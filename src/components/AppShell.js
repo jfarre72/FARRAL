@@ -9,6 +9,7 @@ import HomeIcon from "@mui/icons-material/Home";
 import AccountBalanceIcon from "@mui/icons-material/AccountBalance";
 import GroupsIcon from "@mui/icons-material/Groups";
 import TimelineIcon from "@mui/icons-material/Timeline";
+import PointOfSaleIcon from "@mui/icons-material/PointOfSale";
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "@mui/material/styles";
@@ -18,6 +19,7 @@ const NAV = [
   { label: "Inicio",          href: "/",            icon: <HomeIcon /> },
   { label: "Proyectos",       href: "/proyectos",   icon: <AccountBalanceIcon /> },
   { label: "Inversores",      href: "/inversores",  icon: <GroupsIcon /> },
+  { label: "Caja",            href: "/caja",        icon: <PointOfSaleIcon /> },
   { label: "Línea de tiempo", href: "/linea-tiempo",icon: <TimelineIcon /> },
 ];
 

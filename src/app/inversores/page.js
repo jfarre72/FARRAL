@@ -13,6 +13,10 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtMoney, fmtNum, fmtPct } from "@/components/Money";
+import DonutChart from "@/components/DonutChart";
+
+// Paleta para segmentos de inversores en el gráfico
+const PALETTE = ["#0F2A4A", "#E07A1F", "#1E8E3E", "#7B61FF", "#0EA5A4", "#C0392B", "#E0A21F", "#5C6470"];
 
 const emptyInv  = { nombre: "", contacto: "", moneda_habitual: "USD" };
 const emptyAp   = {
@@ -89,6 +93,9 @@ export default function InversoresPage() {
       ...emptyAp,
       inversor_id,
       moneda: inv?.moneda_habitual ?? "USD",
+      // Precarga desde el proyecto (editable)
+      costo_m2: proyecto?.costo_m2_pozo ? String(proyecto.costo_m2_pozo) : "",
+      precio_venta_final: proyecto?.precio_venta_m2 ? String(proyecto.precio_venta_m2) : "",
     });
     setEditApId(null); setErrAp(null); setOpenAp(true);
   };
@@ -202,11 +209,27 @@ export default function InversoresPage() {
       {tab === 0 && (
         <Card>
           <CardContent>
-            <Grid container spacing={2}>
-              <KPI title="m² vendidos" value={`${fmtNum(totProy.m2)} m²`} hint={`de ${fmtNum(proyecto.m2_totales)} totales`} />
-              <KPI title="% vendido"   value={fmtPct(totProy.pct)} />
-              <KPI title="Total USD"   value={fmtMoney(totProy.aportesUSD, "USD")} />
-              <KPI title="Total ARS"   value={fmtMoney(totProy.aportesARS, "ARS")} />
+            <Grid container spacing={3} alignItems="center">
+              <Grid item xs={12} md={5}>
+                <Typography variant="subtitle2" gutterBottom>m² vendidos vs. disponibles</Typography>
+                <DonutChart
+                  size={170}
+                  centerValue={fmtPct(totProy.pct, 0)}
+                  centerLabel="vendido"
+                  segments={[
+                    { label: "Vendido", value: totProy.m2, color: "#E07A1F" },
+                    { label: "Disponible", value: Math.max(0, Number(proyecto.m2_totales || 0) - totProy.m2), color: "#0F2A4A" },
+                  ]}
+                />
+              </Grid>
+              <Grid item xs={12} md={7}>
+                <Grid container spacing={2}>
+                  <KPI title="m² vendidos" value={`${fmtNum(totProy.m2)} m²`} hint={`de ${fmtNum(proyecto.m2_totales)} totales`} />
+                  <KPI title="% vendido"   value={fmtPct(totProy.pct)} />
+                  <KPI title="Total USD"   value={fmtMoney(totProy.aportesUSD, "USD")} />
+                  <KPI title="Total ARS"   value={fmtMoney(totProy.aportesARS, "ARS")} />
+                </Grid>
+              </Grid>
             </Grid>
             <Divider sx={{ my: 2 }} />
             <Box sx={{ overflowX: "auto" }}>
@@ -356,7 +379,19 @@ export default function InversoresPage() {
             {resumen.length === 0 ? (
               <Typography color="text.secondary">Sin datos para mostrar.</Typography>
             ) : (
-              <Stack spacing={1.5}>
+              <Stack spacing={2.5}>
+                <DonutChart
+                  size={180}
+                  centerValue={fmtNum(totProy.m2, 0)}
+                  centerLabel="m² vendidos"
+                  segments={[
+                    ...resumen
+                      .filter(r => r.m2Sum > 0)
+                      .map((r, idx) => ({ label: r.nombre, value: r.m2Sum, color: PALETTE[idx % PALETTE.length] })),
+                    { label: "Disponible", value: Math.max(0, Number(proyecto.m2_totales || 0) - totProy.m2), color: "rgba(15,42,74,0.12)" },
+                  ]}
+                />
+                <Divider />
                 {resumen.map((r) => (
                   <Box key={r.id}>
                     <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>

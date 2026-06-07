@@ -22,6 +22,10 @@ etapa y Dashboard avanzado).
    resumen por inversor y composición.
 3. **Línea de tiempo** — los 6 hitos principales con fecha estimada, fecha real
    y avance de obra (creados automáticamente al crear el proyecto).
+4. **Caja** — saldos en ARS y USD. Los aportes entran como ingresos
+   automáticamente; se registran egresos/compras (con categoría y comprobante
+   adjunto en Storage) y operaciones de **cambio de divisa** (venta de USD →
+   ingreso a caja ARS con tipo de cambio manual).
 
 ## Setup
 
@@ -30,6 +34,10 @@ etapa y Dashboard avanzado).
 1. Crear un proyecto en [supabase.com](https://supabase.com).
 2. Ir a **SQL Editor → New query**, pegar el contenido de
    [`supabase/schema.sql`](supabase/schema.sql) y ejecutar (`Run`).
+   Este script ya incluye todo (proyectos, inversores, aportes, hitos y caja)
+   y crea el bucket de Storage `comprobantes`.
+   - Si ya tenías la base de la V1 creada, corré sólo la migración
+     incremental [`supabase/v2_caja.sql`](supabase/v2_caja.sql).
 3. En **Project Settings → API** copiar:
    - `Project URL` → `NEXT_PUBLIC_SUPABASE_URL`
    - `anon public key` → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
@@ -51,10 +59,8 @@ etapa y Dashboard avanzado).
   `Inicio (0%)`, `Cimentación (15%)`, `Estructura (40%)`, `Obra cerrada (65%)`,
   `Instalaciones + revoques (85%)`, `Terminada (100%)`.
 
-## Roadmap V2
+## Roadmap próximo
 
-- Caja: ingresos / egresos, saldos en ARS y USD.
 - Presupuestos por etapa, con seguimiento por proveedor.
-- Dashboard con principales indicadores.
+- Dashboard con principales indicadores (incluyendo saldos de caja).
 - Auth + RLS por usuario.
-- Adjuntos (Supabase Storage).
