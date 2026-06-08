@@ -3,8 +3,9 @@ import {
   Card, CardContent, Stack, Typography, Button, Grid, Tabs, Tab, Alert,
   Table, TableBody, TableCell, TableHead, TableRow, IconButton, Dialog,
   DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Box,
-  Chip, Tooltip, Divider, LinearProgress
+  Chip, Tooltip, Divider, LinearProgress, useMediaQuery
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -27,6 +28,8 @@ const emptyAp   = {
 
 export default function InversoresPage() {
   const { proyecto } = useProjects();
+  const theme = useTheme();
+  const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
   const [tab, setTab] = useState(0);
   const [inversores, setInversores] = useState([]);
   const [aportes, setAportes] = useState([]);
@@ -432,7 +435,7 @@ export default function InversoresPage() {
       )}
 
       {/* Dialog inversor */}
-      <Dialog open={openInv} onClose={() => setOpenInv(false)} fullWidth maxWidth="sm">
+      <Dialog open={openInv} onClose={() => setOpenInv(false)} fullWidth maxWidth="sm" fullScreen={fullScreen}>
         <DialogTitle>{editInvId ? "Editar inversor" : "Nuevo inversor"}</DialogTitle>
         <DialogContent dividers>
           {errInv && <Alert severity="error" sx={{ mb: 2 }}>{errInv}</Alert>}
@@ -457,7 +460,7 @@ export default function InversoresPage() {
       </Dialog>
 
       {/* Dialog aporte */}
-      <Dialog open={openAp} onClose={() => setOpenAp(false)} fullWidth maxWidth="md">
+      <Dialog open={openAp} onClose={() => setOpenAp(false)} fullWidth maxWidth="md" fullScreen={fullScreen}>
         <DialogTitle>{editApId ? "Editar aporte" : "Registrar aporte"}</DialogTitle>
         <DialogContent dividers>
           {errAp && <Alert severity="error" sx={{ mb: 2 }}>{errAp}</Alert>}

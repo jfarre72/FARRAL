@@ -20,8 +20,10 @@ etapa y Dashboard avanzado).
 2. **Inversores** — alta de inversores, registro de aportes (m², tipo de venta,
    costo m², monto, moneda, precio venta final, % obtenido y ganancia estimada),
    resumen por inversor y composición.
-3. **Línea de tiempo** — los 6 hitos principales con fecha estimada, fecha real
-   y avance de obra (creados automáticamente al crear el proyecto).
+3. **Línea de tiempo** — las 6 etapas principales, cada una con **subtareas**
+   (lo más importante de cada etapa). Tildando tareas se recalcula el avance %
+   ponderado. Fecha estimada y real por etapa. Todo se crea automáticamente al
+   crear el proyecto.
 4. **Caja** — saldos en ARS y USD. Los aportes entran como ingresos
    automáticamente; se registran egresos/compras (con categoría y comprobante
    adjunto en Storage) y operaciones de **cambio de divisa** (venta de USD →
