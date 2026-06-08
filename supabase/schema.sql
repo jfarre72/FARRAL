@@ -175,6 +175,11 @@ create table if not exists public.movimientos_caja (
   moneda_destino  text check (moneda_destino in ('USD','ARS')),
   tipo_cambio     numeric(14,4),
   monto_destino   numeric(16,2),
+  -- Egreso con cambio integrado (un único registro, 3 impactos en caja)
+  con_cambio            boolean default false,
+  cambio_moneda_origen  text check (cambio_moneda_origen in ('USD','ARS')),
+  cambio_monto_origen   numeric(16,2),
+  cambio_tipo_cambio    numeric(14,4),
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );

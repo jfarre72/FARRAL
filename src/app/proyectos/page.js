@@ -81,9 +81,17 @@ export default function ProyectosPage() {
   };
 
   return (
-    <Stack spacing={2}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center">
-        <Typography variant="h5">Proyectos</Typography>
+    <Stack spacing={3}>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        justifyContent="space-between"
+        alignItems={{ xs: "stretch", sm: "center" }}
+        spacing={1.5}
+      >
+        <Box>
+          <Typography variant="h5">Proyectos</Typography>
+          <Typography variant="body2">Listado de obras y datos base.</Typography>
+        </Box>
         <Button startIcon={<AddIcon />} variant="contained" color="secondary" onClick={openNew}>
           Nuevo proyecto
         </Button>

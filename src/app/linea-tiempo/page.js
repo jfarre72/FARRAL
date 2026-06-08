@@ -57,8 +57,11 @@ export default function LineaTiempoPage() {
   const proximo = hitos.find(h => !h.completado);
 
   return (
-    <Stack spacing={2}>
-      <Typography variant="h5">Línea de tiempo</Typography>
+    <Stack spacing={3}>
+      <Box>
+        <Typography variant="h5">Línea de tiempo</Typography>
+        <Typography variant="body2">Hitos del proyecto con fechas estimadas y reales.</Typography>
+      </Box>
 
       {loading && <LinearProgress />}
 

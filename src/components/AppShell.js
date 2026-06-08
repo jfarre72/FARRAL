@@ -129,10 +129,10 @@ export default function AppShell({ children }) {
         </Drawer>
       )}
 
-      <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, md: 3 }, pt: { xs: 10, md: 11 }, width: "100%" }}>
+      <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, md: 4 }, pt: { xs: 10, md: 11 }, width: "100%" }}>
         <Container maxWidth="xl" disableGutters>
           {proyecto && (
-            <Stack direction="row" spacing={1} sx={{ mb: 2 }} alignItems="center" flexWrap="wrap">
+            <Stack direction="row" spacing={1} sx={{ mb: 3 }} alignItems="center" flexWrap="wrap">
               <Chip label={proyecto.nombre} color="primary" variant="filled" />
               {proyecto.m2_totales > 0 && (
                 <Chip label={`${proyecto.m2_totales} m² totales`} variant="outlined" />
