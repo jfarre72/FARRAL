@@ -2,8 +2,9 @@
 import {
   Card, CardContent, Stack, Typography, Button, Table, TableBody, TableCell,
   TableHead, TableRow, IconButton, Dialog, DialogTitle, DialogContent,
-  DialogActions, TextField, Grid, Alert, Tooltip, Box
+  DialogActions, TextField, Grid, Alert, Tooltip, Box, useMediaQuery
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -21,6 +22,8 @@ const empty = {
 
 export default function ProyectosPage() {
   const { proyectos, refresh, setProyectoId } = useProjects();
+  const theme = useTheme();
+  const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(empty);
   const [editId, setEditId] = useState(null);
@@ -144,7 +147,7 @@ export default function ProyectosPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm" fullScreen={fullScreen}>
         <DialogTitle>{editId ? "Editar proyecto" : "Nuevo proyecto"}</DialogTitle>
         <DialogContent dividers>
           {err && <Alert severity="error" sx={{ mb: 2 }}>{err}</Alert>}

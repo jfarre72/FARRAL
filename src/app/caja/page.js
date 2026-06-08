@@ -4,8 +4,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableRow, IconButton, Dialog,
   DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Box,
   Chip, Tooltip, Divider, LinearProgress, ToggleButtonGroup, ToggleButton,
-  FormControlLabel, Switch, Link
+  FormControlLabel, Switch, Link, useMediaQuery
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import DeleteIcon from "@mui/icons-material/Delete";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
 import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
@@ -36,6 +37,8 @@ const emptyMov = {
 
 export default function CajaPage() {
   const { proyecto } = useProjects();
+  const theme = useTheme();
+  const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
   const [tab, setTab] = useState(0);
   const [aportes, setAportes] = useState([]);
   const [inversores, setInversores] = useState([]);
@@ -84,14 +87,18 @@ export default function CajaPage() {
           const origen = mv.cambio_moneda_origen;
           const tc = Number(mv.cambio_tipo_cambio || 0);
           const monOrigen = Number(mv.cambio_monto_origen || 0);
-          // 1) Sale de caja origen
-          if (origen === "USD") usd -= monOrigen; else ars -= monOrigen;
-          // 2) Entra a caja del gasto (conversión)
+          // 1) Sale de caja origen (cuenta como egreso de esa caja)
+          if (origen === "USD") { usd -= monOrigen; egrUSD += monOrigen; }
+          else { ars -= monOrigen; egrARS += monOrigen; }
+          // 2) Entra a caja del gasto por la conversión (ingreso de esa caja)
           const entrada = origen === "USD" ? monOrigen * tc : (tc > 0 ? monOrigen / tc : 0);
-          if (mv.moneda === "USD") usd += entrada; else ars += entrada;
-          // 3) Sale el gasto de la caja destino
-          if (mv.moneda === "USD") usd -= m; else ars -= m;
-          if (mv.moneda === "USD") egrUSD += m; else egrARS += m;
+          if (mv.moneda === "USD") { usd += entrada; ingUSD += entrada; }
+          else { ars += entrada; ingARS += entrada; }
+          // 3) Sale el gasto de la caja destino (si lo hay)
+          if (m > 0) {
+            if (mv.moneda === "USD") { usd -= m; egrUSD += m; }
+            else { ars -= m; egrARS += m; }
+          }
         } else {
           if (mv.moneda === "USD") { usd -= m; egrUSD += m; }
           else { ars -= m; egrARS += m; }
@@ -167,7 +174,8 @@ export default function CajaPage() {
 
   const save = async () => {
     setErr(null);
-    if (!form.monto || monto <= 0) { setErr("Ingresá un monto válido."); return; }
+    const esCambioPuro = form.tipo === "egreso" && form.con_cambio;
+    if (!esCambioPuro && (!form.monto || monto <= 0)) { setErr("Ingresá un monto válido."); return; }
     if (form.tipo === "egreso" && form.con_cambio) {
       if (!form.cambio_moneda_origen) { setErr("Elegí la caja de origen del cambio."); return; }
       if (form.cambio_moneda_origen === form.moneda) { setErr("La caja origen del cambio debe ser distinta de la caja del gasto."); return; }
@@ -396,7 +404,7 @@ export default function CajaPage() {
       )}
 
       {/* Dialog */}
-      <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="md" fullScreen={fullScreen}>
         <DialogTitle>
           {form.tipo === "ingreso" ? "Registrar ingreso" : "Registrar egreso"}
         </DialogTitle>
@@ -428,6 +436,7 @@ export default function CajaPage() {
                 label={form.tipo === "ingreso" ? "Monto" : "Monto del gasto"}
                 type="number" fullWidth
                 value={form.monto}
+                helperText={form.tipo === "egreso" && form.con_cambio ? "0 si es solo cambio de divisa" : " "}
                 onChange={e => setForm({ ...form, monto: e.target.value })}
               />
             </Grid>

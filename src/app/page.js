@@ -18,12 +18,28 @@ export default function Home() {
         supabase.from("hitos").select("*").eq("proyecto_id", proyecto.id).order("orden"),
         supabase.from("inversores").select("id").eq("proyecto_id", proyecto.id),
       ]);
+      const hitoIds = (hitos ?? []).map(h => h.id);
+      let tareas = [];
+      if (hitoIds.length) {
+        const { data } = await supabase.from("hito_tareas").select("hito_id,completado").in("hito_id", hitoIds);
+        tareas = data ?? [];
+      }
       const totUSD = (aportes ?? []).filter(a => a.moneda === "USD").reduce((s,a) => s + Number(a.monto || 0), 0);
       const totARS = (aportes ?? []).filter(a => a.moneda === "ARS").reduce((s,a) => s + Number(a.monto || 0), 0);
       const m2Vendidos = (aportes ?? []).reduce((s,a) => s + Number(a.cantidad_m2 || 0), 0);
       const pctVendido = proyecto.m2_totales > 0 ? (m2Vendidos / Number(proyecto.m2_totales)) * 100 : 0;
-      const ultimoHito = (hitos ?? []).filter(h => h.completado).sort((a,b) => b.porcentaje - a.porcentaje)[0];
-      const avance = ultimoHito?.porcentaje ?? 0;
+      // Avance ponderado por subtareas (mismo criterio que Línea de tiempo)
+      const sorted = [...(hitos ?? [])].sort((a, b) => a.orden - b.orden);
+      const fraccion = (h) => {
+        const ts = tareas.filter(t => t.hito_id === h.id);
+        if (ts.length > 0) return ts.filter(t => t.completado).length / ts.length;
+        return h.completado ? 1 : 0;
+      };
+      const avance = Math.round(sorted.reduce((s, h, i) => {
+        const next = sorted[i + 1];
+        const peso = next ? Math.max(0, Number(next.porcentaje) - Number(h.porcentaje)) : 0;
+        return s + peso * fraccion(h);
+      }, 0));
       setStats({
         totUSD, totARS, m2Vendidos, pctVendido, avance,
         nInversores: inversores?.length ?? 0,
