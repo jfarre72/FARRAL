@@ -14,7 +14,8 @@ import { fmtNum } from "@/components/Money";
 
 const empty = {
   nombre: "", descripcion: "",
-  m2_cubiertos: "", m2_semicubiertos: "", m2_totales: "",
+  m2_cubiertos: "", m2_semicubiertos: "", m2_totales: "", m2_terreno: "",
+  costo_m2_pozo: "", precio_venta_m2: "",
   fecha_inicio: "", fecha_fin: "",
 };
 
@@ -34,6 +35,9 @@ export default function ProyectosPage() {
       m2_cubiertos: p.m2_cubiertos ?? "",
       m2_semicubiertos: p.m2_semicubiertos ?? "",
       m2_totales: p.m2_totales ?? "",
+      m2_terreno: p.m2_terreno ?? "",
+      costo_m2_pozo: p.costo_m2_pozo ?? "",
+      precio_venta_m2: p.precio_venta_m2 ?? "",
       fecha_inicio: p.fecha_inicio ?? "",
       fecha_fin: p.fecha_fin ?? "",
     });
@@ -50,6 +54,9 @@ export default function ProyectosPage() {
       m2_cubiertos: numOrNull(form.m2_cubiertos),
       m2_semicubiertos: numOrNull(form.m2_semicubiertos),
       m2_totales: numOrNull(form.m2_totales),
+      m2_terreno: numOrNull(form.m2_terreno),
+      costo_m2_pozo: numOrNull(form.costo_m2_pozo),
+      precio_venta_m2: numOrNull(form.precio_venta_m2),
       fecha_inicio: form.fecha_inicio || null,
       fecha_fin: form.fecha_fin || null,
     };
@@ -95,6 +102,7 @@ export default function ProyectosPage() {
                     <TableCell align="right">m² cub.</TableCell>
                     <TableCell align="right">m² semi.</TableCell>
                     <TableCell align="right">m² totales</TableCell>
+                    <TableCell align="right">m² terreno</TableCell>
                     <TableCell>Inicio</TableCell>
                     <TableCell>Fin estim.</TableCell>
                     <TableCell align="right">Acciones</TableCell>
@@ -112,6 +120,7 @@ export default function ProyectosPage() {
                       <TableCell align="right">{fmtNum(p.m2_cubiertos)}</TableCell>
                       <TableCell align="right">{fmtNum(p.m2_semicubiertos)}</TableCell>
                       <TableCell align="right">{fmtNum(p.m2_totales)}</TableCell>
+                      <TableCell align="right">{fmtNum(p.m2_terreno)}</TableCell>
                       <TableCell>{p.fecha_inicio ?? "—"}</TableCell>
                       <TableCell>{p.fecha_fin ?? "—"}</TableCell>
                       <TableCell align="right">
@@ -149,8 +158,22 @@ export default function ProyectosPage() {
                 onChange={(e) => setForm({ ...form, m2_semicubiertos: e.target.value })} />
             </Grid>
             <Grid item xs={12} sm={4}>
-              <TextField label="m² totales" type="number" fullWidth value={form.m2_totales}
+              <TextField label="m² totales (vendibles)" type="number" fullWidth value={form.m2_totales}
                 onChange={(e) => setForm({ ...form, m2_totales: e.target.value })} />
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <TextField label="m² terreno (total)" type="number" fullWidth value={form.m2_terreno}
+                onChange={(e) => setForm({ ...form, m2_terreno: e.target.value })} />
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <TextField label="Costo m² pozo (precarga)" type="number" fullWidth value={form.costo_m2_pozo}
+                helperText="Se precarga al crear un aporte"
+                onChange={(e) => setForm({ ...form, costo_m2_pozo: e.target.value })} />
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <TextField label="Precio venta m² (precarga)" type="number" fullWidth value={form.precio_venta_m2}
+                helperText="Se precarga al crear un aporte"
+                onChange={(e) => setForm({ ...form, precio_venta_m2: e.target.value })} />
             </Grid>
             <Grid item xs={12} sm={6}>
               <TextField label="Fecha inicio estim." type="date" fullWidth InputLabelProps={{ shrink: true }}
