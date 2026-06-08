@@ -3,13 +3,15 @@ import {
   Card, CardContent, Stack, Typography, Button, Grid, Tabs, Tab, Alert,
   Table, TableBody, TableCell, TableHead, TableRow, IconButton, Dialog,
   DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Box,
-  Chip, Tooltip, Divider, LinearProgress, ToggleButtonGroup, ToggleButton, Link
+  Chip, Tooltip, Divider, LinearProgress, ToggleButtonGroup, ToggleButton,
+  FormControlLabel, Switch, Link
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
 import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
+import AttachFileIcon from "@mui/icons-material/AttachFile";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
@@ -20,12 +22,16 @@ const BUCKET = "comprobantes";
 const emptyMov = {
   tipo: "egreso",
   fecha: new Date().toISOString().slice(0, 10),
+  // Para egreso/ingreso: moneda + monto del movimiento real (caja del gasto/ingreso)
   moneda: "ARS",
   monto: "",
   categoria: "",
   descripcion: "",
-  // cambio
-  tipo_cambio: "",
+  // Cambio integrado dentro de egreso:
+  con_cambio: false,
+  cambio_moneda_origen: "USD",
+  cambio_monto_origen: "",
+  cambio_tipo_cambio: "",
 };
 
 export default function CajaPage() {
@@ -64,20 +70,34 @@ export default function CajaPage() {
   const saldos = useMemo(() => {
     let usd = 0, ars = 0;
     let ingUSD = 0, ingARS = 0, egrUSD = 0, egrARS = 0;
-    // Aportes = ingresos
     for (const a of aportes) {
       const m = Number(a.monto || 0);
       if (a.moneda === "USD") { usd += m; ingUSD += m; }
       else { ars += m; ingARS += m; }
     }
-    // Movimientos
     for (const mv of movs) {
       const m = Number(mv.monto || 0);
       if (mv.tipo === "ingreso") {
         if (mv.moneda === "USD") { usd += m; ingUSD += m; } else { ars += m; ingARS += m; }
       } else if (mv.tipo === "egreso") {
-        if (mv.moneda === "USD") { usd -= m; egrUSD += m; } else { ars -= m; egrARS += m; }
+        if (mv.con_cambio) {
+          const origen = mv.cambio_moneda_origen;
+          const tc = Number(mv.cambio_tipo_cambio || 0);
+          const monOrigen = Number(mv.cambio_monto_origen || 0);
+          // 1) Sale de caja origen
+          if (origen === "USD") usd -= monOrigen; else ars -= monOrigen;
+          // 2) Entra a caja del gasto (conversión)
+          const entrada = origen === "USD" ? monOrigen * tc : (tc > 0 ? monOrigen / tc : 0);
+          if (mv.moneda === "USD") usd += entrada; else ars += entrada;
+          // 3) Sale el gasto de la caja destino
+          if (mv.moneda === "USD") usd -= m; else ars -= m;
+          if (mv.moneda === "USD") egrUSD += m; else egrARS += m;
+        } else {
+          if (mv.moneda === "USD") { usd -= m; egrUSD += m; }
+          else { ars -= m; egrARS += m; }
+        }
       } else if (mv.tipo === "cambio") {
+        // Legacy (V2): cambio sin egreso asociado
         const md = Number(mv.monto_destino || 0);
         if (mv.moneda === "USD") usd -= m; else ars -= m;
         if (mv.moneda_destino === "USD") usd += md; else ars += md;
@@ -99,7 +119,7 @@ export default function CajaPage() {
       .sort((a, b) => (b.ARS + b.USD) - (a.ARS + a.USD));
   }, [movs]);
 
-  // --------- Lista unificada de movimientos ---------
+  // --------- Movimientos unificados (aportes + movs) ---------
   const invName = (id) => inversores.find(i => i.id === id)?.nombre ?? "—";
   const unified = useMemo(() => {
     const fromAportes = aportes.map(a => ({
@@ -114,26 +134,28 @@ export default function CajaPage() {
       detalle: mv.tipo === "cambio"
         ? `Cambio ${mv.moneda}→${mv.moneda_destino} @ ${fmtNum(mv.tipo_cambio, 2)}`
         : (mv.descripcion || (mv.tipo === "ingreso" ? "Ingreso" : "Egreso")),
-      categoria: mv.categoria, comprobante_url: mv.comprobante_url,
-      moneda_destino: mv.moneda_destino, monto_destino: mv.monto_destino, raw: mv,
+      categoria: mv.categoria, comprobante_url: mv.comprobante_url, raw: mv,
+      moneda_destino: mv.moneda_destino, monto_destino: mv.monto_destino,
+      con_cambio: mv.con_cambio,
+      cambio_moneda_origen: mv.cambio_moneda_origen,
+      cambio_monto_origen: mv.cambio_monto_origen,
+      cambio_tipo_cambio: mv.cambio_tipo_cambio,
     }));
     return [...fromAportes, ...fromMovs].sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
   }, [aportes, movs, inversores]);
 
   if (!proyecto) return <Alert severity="info">Seleccioná o creá un proyecto para gestionar la caja.</Alert>;
 
-  // --------- Guardar movimiento ---------
-  const monedaDestino = form.moneda === "USD" ? "ARS" : "USD";
-  const montoDestino = (() => {
-    const m = Number(form.monto || 0);
-    const tc = Number(form.tipo_cambio || 0);
-    if (!m || !tc) return null;
-    // tipo_cambio = ARS por 1 USD
-    return form.moneda === "USD" ? m * tc : m / tc;
-  })();
+  // --------- Cálculos del dialog ---------
+  const monto = Number(form.monto || 0);
+  const tc = Number(form.cambio_tipo_cambio || 0);
+  const monOrigen = Number(form.cambio_monto_origen || 0);
+  const entradaPorCambio = form.cambio_moneda_origen === "USD"
+    ? monOrigen * tc
+    : (tc > 0 ? monOrigen / tc : 0);
 
   const openNew = (tipo) => {
-    setForm({ ...emptyMov, tipo, moneda: tipo === "cambio" ? "USD" : "ARS" });
+    setForm({ ...emptyMov, tipo, moneda: "ARS", con_cambio: false });
     setFile(null); setErr(null); setOpen(true);
   };
 
@@ -145,13 +167,15 @@ export default function CajaPage() {
 
   const save = async () => {
     setErr(null);
-    if (!form.monto || Number(form.monto) <= 0) { setErr("Ingresá un monto válido."); return; }
-    if (form.tipo === "cambio" && (!form.tipo_cambio || Number(form.tipo_cambio) <= 0)) {
-      setErr("Ingresá el tipo de cambio."); return;
+    if (!form.monto || monto <= 0) { setErr("Ingresá un monto válido."); return; }
+    if (form.tipo === "egreso" && form.con_cambio) {
+      if (!form.cambio_moneda_origen) { setErr("Elegí la caja de origen del cambio."); return; }
+      if (form.cambio_moneda_origen === form.moneda) { setErr("La caja origen del cambio debe ser distinta de la caja del gasto."); return; }
+      if (!monOrigen || monOrigen <= 0) { setErr("Ingresá el monto a convertir."); return; }
+      if (!tc || tc <= 0) { setErr("Ingresá el tipo de cambio."); return; }
     }
     setSaving(true);
 
-    // Subir comprobante si hay
     let comprobante_url = null;
     if (file) {
       const safe = file.name.replace(/[^\w.\-]/g, "_");
@@ -166,13 +190,14 @@ export default function CajaPage() {
       fecha: form.fecha,
       tipo: form.tipo,
       moneda: form.moneda,
-      monto: Number(form.monto),
+      monto: monto,
       categoria: form.tipo === "egreso" ? (form.categoria || null) : null,
       descripcion: form.descripcion || null,
       comprobante_url,
-      moneda_destino: form.tipo === "cambio" ? monedaDestino : null,
-      tipo_cambio: form.tipo === "cambio" ? Number(form.tipo_cambio) : null,
-      monto_destino: form.tipo === "cambio" ? montoDestino : null,
+      con_cambio: form.tipo === "egreso" ? form.con_cambio : false,
+      cambio_moneda_origen: form.tipo === "egreso" && form.con_cambio ? form.cambio_moneda_origen : null,
+      cambio_monto_origen:  form.tipo === "egreso" && form.con_cambio ? monOrigen : null,
+      cambio_tipo_cambio:   form.tipo === "egreso" && form.con_cambio ? tc : null,
     };
 
     const { error } = await supabase.from("movimientos_caja").insert(payload);
@@ -191,20 +216,49 @@ export default function CajaPage() {
     if (error) alert(error.message); else reload();
   };
 
-  const tipoChip = (tipo) => {
-    if (tipo === "ingreso") return <Chip size="small" color="success" variant="outlined" icon={<ArrowUpwardIcon />} label="Ingreso" />;
-    if (tipo === "egreso")  return <Chip size="small" color="error"   variant="outlined" icon={<ArrowDownwardIcon />} label="Egreso" />;
+  const tipoChip = (m) => {
+    if (m.tipo === "ingreso") return <Chip size="small" color="success" variant="outlined" icon={<ArrowUpwardIcon />} label="Ingreso" />;
+    if (m.tipo === "egreso") {
+      return (
+        <Stack direction="row" spacing={0.5} alignItems="center">
+          <Chip size="small" color="error" variant="outlined" icon={<ArrowDownwardIcon />} label="Egreso" />
+          {m.con_cambio && <Chip size="small" color="primary" variant="outlined" icon={<SwapHorizIcon />} label="con cambio" />}
+        </Stack>
+      );
+    }
     return <Chip size="small" color="primary" variant="outlined" icon={<SwapHorizIcon />} label="Cambio" />;
   };
 
   return (
-    <Stack spacing={2}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
-        <Typography variant="h5">Caja</Typography>
-        <Stack direction="row" spacing={1}>
-          <Button startIcon={<ArrowUpwardIcon />} variant="outlined" color="success" onClick={() => openNew("ingreso")}>Ingreso</Button>
-          <Button startIcon={<ArrowDownwardIcon />} variant="outlined" color="error" onClick={() => openNew("egreso")}>Egreso</Button>
-          <Button startIcon={<SwapHorizIcon />} variant="contained" color="secondary" onClick={() => openNew("cambio")}>Cambio</Button>
+    <Stack spacing={3}>
+      {/* Header */}
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        justifyContent="space-between"
+        alignItems={{ xs: "stretch", sm: "center" }}
+        spacing={1.5}
+      >
+        <Box>
+          <Typography variant="h5">Caja</Typography>
+          <Typography variant="body2">Saldos, ingresos, egresos y cambios del proyecto.</Typography>
+        </Box>
+        <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
+          <Button
+            startIcon={<ArrowUpwardIcon />}
+            variant="outlined"
+            color="success"
+            onClick={() => openNew("ingreso")}
+          >
+            Ingreso
+          </Button>
+          <Button
+            startIcon={<ArrowDownwardIcon />}
+            variant="contained"
+            color="secondary"
+            onClick={() => openNew("egreso")}
+          >
+            Egreso
+          </Button>
         </Stack>
       </Stack>
 
@@ -213,39 +267,41 @@ export default function CajaPage() {
       {/* Saldos */}
       <Grid container spacing={2}>
         <Grid item xs={12} sm={6}>
-          <Card sx={{ borderTop: "4px solid #1E8E3E" }}>
-            <CardContent>
-              <Typography variant="caption" color="text.secondary">Saldo caja USD</Typography>
-              <Typography variant="h4">{fmtMoney(saldos.usd, "USD")}</Typography>
-              <Typography variant="caption" color="text.secondary">
-                Ingresos {fmtMoney(saldos.ingUSD, "USD")} · Egresos {fmtMoney(saldos.egrUSD, "USD")}
-              </Typography>
-            </CardContent>
-          </Card>
+          <SaldoCard
+            label="Saldo caja USD"
+            saldo={saldos.usd}
+            currency="USD"
+            ingresos={saldos.ingUSD}
+            egresos={saldos.egrUSD}
+            accent="#1E8E3E"
+          />
         </Grid>
         <Grid item xs={12} sm={6}>
-          <Card sx={{ borderTop: "4px solid #0F2A4A" }}>
-            <CardContent>
-              <Typography variant="caption" color="text.secondary">Saldo caja ARS</Typography>
-              <Typography variant="h4">{fmtMoney(saldos.ars, "ARS")}</Typography>
-              <Typography variant="caption" color="text.secondary">
-                Ingresos {fmtMoney(saldos.ingARS, "ARS")} · Egresos {fmtMoney(saldos.egrARS, "ARS")}
-              </Typography>
-            </CardContent>
-          </Card>
+          <SaldoCard
+            label="Saldo caja ARS"
+            saldo={saldos.ars}
+            currency="ARS"
+            ingresos={saldos.ingARS}
+            egresos={saldos.egrARS}
+            accent="#0F2A4A"
+          />
         </Grid>
       </Grid>
 
-      <Tabs value={tab} onChange={(_, v) => setTab(v)}>
-        <Tab label="Movimientos" />
-        <Tab label="Egresos por categoría" />
-      </Tabs>
+      {/* Tabs */}
+      <Box>
+        <Tabs value={tab} onChange={(_, v) => setTab(v)}>
+          <Tab label="Movimientos" />
+          <Tab label="Egresos por categoría" />
+        </Tabs>
+        <Divider />
+      </Box>
 
       {tab === 0 && (
         <Card>
-          <CardContent>
+          <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
             {unified.length === 0 ? (
-              <Typography color="text.secondary">Aún no hay movimientos. Los aportes aparecen como ingresos automáticamente.</Typography>
+              <EmptyState text="Aún no hay movimientos. Los aportes aparecen como ingresos automáticamente." />
             ) : (
               <Box sx={{ overflowX: "auto" }}>
                 <Table size="small">
@@ -263,22 +319,27 @@ export default function CajaPage() {
                   <TableBody>
                     {unified.map((m) => (
                       <TableRow key={m.id} hover>
-                        <TableCell>{m.fecha}</TableCell>
-                        <TableCell>{tipoChip(m.tipo)}</TableCell>
+                        <TableCell sx={{ whiteSpace: "nowrap" }}>{m.fecha}</TableCell>
+                        <TableCell>{tipoChip(m)}</TableCell>
                         <TableCell>
-                          {m.detalle}
+                          <Typography variant="body2" color="text.primary">{m.detalle}</Typography>
+                          {m.con_cambio && (
+                            <Typography variant="caption" color="text.secondary" display="block">
+                              {`Cambio: ${fmtMoney(m.cambio_monto_origen, m.cambio_moneda_origen)} @ ${fmtNum(m.cambio_tipo_cambio, 2)}`}
+                            </Typography>
+                          )}
                           {m.tipo === "cambio" && (
                             <Typography variant="caption" color="text.secondary" display="block">
                               → {fmtMoney(m.monto_destino, m.moneda_destino)}
                             </Typography>
                           )}
                         </TableCell>
-                        <TableCell>{m.categoria ? <Chip size="small" label={m.categoria} /> : "—"}</TableCell>
-                        <TableCell align="right">
+                        <TableCell>{m.categoria ? <Chip size="small" label={m.categoria} /> : <Typography variant="body2" color="text.secondary">—</Typography>}</TableCell>
+                        <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
                           <Typography
                             component="span"
                             color={m.tipo === "ingreso" ? "success.main" : m.tipo === "egreso" ? "error.main" : "text.primary"}
-                            fontWeight={600}
+                            fontWeight={700}
                           >
                             {m.tipo === "egreso" ? "−" : m.tipo === "ingreso" ? "+" : ""}{fmtMoney(m.monto, m.moneda)}
                           </Typography>
@@ -286,12 +347,12 @@ export default function CajaPage() {
                         <TableCell>
                           {m.comprobante_url
                             ? <Tooltip title="Ver comprobante"><IconButton size="small" component={Link} href={publicUrl(m.comprobante_url)} target="_blank"><ReceiptLongIcon fontSize="small" /></IconButton></Tooltip>
-                            : "—"}
+                            : <Typography variant="body2" color="text.secondary">—</Typography>}
                         </TableCell>
                         <TableCell align="right">
                           {m.kind === "mov"
                             ? <Tooltip title="Eliminar"><IconButton size="small" onClick={() => delMov(m)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
-                            : <Tooltip title="Editar desde Inversores"><span><IconButton size="small" disabled><DeleteIcon fontSize="small" /></IconButton></span></Tooltip>}
+                            : <span />}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -305,67 +366,70 @@ export default function CajaPage() {
 
       {tab === 1 && (
         <Card>
-          <CardContent>
+          <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
             {porCategoria.length === 0 ? (
-              <Typography color="text.secondary">Aún no hay egresos registrados.</Typography>
+              <EmptyState text="Aún no hay egresos registrados." />
             ) : (
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Categoría</TableCell>
-                    <TableCell align="right">Total ARS</TableCell>
-                    <TableCell align="right">Total USD</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {porCategoria.map((c) => (
-                    <TableRow key={c.cat} hover>
-                      <TableCell><Chip size="small" label={c.cat} /></TableCell>
-                      <TableCell align="right">{c.ARS ? fmtMoney(c.ARS, "ARS") : "—"}</TableCell>
-                      <TableCell align="right">{c.USD ? fmtMoney(c.USD, "USD") : "—"}</TableCell>
+              <Box sx={{ overflowX: "auto" }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Categoría</TableCell>
+                      <TableCell align="right">Total ARS</TableCell>
+                      <TableCell align="right">Total USD</TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHead>
+                  <TableBody>
+                    {porCategoria.map((c) => (
+                      <TableRow key={c.cat} hover>
+                        <TableCell><Chip size="small" label={c.cat} /></TableCell>
+                        <TableCell align="right">{c.ARS ? fmtMoney(c.ARS, "ARS") : "—"}</TableCell>
+                        <TableCell align="right">{c.USD ? fmtMoney(c.USD, "USD") : "—"}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Box>
             )}
           </CardContent>
         </Card>
       )}
 
-      {/* Dialog movimiento */}
+      {/* Dialog */}
       <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>
-          {form.tipo === "ingreso" ? "Registrar ingreso" : form.tipo === "egreso" ? "Registrar egreso / compra" : "Registrar cambio de divisa"}
+          {form.tipo === "ingreso" ? "Registrar ingreso" : "Registrar egreso"}
         </DialogTitle>
         <DialogContent dividers>
           {err && <Alert severity="error" sx={{ mb: 2 }}>{err}</Alert>}
-
-          <ToggleButtonGroup
-            exclusive size="small" color="primary" sx={{ mb: 2 }}
-            value={form.tipo}
-            onChange={(_, v) => v && setForm({ ...form, tipo: v, moneda: v === "cambio" ? "USD" : form.moneda })}
-          >
-            <ToggleButton value="ingreso">Ingreso</ToggleButton>
-            <ToggleButton value="egreso">Egreso</ToggleButton>
-            <ToggleButton value="cambio">Cambio</ToggleButton>
-          </ToggleButtonGroup>
 
           <Grid container spacing={2}>
             <Grid item xs={12} sm={6}>
               <TextField label="Fecha" type="date" fullWidth InputLabelProps={{ shrink: true }}
                 value={form.fecha} onChange={e => setForm({ ...form, fecha: e.target.value })} />
             </Grid>
+
             <Grid item xs={12} sm={6}>
-              <TextField select label={form.tipo === "cambio" ? "Caja origen" : "Caja / moneda"} fullWidth
-                value={form.moneda} onChange={e => setForm({ ...form, moneda: e.target.value })}>
-                <MenuItem value="ARS">ARS ($)</MenuItem>
-                <MenuItem value="USD">USD</MenuItem>
-              </TextField>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
+                {form.tipo === "ingreso" ? "Caja de destino" : "Caja del gasto"}
+              </Typography>
+              <ToggleButtonGroup
+                exclusive size="small" color="primary" fullWidth
+                value={form.moneda}
+                onChange={(_, v) => v && setForm({ ...form, moneda: v })}
+              >
+                <ToggleButton value="ARS">Caja ARS ($)</ToggleButton>
+                <ToggleButton value="USD">Caja USD</ToggleButton>
+              </ToggleButtonGroup>
             </Grid>
 
             <Grid item xs={12} sm={6}>
-              <TextField label={form.tipo === "cambio" ? "Monto a vender" : "Monto"} type="number" fullWidth
-                value={form.monto} onChange={e => setForm({ ...form, monto: e.target.value })} />
+              <TextField
+                label={form.tipo === "ingreso" ? "Monto" : "Monto del gasto"}
+                type="number" fullWidth
+                value={form.monto}
+                onChange={e => setForm({ ...form, monto: e.target.value })}
+              />
             </Grid>
 
             {form.tipo === "egreso" && (
@@ -378,44 +442,160 @@ export default function CajaPage() {
               </Grid>
             )}
 
-            {form.tipo === "cambio" && (
-              <>
-                <Grid item xs={12} sm={6}>
-                  <TextField label="Tipo de cambio (ARS por 1 USD)" type="number" fullWidth
-                    value={form.tipo_cambio} onChange={e => setForm({ ...form, tipo_cambio: e.target.value })} />
-                </Grid>
-                <Grid item xs={12}>
-                  <Alert severity="info" icon={<SwapHorizIcon />}>
-                    Sale {fmtMoney(Number(form.monto || 0), form.moneda)} de caja {form.moneda} ·
-                    {" "}entra <b>{montoDestino !== null ? fmtMoney(montoDestino, monedaDestino) : "—"}</b> a caja {monedaDestino}.
-                  </Alert>
-                </Grid>
-              </>
-            )}
-
             <Grid item xs={12}>
               <TextField label="Descripción" fullWidth multiline minRows={2}
                 value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} />
             </Grid>
 
-            {form.tipo !== "cambio" && (
-              <Grid item xs={12}>
-                <Button variant="outlined" component="label" startIcon={<ReceiptLongIcon />} fullWidth>
-                  {file ? file.name : "Adjuntar comprobante (opcional)"}
-                  <input hidden type="file" accept="image/*,application/pdf"
-                    onChange={e => setFile(e.target.files?.[0] ?? null)} />
-                </Button>
-              </Grid>
+            {/* Cambio integrado: solo egresos */}
+            {form.tipo === "egreso" && (
+              <>
+                <Grid item xs={12}>
+                  <Box sx={{
+                    p: 1.5, borderRadius: 2,
+                    border: "1px solid", borderColor: "divider",
+                    bgcolor: "rgba(15,42,74,0.025)",
+                  }}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={form.con_cambio}
+                          onChange={(e) => {
+                            const next = e.target.checked;
+                            setForm({
+                              ...form,
+                              con_cambio: next,
+                              // Origen por defecto: la opuesta a la caja del gasto
+                              cambio_moneda_origen: next ? (form.moneda === "ARS" ? "USD" : "ARS") : "USD",
+                            });
+                          }}
+                        />
+                      }
+                      label={
+                        <Stack>
+                          <Typography fontWeight={600}>¿Necesita cambio de moneda?</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Activar si para pagar este gasto primero hay que vender divisa de otra caja.
+                          </Typography>
+                        </Stack>
+                      }
+                      sx={{ alignItems: "flex-start", m: 0 }}
+                    />
+
+                    {form.con_cambio && (
+                      <Stack spacing={2} sx={{ mt: 2 }}>
+                        <Grid container spacing={2}>
+                          <Grid item xs={12} sm={4}>
+                            <TextField
+                              select fullWidth label="Caja origen"
+                              value={form.cambio_moneda_origen}
+                              onChange={(e) => setForm({ ...form, cambio_moneda_origen: e.target.value })}
+                            >
+                              <MenuItem value="USD" disabled={form.moneda === "USD"}>Caja USD</MenuItem>
+                              <MenuItem value="ARS" disabled={form.moneda === "ARS"}>Caja ARS ($)</MenuItem>
+                            </TextField>
+                          </Grid>
+                          <Grid item xs={12} sm={4}>
+                            <TextField
+                              fullWidth type="number"
+                              label={`Monto a vender (${form.cambio_moneda_origen})`}
+                              value={form.cambio_monto_origen}
+                              onChange={(e) => setForm({ ...form, cambio_monto_origen: e.target.value })}
+                            />
+                          </Grid>
+                          <Grid item xs={12} sm={4}>
+                            <TextField
+                              fullWidth type="number"
+                              label="Tipo de cambio (ARS por 1 USD)"
+                              value={form.cambio_tipo_cambio}
+                              onChange={(e) => setForm({ ...form, cambio_tipo_cambio: e.target.value })}
+                            />
+                          </Grid>
+                        </Grid>
+
+                        <Alert severity="info" icon={<SwapHorizIcon />} sx={{ alignItems: "flex-start" }}>
+                          <Typography variant="body2" sx={{ mb: 0.5 }}>
+                            Este registro impacta en <b>3 movimientos</b>:
+                          </Typography>
+                          <Stack component="ol" sx={{ pl: 2.5, m: 0 }} spacing={0.25}>
+                            <li>
+                              Caja {form.cambio_moneda_origen}: <b style={{ color: "#C0392B" }}>−{fmtMoney(monOrigen, form.cambio_moneda_origen)}</b>
+                            </li>
+                            <li>
+                              Caja {form.moneda}: <b style={{ color: "#1E8E3E" }}>+{fmtMoney(entradaPorCambio, form.moneda)}</b> (conversión)
+                            </li>
+                            <li>
+                              Caja {form.moneda}: <b style={{ color: "#C0392B" }}>−{fmtMoney(monto, form.moneda)}</b> (pago del gasto)
+                            </li>
+                          </Stack>
+                          {monto > 0 && entradaPorCambio > 0 && (
+                            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
+                              Sobrante en caja {form.moneda} luego del pago: <b>{fmtMoney(entradaPorCambio - monto, form.moneda)}</b>
+                            </Typography>
+                          )}
+                        </Alert>
+                      </Stack>
+                    )}
+                  </Box>
+                </Grid>
+              </>
             )}
+
+            <Grid item xs={12}>
+              <Button variant="outlined" component="label" startIcon={<AttachFileIcon />} fullWidth>
+                {file ? file.name : "Adjuntar comprobante (opcional)"}
+                <input hidden type="file" accept="image/*,application/pdf"
+                  onChange={e => setFile(e.target.files?.[0] ?? null)} />
+              </Button>
+            </Grid>
           </Grid>
         </DialogContent>
-        <DialogActions>
+        <DialogActions sx={{ px: 3, py: 2 }}>
           <Button onClick={() => setOpen(false)}>Cancelar</Button>
-          <Button variant="contained" onClick={save} disabled={saving}>
+          <Button variant="contained" color="secondary" onClick={save} disabled={saving}>
             {saving ? "Guardando…" : "Registrar"}
           </Button>
         </DialogActions>
       </Dialog>
+    </Stack>
+  );
+}
+
+function SaldoCard({ label, saldo, currency, ingresos, egresos, accent }) {
+  return (
+    <Card sx={{ position: "relative", overflow: "hidden" }}>
+      <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, bgcolor: accent }} />
+      <CardContent>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+          <Typography variant="caption" color="text.secondary">{label}</Typography>
+          <Chip size="small" label={currency} sx={{ bgcolor: "rgba(15,42,74,0.06)" }} />
+        </Stack>
+        <Typography variant="h4" sx={{ fontVariantNumeric: "tabular-nums" }}>
+          {fmtMoney(saldo, currency)}
+        </Typography>
+        <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
+          <Stack direction="row" spacing={0.5} alignItems="center">
+            <ArrowUpwardIcon sx={{ fontSize: 14, color: "success.main" }} />
+            <Typography variant="caption" color="text.secondary">
+              Ingresos {fmtMoney(ingresos, currency)}
+            </Typography>
+          </Stack>
+          <Stack direction="row" spacing={0.5} alignItems="center">
+            <ArrowDownwardIcon sx={{ fontSize: 14, color: "error.main" }} />
+            <Typography variant="caption" color="text.secondary">
+              Egresos {fmtMoney(egresos, currency)}
+            </Typography>
+          </Stack>
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+}
+
+function EmptyState({ text }) {
+  return (
+    <Stack alignItems="center" justifyContent="center" sx={{ py: 6 }}>
+      <Typography color="text.secondary">{text}</Typography>
     </Stack>
   );
 }

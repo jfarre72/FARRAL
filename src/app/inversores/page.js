@@ -185,10 +185,18 @@ export default function InversoresPage() {
   const invName = (id) => inversores.find(i => i.id === id)?.nombre ?? "—";
 
   return (
-    <Stack spacing={2}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
-        <Typography variant="h5">Inversores</Typography>
-        <Stack direction="row" spacing={1}>
+    <Stack spacing={3}>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        justifyContent="space-between"
+        alignItems={{ xs: "stretch", sm: "center" }}
+        spacing={1.5}
+      >
+        <Box>
+          <Typography variant="h5">Inversores</Typography>
+          <Typography variant="body2">Aportes, participación y composición del proyecto.</Typography>
+        </Box>
+        <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
           <Button startIcon={<AddIcon />} variant="outlined" onClick={openNewInv}>Nuevo inversor</Button>
           <Button startIcon={<PaidIcon />} variant="contained" color="secondary"
             disabled={inversores.length === 0} onClick={() => openNewAp("")}>
@@ -199,12 +207,15 @@ export default function InversoresPage() {
 
       {loading && <LinearProgress />}
 
-      <Tabs value={tab} onChange={(_, v) => setTab(v)}>
-        <Tab label="Resumen" />
-        <Tab label="Inversores" />
-        <Tab label="Aportes" />
-        <Tab label="Composición" />
-      </Tabs>
+      <Box>
+        <Tabs value={tab} onChange={(_, v) => setTab(v)}>
+          <Tab label="Resumen" />
+          <Tab label="Inversores" />
+          <Tab label="Aportes" />
+          <Tab label="Composición" />
+        </Tabs>
+        <Divider />
+      </Box>
 
       {tab === 0 && (
         <Card>
