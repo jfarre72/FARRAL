@@ -24,23 +24,25 @@ export default function Home() {
         const { data } = await supabase.from("hito_tareas").select("hito_id,completado").in("hito_id", hitoIds);
         tareas = data ?? [];
       }
-      const totUSD = (aportes ?? []).filter(a => a.moneda === "USD").reduce((s,a) => s + Number(a.monto || 0), 0);
+      const aportesUSD = (aportes ?? []).filter(a => (a.moneda ?? "USD") === "USD");
+      // totUSD = total comprometido (incluye honorarios / no-caja). Cuenta para % recaudado.
+      const totUSD = aportesUSD.reduce((s,a) => s + Number(a.monto || 0), 0);
+      // efectivoUSD = lo que realmente entró a caja
+      const efectivoUSD = aportesUSD.filter(a => a.entra_a_caja !== false).reduce((s,a) => s + Number(a.monto || 0), 0);
       const venta = Number(proyecto.precio_venta_estimado || 0);
       const costo = Number(proyecto.costo_total_estimado  || 0);
       const ganancia = venta - costo;
       const costoM2 = (costo > 0 && Number(proyecto.m2_totales) > 0) ? costo / Number(proyecto.m2_totales) : 0;
       const pctRecaudado = costo > 0 ? (totUSD / costo) * 100 : 0;
-      // Rendimiento anualizado del proyecto
+      // Rendimiento anualizado del proyecto (fórmula simple: ROI × 365 / días)
       const diasProy = (() => {
         if (!proyecto.fecha_inicio || !proyecto.fecha_fin) return 365;
         const a = new Date(proyecto.fecha_inicio + "T00:00:00");
         const b = new Date(proyecto.fecha_fin + "T00:00:00");
         return Math.max(1, Math.round((b - a) / 86400000));
       })();
-      const roiProy = costo > 0 ? ganancia / costo : 0;
-      const anualProy = (costo > 0 && (1 + roiProy) > 0)
-        ? (Math.pow(1 + roiProy, 365/diasProy) - 1) * 100
-        : null;
+      const roiProyPct = costo > 0 ? (ganancia / costo) * 100 : 0;
+      const anualProy = (costo > 0 && diasProy > 0) ? (roiProyPct * 365 / diasProy) : null;
       // Avance ponderado por subtareas (mismo criterio que Línea de tiempo)
       const sorted = [...(hitos ?? [])].sort((a, b) => a.orden - b.orden);
       const fraccion = (h) => {
@@ -54,7 +56,7 @@ export default function Home() {
         return s + peso * fraccion(h);
       }, 0));
       setStats({
-        totUSD, venta, costo, ganancia, costoM2, avance,
+        totUSD, efectivoUSD, venta, costo, ganancia, costoM2, avance,
         pctRecaudado, anualProy,
         nInversores: inversores?.length ?? 0,
         hitos: hitos ?? [],
@@ -124,7 +126,15 @@ export default function Home() {
         <KPI title="Venta estimada"   value={fmtMoney(stats?.venta ?? 0, "USD")} />
         <KPI title="Costo estimado"   value={fmtMoney(stats?.costo ?? 0, "USD")} hint={`Costo m² ${fmtMoney(stats?.costoM2 ?? 0, "USD")}`} />
         <KPI title="Ganancia estim."  value={fmtMoney(stats?.ganancia ?? 0, "USD")} hint={stats?.anualProy != null ? `Anualizado ${fmtPct(stats.anualProy, 2)}` : " "} />
-        <KPI title="Aportes USD"      value={fmtMoney(stats?.totUSD ?? 0, "USD")} hint={`${fmtPct(stats?.pctRecaudado ?? 0, 1)} del costo`} />
+        <KPI
+          title="Aportes USD"
+          value={fmtMoney(stats?.totUSD ?? 0, "USD")}
+          hint={
+            stats && stats.totUSD !== stats.efectivoUSD
+              ? `Efectivo en caja ${fmtMoney(stats.efectivoUSD, "USD")}`
+              : `${fmtPct(stats?.pctRecaudado ?? 0, 1)} del costo`
+          }
+        />
       </Grid>
 
       <Card>

@@ -56,6 +56,7 @@ create table if not exists public.aportes (
   costo_m2            numeric(14,2) not null default 0,
   monto               numeric(16,2) not null default 0,
   moneda              text not null default 'USD' check (moneda in ('USD','ARS')),
+  entra_a_caja        boolean not null default true,
   precio_venta_final  numeric(14,2),
   observacion         text,
   created_at          timestamptz not null default now(),

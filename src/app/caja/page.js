@@ -73,7 +73,9 @@ export default function CajaPage() {
   const saldos = useMemo(() => {
     let usd = 0, ars = 0;
     let ingUSD = 0, ingARS = 0, egrUSD = 0, egrARS = 0;
+    // Sólo los aportes en efectivo (entra_a_caja === true) afectan caja.
     for (const a of aportes) {
+      if (a.entra_a_caja === false) continue;
       const m = Number(a.monto || 0);
       if (a.moneda === "USD") { usd += m; ingUSD += m; }
       else { ars += m; ingARS += m; }
@@ -129,7 +131,9 @@ export default function CajaPage() {
   // --------- Movimientos unificados (aportes + movs) ---------
   const invName = (id) => inversores.find(i => i.id === id)?.nombre ?? "—";
   const unified = useMemo(() => {
-    const fromAportes = aportes.map(a => ({
+    const fromAportes = aportes
+      .filter(a => a.entra_a_caja !== false)
+      .map(a => ({
       id: "ap_" + a.id, kind: "aporte", fecha: a.fecha, tipo: "ingreso",
       moneda: a.moneda, monto: Number(a.monto || 0),
       detalle: `Aporte · ${invName(a.inversor_id)}`,
