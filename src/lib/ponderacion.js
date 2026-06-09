@@ -27,8 +27,9 @@ export function daysBetween(fromISO, toISO) {
   return Math.max(0, diff);
 }
 
-export function computePonderacion({ proyecto, aportes = [], inversores = [] }) {
-  const fechaCorte = proyecto?.fecha_fin || todayISO();
+export function computePonderacion({ proyecto, aportes = [], inversores = [], fechaCorteOverride } = {}) {
+  // Permite hacer "what if" con una fecha distinta a la de fin del proyecto.
+  const fechaCorte = fechaCorteOverride || proyecto?.fecha_fin || todayISO();
   const venta = Number(proyecto?.precio_venta_estimado || 0);
   const costo = Number(proyecto?.costo_total_estimado  || 0);
   const gananciaTotal = venta - costo;
@@ -107,8 +108,10 @@ export function computePonderacion({ proyecto, aportes = [], inversores = [] }) 
   // % recaudado del costo total
   const pctRecaudado = costo > 0 ? (totalAportadoUSD / costo) * 100 : 0;
 
-  // Duración total del proyecto (para anualización del proyecto)
+  // Duración total del proyecto (para anualización del proyecto).
+  // Si hay override de fecha de corte, se usa esa fecha como "fin" virtual.
   const diasProyecto = daysBetween(proyecto?.fecha_inicio, fechaCorte) || 365;
+  // Promedio ponderado de días de los aportes (para anualización por inversor)
 
   return {
     fechaCorte,

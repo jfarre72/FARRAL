@@ -3,7 +3,7 @@ import {
   Card, CardContent, Stack, Typography, Button, Grid, Tabs, Tab, Alert,
   Table, TableBody, TableCell, TableHead, TableRow, IconButton, Dialog,
   DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Box,
-  Chip, Tooltip, Divider, LinearProgress, useMediaQuery
+  Chip, Tooltip, Divider, LinearProgress, FormControlLabel, Switch, useMediaQuery
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
@@ -13,7 +13,7 @@ import PaidIcon from "@mui/icons-material/Paid";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
-import { fmtMoney, fmtNum, fmtPct } from "@/components/Money";
+import { fmtMoney, fmtNum, fmtPct, anualizada } from "@/components/Money";
 import DonutChart from "@/components/DonutChart";
 import { computePonderacion } from "@/lib/ponderacion";
 
@@ -26,6 +26,7 @@ const emptyAp   = {
   fecha_inicio_calculo: "",
   cantidad_m2: "", tipo_venta: "pozo", costo_m2: "", monto: "",
   moneda: "USD", precio_venta_final: "", observacion: "",
+  entra_a_caja: true,
 };
 
 export default function InversoresPage() {
@@ -46,6 +47,22 @@ export default function InversoresPage() {
   const [formAp, setFormAp] = useState(emptyAp);
   const [editApId, setEditApId] = useState(null);
   const [errAp, setErrAp] = useState(null);
+
+  // What-if: fecha de venta del proyecto editable desde el Resumen.
+  // Reemplaza temporalmente a fecha_fin. Persiste por proyecto en localStorage.
+  const [fechaVentaOverride, setFechaVentaOverride] = useState("");
+  useEffect(() => {
+    if (!proyecto) return;
+    const k = `farral.fechaVentaOverride.${proyecto.id}`;
+    const saved = typeof window !== "undefined" ? window.localStorage.getItem(k) : null;
+    setFechaVentaOverride(saved || proyecto.fecha_fin || "");
+    // eslint-disable-next-line
+  }, [proyecto?.id]);
+  useEffect(() => {
+    if (!proyecto) return;
+    const k = `farral.fechaVentaOverride.${proyecto.id}`;
+    if (fechaVentaOverride) window.localStorage.setItem(k, fechaVentaOverride);
+  }, [fechaVentaOverride, proyecto?.id]);
 
   const reload = async () => {
     if (!proyecto) return;
@@ -118,6 +135,7 @@ export default function InversoresPage() {
       moneda: a.moneda,
       precio_venta_final: a.precio_venta_final ?? "",
       observacion: a.observacion ?? "",
+      entra_a_caja: a.entra_a_caja ?? true,
     });
     setEditApId(a.id); setErrAp(null); setOpenAp(true);
   };
@@ -137,6 +155,7 @@ export default function InversoresPage() {
       moneda: formAp.moneda,
       precio_venta_final: formAp.precio_venta_final === "" ? null : Number(formAp.precio_venta_final),
       observacion: formAp.observacion || null,
+      entra_a_caja: formAp.entra_a_caja !== false,
     };
     const res = editApId
       ? await supabase.from("aportes").update(payload).eq("id", editApId)
@@ -159,8 +178,8 @@ export default function InversoresPage() {
 
   // ---- Cálculo de ponderación (nuevo modelo)
   const calc = useMemo(
-    () => computePonderacion({ proyecto, aportes, inversores }),
-    [proyecto, aportes, inversores]
+    () => computePonderacion({ proyecto, aportes, inversores, fechaCorteOverride: fechaVentaOverride || undefined }),
+    [proyecto, aportes, inversores, fechaVentaOverride]
   );
   // Reales + faltante (este último al final). Si no hay faltante, no se incluye.
   const resumen   = calc.faltante.aportesUSD > 0
@@ -177,13 +196,10 @@ export default function InversoresPage() {
     fechaCorte: calc.fechaCorte,
     diasProyecto: calc.diasProyecto,
   };
-  // Rendimiento anualizado del proyecto
+  // Rendimiento anualizado del proyecto (fórmula simple)
+  // anual = (ganancia / costo) × 365 / días
   const roiProy = totProy.costo > 0 ? (totProy.ganancia / totProy.costo) * 100 : 0;
-  const anualProy = (() => {
-    if (totProy.costo <= 0 || totProy.diasProyecto <= 0) return null;
-    if (1 + roiProy/100 <= 0) return null;
-    return (Math.pow(1 + roiProy/100, 365/totProy.diasProyecto) - 1) * 100;
-  })();
+  const anualProy = anualizada(roiProy, totProy.diasProyecto);
   const costoM2Estim = proyecto?.m2_totales > 0 && proyecto?.costo_total_estimado > 0
     ? Number(proyecto.costo_total_estimado) / Number(proyecto.m2_totales)
     : 0;
@@ -234,6 +250,41 @@ export default function InversoresPage() {
       {tab === 0 && (
         <Card>
           <CardContent>
+            {/* Simulador de fecha de venta */}
+            <Box sx={{
+              mb: 2, p: 1.5, borderRadius: 2,
+              border: "1px dashed", borderColor: "divider",
+              bgcolor: "rgba(15,42,74,0.025)",
+            }}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }}>
+                <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                  <Typography variant="subtitle2">Simular fecha de venta</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Reemplaza temporalmente la fecha de fin del proyecto para ver el impacto en ponderación, % participación, ganancia y rendimiento anualizado.
+                  </Typography>
+                </Box>
+                <TextField
+                  type="date" label="Fecha de venta (simulada)"
+                  InputLabelProps={{ shrink: true }}
+                  sx={{ width: { xs: "100%", sm: 220 } }}
+                  value={fechaVentaOverride}
+                  onChange={(e) => setFechaVentaOverride(e.target.value)}
+                />
+                <Button
+                  size="small" variant="outlined"
+                  disabled={!proyecto.fecha_fin || fechaVentaOverride === proyecto.fecha_fin}
+                  onClick={() => setFechaVentaOverride(proyecto.fecha_fin || "")}
+                >
+                  Restablecer
+                </Button>
+              </Stack>
+              {proyecto.fecha_fin && fechaVentaOverride && fechaVentaOverride !== proyecto.fecha_fin && (
+                <Typography variant="caption" color="warning.main" sx={{ mt: 1, display: "block" }}>
+                  Simulación activa. Fecha original del proyecto: {proyecto.fecha_fin}.
+                </Typography>
+              )}
+            </Box>
+
             <Grid container spacing={2}>
               <KPI title="Venta estimada"  value={fmtMoney(totProy.venta, "USD")} />
               <KPI title="Costo estimado"  value={fmtMoney(totProy.costo, "USD")} hint={`Costo m² ${fmtMoney(costoM2Estim, "USD")}`} />
@@ -363,7 +414,14 @@ export default function InversoresPage() {
                       <TableRow key={a.id} hover>
                         <TableCell sx={{ whiteSpace: "nowrap" }}>{a.fecha}</TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap" }}>{a._fechaInicioCalculo}</TableCell>
-                        <TableCell>{invName(a.inversor_id)}</TableCell>
+                        <TableCell>
+                          <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
+                            <span>{invName(a.inversor_id)}</span>
+                            {a.entra_a_caja === false && (
+                              <Chip size="small" label="no caja" variant="outlined" sx={{ borderStyle: "dashed" }} />
+                            )}
+                          </Stack>
+                        </TableCell>
                         <TableCell>
                           <Chip size="small"
                             label={a.tipo_venta === "pozo" ? "Pozo" : "Avanzado"}
@@ -581,6 +639,36 @@ export default function InversoresPage() {
             <Grid item xs={12}>
               <TextField label="Observación" fullWidth multiline minRows={2}
                 value={formAp.observacion} onChange={e => setFormAp({ ...formAp, observacion: e.target.value })} />
+            </Grid>
+
+            <Grid item xs={12}>
+              <Box sx={{
+                p: 1.5, borderRadius: 2,
+                border: "1px solid", borderColor: "divider",
+                bgcolor: "rgba(15,42,74,0.025)",
+              }}>
+                <FormControlLabel
+                  sx={{ alignItems: "flex-start", m: 0 }}
+                  control={
+                    <Switch
+                      checked={formAp.entra_a_caja !== false}
+                      onChange={(e) => setFormAp({ ...formAp, entra_a_caja: e.target.checked })}
+                    />
+                  }
+                  label={
+                    <Stack>
+                      <Typography fontWeight={600}>
+                        {formAp.entra_a_caja !== false ? "Aporte en efectivo (ingresa a caja)" : "Aporte sin ingreso de efectivo"}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {formAp.entra_a_caja !== false
+                          ? "El monto entra al saldo USD de la caja en la fecha indicada."
+                          : "Honorarios o servicios que se cobran al final con su % de ganancia. No impactan en caja, pero cuentan para el % recaudado y la ponderación."}
+                      </Typography>
+                    </Stack>
+                  }
+                />
+              </Box>
             </Grid>
           </Grid>
         </DialogContent>
