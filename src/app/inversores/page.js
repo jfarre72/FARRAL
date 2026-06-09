@@ -15,6 +15,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtMoney, fmtNum, fmtPct } from "@/components/Money";
 import DonutChart from "@/components/DonutChart";
+import { computePonderacion } from "@/lib/ponderacion";
 
 // Paleta para segmentos de inversores en el gráfico
 const PALETTE = ["#0F2A4A", "#E07A1F", "#1E8E3E", "#7B61FF", "#0EA5A4", "#C0392B", "#E0A21F", "#5C6470"];
@@ -22,6 +23,7 @@ const PALETTE = ["#0F2A4A", "#E07A1F", "#1E8E3E", "#7B61FF", "#0EA5A4", "#C0392B
 const emptyInv  = { nombre: "", contacto: "", moneda_habitual: "USD" };
 const emptyAp   = {
   inversor_id: "", fecha: new Date().toISOString().slice(0,10),
+  fecha_inicio_calculo: "",
   cantidad_m2: "", tipo_venta: "pozo", costo_m2: "", monto: "",
   moneda: "USD", precio_venta_final: "", observacion: ""
 };
@@ -92,11 +94,13 @@ export default function InversoresPage() {
   // ------ Aporte save ------
   const openNewAp = (inversor_id = "") => {
     const inv = inversores.find(i => i.id === inversor_id);
+    const hoy = new Date().toISOString().slice(0,10);
     setFormAp({
       ...emptyAp,
       inversor_id,
+      fecha: hoy,
+      fecha_inicio_calculo: hoy,
       moneda: inv?.moneda_habitual ?? "USD",
-      // Precarga desde el proyecto (editable)
       costo_m2: proyecto?.costo_m2_pozo ? String(proyecto.costo_m2_pozo) : "",
       precio_venta_final: proyecto?.precio_venta_m2 ? String(proyecto.precio_venta_m2) : "",
     });
@@ -106,6 +110,7 @@ export default function InversoresPage() {
     setFormAp({
       inversor_id: a.inversor_id,
       fecha: a.fecha,
+      fecha_inicio_calculo: a.fecha_inicio_calculo ?? a.fecha,
       cantidad_m2: a.cantidad_m2 ?? "",
       tipo_venta: a.tipo_venta,
       costo_m2: a.costo_m2 ?? "",
@@ -124,6 +129,7 @@ export default function InversoresPage() {
       proyecto_id: proyecto.id,
       inversor_id: formAp.inversor_id,
       fecha: formAp.fecha,
+      fecha_inicio_calculo: formAp.fecha_inicio_calculo || formAp.fecha,
       cantidad_m2: Number(formAp.cantidad_m2 || 0),
       tipo_venta: formAp.tipo_venta,
       costo_m2: Number(formAp.costo_m2 || 0),
@@ -151,39 +157,25 @@ export default function InversoresPage() {
     return c && m ? c * m : null;
   })();
 
-  // ---- Resumen por inversor
-  const resumen = useMemo(() => {
-    const m2T = Number(proyecto?.m2_totales || 0);
-    return inversores.map((i) => {
-      const items = aportes.filter(a => a.inversor_id === i.id);
-      const m2Sum = items.reduce((s,a) => s + Number(a.cantidad_m2 || 0), 0);
-      const aportesUSD = items.filter(a => a.moneda === "USD").reduce((s,a) => s + Number(a.monto || 0), 0);
-      const aportesARS = items.filter(a => a.moneda === "ARS").reduce((s,a) => s + Number(a.monto || 0), 0);
-      const ventaFinal = items.reduce((s,a) => {
-        const pv = Number(a.precio_venta_final || 0);
-        const m2 = Number(a.cantidad_m2 || 0);
-        return s + (pv && m2 ? pv * m2 : 0);
-      }, 0);
-      const costoTotal = items.reduce((s,a) => s + Number(a.monto || 0), 0);
-      const ganancia = ventaFinal - costoTotal;
-      const gananciaPct = costoTotal > 0 ? (ganancia / costoTotal) * 100 : 0;
-      const participacion = m2T > 0 ? (m2Sum / m2T) * 100 : 0;
-      return {
-        ...i,
-        nAportes: items.length,
-        m2Sum, aportesUSD, aportesARS,
-        ventaFinal, costoTotal, ganancia, gananciaPct, participacion,
-      };
-    });
-  }, [inversores, aportes, proyecto]);
-
-  const totProy = useMemo(() => {
-    const m2 = resumen.reduce((s,r) => s + r.m2Sum, 0);
-    const aportesUSD = resumen.reduce((s,r) => s + r.aportesUSD, 0);
-    const aportesARS = resumen.reduce((s,r) => s + r.aportesARS, 0);
-    const m2T = Number(proyecto?.m2_totales || 0);
-    return { m2, aportesUSD, aportesARS, pct: m2T ? (m2/m2T)*100 : 0 };
-  }, [resumen, proyecto]);
+  // ---- Cálculo de ponderación (nuevo modelo)
+  const calc = useMemo(
+    () => computePonderacion({ proyecto, aportes, inversores }),
+    [proyecto, aportes, inversores]
+  );
+  const resumen   = calc.porInversor;
+  const aportesC  = calc.aportes;
+  const totProy   = {
+    aportesUSD: resumen.reduce((s,r) => s + r.aportesUSD, 0),
+    aportesARS: resumen.reduce((s,r) => s + r.aportesARS, 0),
+    ponderado:  calc.totalPonderado,
+    ganancia:   calc.gananciaTotal,
+    venta:      calc.venta,
+    costo:      calc.costo,
+    fechaCorte: calc.fechaCorte,
+  };
+  const costoM2Estim = proyecto?.m2_totales > 0 && proyecto?.costo_total_estimado > 0
+    ? Number(proyecto.costo_total_estimado) / Number(proyecto.m2_totales)
+    : 0;
 
   const invName = (id) => inversores.find(i => i.id === id)?.nombre ?? "—";
 
@@ -225,23 +217,28 @@ export default function InversoresPage() {
           <CardContent>
             <Grid container spacing={3} alignItems="center">
               <Grid item xs={12} md={5}>
-                <Typography variant="subtitle2" gutterBottom>m² vendidos vs. disponibles</Typography>
+                <Typography variant="subtitle2" gutterBottom>Composición por ponderación</Typography>
                 <DonutChart
-                  size={170}
-                  centerValue={fmtPct(totProy.pct, 0)}
-                  centerLabel="vendido"
-                  segments={[
-                    { label: "Vendido", value: totProy.m2, color: "#E07A1F" },
-                    { label: "Disponible", value: Math.max(0, Number(proyecto.m2_totales || 0) - totProy.m2), color: "#0F2A4A" },
-                  ]}
+                  size={180}
+                  centerValue={resumen.filter(r => r.ponderado > 0).length}
+                  centerLabel="inversores"
+                  segments={
+                    resumen.filter(r => r.ponderado > 0).length > 0
+                      ? resumen
+                          .filter(r => r.ponderado > 0)
+                          .map((r, idx) => ({ label: r.nombre, value: r.ponderado, color: PALETTE[idx % PALETTE.length] }))
+                      : [{ label: "Sin aportes", value: 1, color: "rgba(15,42,74,0.12)" }]
+                  }
                 />
               </Grid>
               <Grid item xs={12} md={7}>
                 <Grid container spacing={2}>
-                  <KPI title="m² vendidos" value={`${fmtNum(totProy.m2)} m²`} hint={`de ${fmtNum(proyecto.m2_totales)} totales`} />
-                  <KPI title="% vendido"   value={fmtPct(totProy.pct)} />
-                  <KPI title="Total USD"   value={fmtMoney(totProy.aportesUSD, "USD")} />
-                  <KPI title="Total ARS"   value={fmtMoney(totProy.aportesARS, "ARS")} />
+                  <KPI title="Venta estimada"   value={fmtMoney(totProy.venta, "USD")} />
+                  <KPI title="Costo estimado"   value={fmtMoney(totProy.costo, "USD")} />
+                  <KPI title="Ganancia estim."  value={fmtMoney(totProy.ganancia, "USD")} hint={`Costo m² ${fmtMoney(costoM2Estim, "USD")}`} />
+                  <KPI title="Total ponderado"  value={fmtNum(totProy.ponderado, 0)} hint={`Corte ${totProy.fechaCorte}`} />
+                  <KPI title="Aportes USD"      value={fmtMoney(totProy.aportesUSD, "USD")} />
+                  <KPI title="Aportes ARS"      value={fmtMoney(totProy.aportesARS, "ARS")} />
                 </Grid>
               </Grid>
             </Grid>
@@ -251,12 +248,11 @@ export default function InversoresPage() {
                 <TableHead>
                   <TableRow>
                     <TableCell>Inversor</TableCell>
-                    <TableCell align="right">m²</TableCell>
-                    <TableCell align="right">% participación</TableCell>
                     <TableCell align="right">Aportes USD</TableCell>
                     <TableCell align="right">Aportes ARS</TableCell>
+                    <TableCell align="right">Ponderado</TableCell>
+                    <TableCell align="right">% participación</TableCell>
                     <TableCell align="right">Ganancia estim.</TableCell>
-                    <TableCell align="right">Ganancia %</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -268,12 +264,11 @@ export default function InversoresPage() {
                           <Typography variant="caption" color="text.secondary">{r.contacto}</Typography>
                         </Stack>
                       </TableCell>
-                      <TableCell align="right">{fmtNum(r.m2Sum)}</TableCell>
-                      <TableCell align="right">{fmtPct(r.participacion)}</TableCell>
                       <TableCell align="right">{fmtMoney(r.aportesUSD,"USD")}</TableCell>
                       <TableCell align="right">{fmtMoney(r.aportesARS,"ARS")}</TableCell>
-                      <TableCell align="right">{r.ventaFinal ? fmtMoney(r.ganancia, r.moneda_habitual) : "—"}</TableCell>
-                      <TableCell align="right">{r.ventaFinal ? fmtPct(r.gananciaPct) : "—"}</TableCell>
+                      <TableCell align="right">{fmtNum(r.ponderado, 0)}</TableCell>
+                      <TableCell align="right">{fmtPct(r.participacion)}</TableCell>
+                      <TableCell align="right">{totProy.ganancia > 0 ? fmtMoney(r.ganancia, "USD") : "—"}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -333,51 +328,42 @@ export default function InversoresPage() {
                   <TableHead>
                     <TableRow>
                       <TableCell>Fecha</TableCell>
+                      <TableCell>Inicio cálc.</TableCell>
                       <TableCell>Inversor</TableCell>
                       <TableCell>Tipo</TableCell>
                       <TableCell align="right">m²</TableCell>
-                      <TableCell align="right">Costo m²</TableCell>
                       <TableCell align="right">Monto</TableCell>
-                      <TableCell>Moneda</TableCell>
-                      <TableCell align="right">% obtenido</TableCell>
-                      <TableCell align="right">Precio venta</TableCell>
+                      <TableCell align="right">Días</TableCell>
+                      <TableCell align="right">Ponderado</TableCell>
+                      <TableCell align="right">% partic.</TableCell>
                       <TableCell align="right">Ganancia</TableCell>
                       <TableCell align="right">Acciones</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {aportes.map(a => {
-                      const m2T = Number(proyecto.m2_totales || 0);
-                      const pct = m2T > 0 ? (Number(a.cantidad_m2)/m2T)*100 : 0;
-                      const venta = Number(a.precio_venta_final || 0) * Number(a.cantidad_m2 || 0);
-                      const gan = venta ? venta - Number(a.monto || 0) : null;
-                      const ganPct = (gan !== null && Number(a.monto) > 0) ? (gan / Number(a.monto)) * 100 : null;
-                      return (
-                        <TableRow key={a.id} hover>
-                          <TableCell>{a.fecha}</TableCell>
-                          <TableCell>{invName(a.inversor_id)}</TableCell>
-                          <TableCell>
-                            <Chip size="small"
-                              label={a.tipo_venta === "pozo" ? "Pozo" : "Avanzado"}
-                              color={a.tipo_venta === "pozo" ? "secondary" : "primary"}
-                              variant="outlined" />
-                          </TableCell>
-                          <TableCell align="right">{fmtNum(a.cantidad_m2)}</TableCell>
-                          <TableCell align="right">{fmtMoney(a.costo_m2, a.moneda)}</TableCell>
-                          <TableCell align="right">{fmtMoney(a.monto, a.moneda)}</TableCell>
-                          <TableCell>{a.moneda}</TableCell>
-                          <TableCell align="right">{fmtPct(pct)}</TableCell>
-                          <TableCell align="right">{a.precio_venta_final ? fmtMoney(a.precio_venta_final, a.moneda) : "—"}</TableCell>
-                          <TableCell align="right">
-                            {gan !== null ? `${fmtMoney(gan, a.moneda)} (${fmtPct(ganPct)})` : "—"}
-                          </TableCell>
-                          <TableCell align="right">
-                            <Tooltip title="Editar"><IconButton onClick={() => openEditAp(a)}><EditIcon fontSize="small" /></IconButton></Tooltip>
-                            <Tooltip title="Eliminar"><IconButton onClick={() => deleteAp(a.id)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
+                    {aportesC.map(a => (
+                      <TableRow key={a.id} hover>
+                        <TableCell sx={{ whiteSpace: "nowrap" }}>{a.fecha}</TableCell>
+                        <TableCell sx={{ whiteSpace: "nowrap" }}>{a._fechaInicioCalculo}</TableCell>
+                        <TableCell>{invName(a.inversor_id)}</TableCell>
+                        <TableCell>
+                          <Chip size="small"
+                            label={a.tipo_venta === "pozo" ? "Pozo" : "Avanzado"}
+                            color={a.tipo_venta === "pozo" ? "secondary" : "primary"}
+                            variant="outlined" />
+                        </TableCell>
+                        <TableCell align="right">{fmtNum(a.cantidad_m2)}</TableCell>
+                        <TableCell align="right">{fmtMoney(a.monto, a.moneda)}</TableCell>
+                        <TableCell align="right">{fmtNum(a._dias, 0)}</TableCell>
+                        <TableCell align="right">{fmtNum(a._ponderado, 0)}</TableCell>
+                        <TableCell align="right">{fmtPct(a._participacion)}</TableCell>
+                        <TableCell align="right">{totProy.ganancia > 0 ? fmtMoney(a._ganancia, "USD") : "—"}</TableCell>
+                        <TableCell align="right">
+                          <Tooltip title="Editar"><IconButton onClick={() => openEditAp(a)}><EditIcon fontSize="small" /></IconButton></Tooltip>
+                          <Tooltip title="Eliminar"><IconButton onClick={() => deleteAp(a.id)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    ))}
                   </TableBody>
                 </Table>
               </Box>
@@ -389,32 +375,35 @@ export default function InversoresPage() {
       {tab === 3 && (
         <Card>
           <CardContent>
-            <Typography variant="h6" gutterBottom>Composición de inversores</Typography>
-            {resumen.length === 0 ? (
-              <Typography color="text.secondary">Sin datos para mostrar.</Typography>
+            <Stack direction="row" justifyContent="space-between" alignItems="baseline" sx={{ mb: 1 }}>
+              <Typography variant="h6">Composición por ponderación</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Corte: {totProy.fechaCorte} · Monto × días en proyecto
+              </Typography>
+            </Stack>
+            {resumen.filter(r => r.ponderado > 0).length === 0 ? (
+              <Typography color="text.secondary">Sin aportes ponderados todavía.</Typography>
             ) : (
               <Stack spacing={2.5}>
                 <DonutChart
-                  size={180}
-                  centerValue={fmtNum(totProy.m2, 0)}
-                  centerLabel="m² vendidos"
-                  segments={[
-                    ...resumen
-                      .filter(r => r.m2Sum > 0)
-                      .map((r, idx) => ({ label: r.nombre, value: r.m2Sum, color: PALETTE[idx % PALETTE.length] })),
-                    { label: "Disponible", value: Math.max(0, Number(proyecto.m2_totales || 0) - totProy.m2), color: "rgba(15,42,74,0.12)" },
-                  ]}
+                  size={200}
+                  centerValue={totProy.ganancia > 0 ? fmtMoney(totProy.ganancia, "USD") : fmtNum(totProy.ponderado, 0)}
+                  centerLabel={totProy.ganancia > 0 ? "Ganancia estim." : "Ponderado total"}
+                  segments={resumen
+                    .filter(r => r.ponderado > 0)
+                    .map((r, idx) => ({ label: r.nombre, value: r.ponderado, color: PALETTE[idx % PALETTE.length] }))}
                 />
                 <Divider />
-                {resumen.map((r) => (
+                {resumen.filter(r => r.ponderado > 0).map((r) => (
                   <Box key={r.id}>
                     <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
                       <Typography fontWeight={600}>{r.nombre}</Typography>
-                      <Typography>{fmtPct(r.participacion)} · {fmtNum(r.m2Sum)} m²</Typography>
+                      <Typography>
+                        {fmtPct(r.participacion)}
+                        {totProy.ganancia > 0 && <> · {fmtMoney(r.ganancia, "USD")}</>}
+                      </Typography>
                     </Stack>
-                    <Box sx={{
-                      height: 10, bgcolor: "rgba(15,42,74,0.08)", borderRadius: 5, overflow: "hidden",
-                    }}>
+                    <Box sx={{ height: 10, bgcolor: "rgba(15,42,74,0.08)", borderRadius: 5, overflow: "hidden" }}>
                       <Box sx={{
                         height: "100%",
                         width: `${Math.min(100, r.participacion)}%`,
@@ -423,11 +412,6 @@ export default function InversoresPage() {
                     </Box>
                   </Box>
                 ))}
-                <Divider sx={{ my: 1 }} />
-                <Stack direction="row" justifyContent="space-between">
-                  <Typography color="text.secondary">Total comprometido</Typography>
-                  <Typography fontWeight={700}>{fmtPct(totProy.pct)} · {fmtNum(totProy.m2)} m²</Typography>
-                </Stack>
               </Stack>
             )}
           </CardContent>
@@ -474,9 +458,24 @@ export default function InversoresPage() {
                 {inversores.map(i => <MenuItem key={i.id} value={i.id}>{i.nombre}</MenuItem>)}
               </TextField>
             </Grid>
-            <Grid item xs={12} sm={3}>
-              <TextField label="Fecha" type="date" fullWidth InputLabelProps={{ shrink: true }}
-                value={formAp.fecha} onChange={e => setFormAp({ ...formAp, fecha: e.target.value })} />
+            <Grid item xs={6} sm={3}>
+              <TextField label="Fecha (ingresa a caja)" type="date" fullWidth InputLabelProps={{ shrink: true }}
+                value={formAp.fecha}
+                onChange={e => {
+                  const f = e.target.value;
+                  // Si fecha_inicio_calculo seguía igual a la fecha previa, lo sincronizo
+                  setFormAp(prev => ({
+                    ...prev,
+                    fecha: f,
+                    fecha_inicio_calculo: (!prev.fecha_inicio_calculo || prev.fecha_inicio_calculo === prev.fecha) ? f : prev.fecha_inicio_calculo,
+                  }));
+                }} />
+            </Grid>
+            <Grid item xs={6} sm={3}>
+              <TextField label="Inicio cálculo %" type="date" fullWidth InputLabelProps={{ shrink: true }}
+                value={formAp.fecha_inicio_calculo}
+                helperText="Desde cuándo cuenta para la ponderación"
+                onChange={e => setFormAp({ ...formAp, fecha_inicio_calculo: e.target.value })} />
             </Grid>
             <Grid item xs={12} sm={3}>
               <TextField select label="Tipo de venta" fullWidth value={formAp.tipo_venta}
@@ -515,19 +514,62 @@ export default function InversoresPage() {
               </TextField>
             </Grid>
 
-            <Grid item xs={12} sm={6}>
-              <TextField label="Precio venta final (por m²)" type="number" fullWidth
-                value={formAp.precio_venta_final}
-                helperText="Para calcular ganancia estimada (precio × m²)"
-                onChange={e => setFormAp({ ...formAp, precio_venta_final: e.target.value })} />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField label="% obtenido (sobre m² totales)" fullWidth disabled
-                value={
-                  proyecto.m2_totales > 0 && formAp.cantidad_m2
-                    ? fmtPct((Number(formAp.cantidad_m2)/Number(proyecto.m2_totales))*100)
-                    : "—"
-                } />
+            <Grid item xs={12}>
+              <Box sx={{
+                p: 1.5, borderRadius: 2,
+                border: "1px solid", borderColor: "divider",
+                bgcolor: "rgba(15,42,74,0.025)",
+              }}>
+                <Typography variant="caption" color="text.secondary">PREVIEW DE PONDERACIÓN</Typography>
+                <Grid container spacing={2} sx={{ mt: 0 }}>
+                  <Grid item xs={6} sm={3}>
+                    <Typography variant="caption" color="text.secondary">Fecha de corte</Typography>
+                    <Typography fontWeight={600}>{proyecto.fecha_fin || "hoy"}</Typography>
+                  </Grid>
+                  <Grid item xs={6} sm={3}>
+                    <Typography variant="caption" color="text.secondary">Días</Typography>
+                    <Typography fontWeight={600}>
+                      {(() => {
+                        const start = formAp.fecha_inicio_calculo || formAp.fecha;
+                        const cut = proyecto.fecha_fin || new Date().toISOString().slice(0,10);
+                        if (!start) return "—";
+                        const d = Math.max(0, Math.round((new Date(cut+"T00:00:00") - new Date(start+"T00:00:00"))/86400000));
+                        return fmtNum(d, 0);
+                      })()}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={6} sm={3}>
+                    <Typography variant="caption" color="text.secondary">Ponderado</Typography>
+                    <Typography fontWeight={600}>
+                      {(() => {
+                        const start = formAp.fecha_inicio_calculo || formAp.fecha;
+                        const cut = proyecto.fecha_fin || new Date().toISOString().slice(0,10);
+                        const monto = Number(formAp.monto || 0);
+                        if (!start || !monto) return "—";
+                        const d = Math.max(0, Math.round((new Date(cut+"T00:00:00") - new Date(start+"T00:00:00"))/86400000));
+                        return fmtNum(monto * d, 0);
+                      })()}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={6} sm={3}>
+                    <Typography variant="caption" color="text.secondary">Sobre el total actual</Typography>
+                    <Typography fontWeight={600}>
+                      {(() => {
+                        const start = formAp.fecha_inicio_calculo || formAp.fecha;
+                        const cut = proyecto.fecha_fin || new Date().toISOString().slice(0,10);
+                        const monto = Number(formAp.monto || 0);
+                        if (!start || !monto) return "—";
+                        const d = Math.max(0, Math.round((new Date(cut+"T00:00:00") - new Date(start+"T00:00:00"))/86400000));
+                        const pond = monto * d;
+                        const totalActual = aportesC
+                          .filter(a => editApId ? a.id !== editApId : true)
+                          .reduce((s,a) => s + a._ponderado, 0) + pond;
+                        return totalActual > 0 ? fmtPct((pond/totalActual)*100) : "—";
+                      })()}
+                    </Typography>
+                  </Grid>
+                </Grid>
+              </Box>
             </Grid>
 
             <Grid item xs={12}>
