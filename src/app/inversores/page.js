@@ -25,7 +25,7 @@ const emptyAp   = {
   inversor_id: "", fecha: new Date().toISOString().slice(0,10),
   fecha_inicio_calculo: "",
   cantidad_m2: "", tipo_venta: "pozo", costo_m2: "", monto: "",
-  moneda: "USD", precio_venta_final: "", observacion: ""
+  moneda: "USD", precio_venta_final: "", observacion: "",
 };
 
 export default function InversoresPage() {
@@ -100,7 +100,7 @@ export default function InversoresPage() {
       inversor_id,
       fecha: hoy,
       fecha_inicio_calculo: hoy,
-      moneda: inv?.moneda_habitual ?? "USD",
+      moneda: "USD",
       costo_m2: proyecto?.costo_m2_pozo ? String(proyecto.costo_m2_pozo) : "",
       precio_venta_final: proyecto?.precio_venta_m2 ? String(proyecto.precio_venta_m2) : "",
     });
@@ -162,17 +162,28 @@ export default function InversoresPage() {
     () => computePonderacion({ proyecto, aportes, inversores }),
     [proyecto, aportes, inversores]
   );
-  const resumen   = calc.porInversor;
+  // Reales + faltante (este último al final). Si no hay faltante, no se incluye.
+  const resumen   = calc.faltante.aportesUSD > 0
+    ? [...calc.porInversor, calc.faltante]
+    : calc.porInversor;
   const aportesC  = calc.aportes;
   const totProy   = {
-    aportesUSD: resumen.reduce((s,r) => s + r.aportesUSD, 0),
-    aportesARS: resumen.reduce((s,r) => s + r.aportesARS, 0),
+    aportesUSD: calc.totalAportadoUSD,
+    pctRecaudado: calc.pctRecaudado,
     ponderado:  calc.totalPonderado,
     ganancia:   calc.gananciaTotal,
     venta:      calc.venta,
     costo:      calc.costo,
     fechaCorte: calc.fechaCorte,
+    diasProyecto: calc.diasProyecto,
   };
+  // Rendimiento anualizado del proyecto
+  const roiProy = totProy.costo > 0 ? (totProy.ganancia / totProy.costo) * 100 : 0;
+  const anualProy = (() => {
+    if (totProy.costo <= 0 || totProy.diasProyecto <= 0) return null;
+    if (1 + roiProy/100 <= 0) return null;
+    return (Math.pow(1 + roiProy/100, 365/totProy.diasProyecto) - 1) * 100;
+  })();
   const costoM2Estim = proyecto?.m2_totales > 0 && proyecto?.costo_total_estimado > 0
     ? Number(proyecto.costo_total_estimado) / Number(proyecto.m2_totales)
     : 0;
@@ -191,7 +202,15 @@ export default function InversoresPage() {
           <Typography variant="h5">Inversores</Typography>
           <Typography variant="body2">Aportes, participación y composición del proyecto.</Typography>
         </Box>
-        <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
+        <Stack direction="row" spacing={1} sx={{ flexShrink: 0, flexWrap: "wrap" }}>
+          {anualProy != null && (
+            <Chip
+              color="success"
+              variant="filled"
+              label={`Rendimiento anualizado · ${fmtPct(anualProy, 2)}`}
+              sx={{ fontWeight: 700 }}
+            />
+          )}
           <Button startIcon={<AddIcon />} variant="outlined" onClick={openNewInv}>Nuevo inversor</Button>
           <Button startIcon={<PaidIcon />} variant="contained" color="secondary"
             disabled={inversores.length === 0} onClick={() => openNewAp("")}>
@@ -215,60 +234,61 @@ export default function InversoresPage() {
       {tab === 0 && (
         <Card>
           <CardContent>
-            <Grid container spacing={3} alignItems="center">
-              <Grid item xs={12} md={5}>
-                <Typography variant="subtitle2" gutterBottom>Composición por ponderación</Typography>
-                <DonutChart
-                  size={180}
-                  centerValue={resumen.filter(r => r.ponderado > 0).length}
-                  centerLabel="inversores"
-                  segments={
-                    resumen.filter(r => r.ponderado > 0).length > 0
-                      ? resumen
-                          .filter(r => r.ponderado > 0)
-                          .map((r, idx) => ({ label: r.nombre, value: r.ponderado, color: PALETTE[idx % PALETTE.length] }))
-                      : [{ label: "Sin aportes", value: 1, color: "rgba(15,42,74,0.12)" }]
-                  }
-                />
-              </Grid>
-              <Grid item xs={12} md={7}>
-                <Grid container spacing={2}>
-                  <KPI title="Venta estimada"   value={fmtMoney(totProy.venta, "USD")} />
-                  <KPI title="Costo estimado"   value={fmtMoney(totProy.costo, "USD")} />
-                  <KPI title="Ganancia estim."  value={fmtMoney(totProy.ganancia, "USD")} hint={`Costo m² ${fmtMoney(costoM2Estim, "USD")}`} />
-                  <KPI title="Total ponderado"  value={fmtNum(totProy.ponderado, 0)} hint={`Corte ${totProy.fechaCorte}`} />
-                  <KPI title="Aportes USD"      value={fmtMoney(totProy.aportesUSD, "USD")} />
-                  <KPI title="Aportes ARS"      value={fmtMoney(totProy.aportesARS, "ARS")} />
-                </Grid>
-              </Grid>
+            <Grid container spacing={2}>
+              <KPI title="Venta estimada"  value={fmtMoney(totProy.venta, "USD")} />
+              <KPI title="Costo estimado"  value={fmtMoney(totProy.costo, "USD")} hint={`Costo m² ${fmtMoney(costoM2Estim, "USD")}`} />
+              <KPI title="Ganancia estim." value={fmtMoney(totProy.ganancia, "USD")} hint={anualProy != null ? `Anualizado ${fmtPct(anualProy, 2)}` : " "} />
+              <KPI title="Recaudado"       value={fmtPct(totProy.pctRecaudado, 1)} hint={`${fmtMoney(totProy.aportesUSD, "USD")} de ${fmtMoney(totProy.costo, "USD")}`} />
             </Grid>
-            <Divider sx={{ my: 2 }} />
+            <Box sx={{ mt: 2, height: 10, bgcolor: "rgba(15,42,74,0.08)", borderRadius: 5, overflow: "hidden" }}>
+              <Box sx={{ height: "100%", width: `${Math.min(100, totProy.pctRecaudado)}%`, bgcolor: "success.main", transition: "width .4s" }} />
+            </Box>
+            <Divider sx={{ my: 3 }} />
             <Box sx={{ overflowX: "auto" }}>
               <Table size="small">
                 <TableHead>
                   <TableRow>
                     <TableCell>Inversor</TableCell>
-                    <TableCell align="right">Aportes USD</TableCell>
-                    <TableCell align="right">Aportes ARS</TableCell>
+                    <TableCell align="right">Aporte (USD)</TableCell>
                     <TableCell align="right">Ponderado</TableCell>
                     <TableCell align="right">% participación</TableCell>
                     <TableCell align="right">Ganancia estim.</TableCell>
+                    <TableCell align="right">% ganancia</TableCell>
+                    <TableCell align="right">Total a devolver</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {resumen.map(r => (
-                    <TableRow key={r.id} hover>
+                    <TableRow
+                      key={r.id} hover
+                      sx={r.es_faltante ? { bgcolor: "rgba(15,42,74,0.04)" } : undefined}
+                    >
                       <TableCell>
-                        <Stack>
-                          <Typography fontWeight={600}>{r.nombre}</Typography>
-                          <Typography variant="caption" color="text.secondary">{r.contacto}</Typography>
+                        <Stack direction="row" alignItems="center" spacing={1}>
+                          <Box>
+                            <Typography fontWeight={600} sx={{ fontStyle: r.es_faltante ? "italic" : "normal" }}>
+                              {r.nombre}
+                            </Typography>
+                            {r.contacto && <Typography variant="caption" color="text.secondary">{r.contacto}</Typography>}
+                            {r.es_faltante && (
+                              <Typography variant="caption" color="text.secondary" display="block">
+                                desde {r.fechaInicio}
+                              </Typography>
+                            )}
+                          </Box>
+                          {r.es_faltante && <Chip size="small" label="virtual" variant="outlined" />}
                         </Stack>
                       </TableCell>
-                      <TableCell align="right">{fmtMoney(r.aportesUSD,"USD")}</TableCell>
-                      <TableCell align="right">{fmtMoney(r.aportesARS,"ARS")}</TableCell>
+                      <TableCell align="right">{fmtMoney(r.aportesUSD, "USD")}</TableCell>
                       <TableCell align="right">{fmtNum(r.ponderado, 0)}</TableCell>
                       <TableCell align="right">{fmtPct(r.participacion)}</TableCell>
                       <TableCell align="right">{totProy.ganancia > 0 ? fmtMoney(r.ganancia, "USD") : "—"}</TableCell>
+                      <TableCell align="right">{totProy.ganancia > 0 && r.aportesUSD > 0 ? fmtPct(r.gananciaPct) : "—"}</TableCell>
+                      <TableCell align="right">
+                        <Typography fontWeight={700}>
+                          {totProy.ganancia > 0 ? fmtMoney(r.totalDevolver, "USD") : fmtMoney(r.aportesUSD, "USD")}
+                        </Typography>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -290,17 +310,15 @@ export default function InversoresPage() {
                     <TableRow>
                       <TableCell>Nombre</TableCell>
                       <TableCell>Contacto</TableCell>
-                      <TableCell>Moneda habitual</TableCell>
                       <TableCell align="right">N° aportes</TableCell>
                       <TableCell align="right">Acciones</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {resumen.map(i => (
+                    {resumen.filter(i => !i.es_faltante).map(i => (
                       <TableRow key={i.id} hover>
                         <TableCell>{i.nombre}</TableCell>
                         <TableCell>{i.contacto || "—"}</TableCell>
-                        <TableCell><Chip size="small" label={i.moneda_habitual} /></TableCell>
                         <TableCell align="right">{i.nAportes}</TableCell>
                         <TableCell align="right">
                           <Tooltip title="Nuevo aporte"><IconButton onClick={() => openNewAp(i.id)}><PaidIcon fontSize="small" /></IconButton></Tooltip>
@@ -353,7 +371,7 @@ export default function InversoresPage() {
                             variant="outlined" />
                         </TableCell>
                         <TableCell align="right">{fmtNum(a.cantidad_m2)}</TableCell>
-                        <TableCell align="right">{fmtMoney(a.monto, a.moneda)}</TableCell>
+                        <TableCell align="right">{fmtMoney(a.monto, "USD")}</TableCell>
                         <TableCell align="right">{fmtNum(a._dias, 0)}</TableCell>
                         <TableCell align="right">{fmtNum(a._ponderado, 0)}</TableCell>
                         <TableCell align="right">{fmtPct(a._participacion)}</TableCell>
@@ -391,13 +409,19 @@ export default function InversoresPage() {
                   centerLabel={totProy.ganancia > 0 ? "Ganancia estim." : "Ponderado total"}
                   segments={resumen
                     .filter(r => r.ponderado > 0)
-                    .map((r, idx) => ({ label: r.nombre, value: r.ponderado, color: PALETTE[idx % PALETTE.length] }))}
+                    .map((r, idx) => ({
+                      label: r.nombre,
+                      value: r.ponderado,
+                      color: r.es_faltante ? "rgba(15,42,74,0.18)" : PALETTE[idx % PALETTE.length],
+                    }))}
                 />
                 <Divider />
                 {resumen.filter(r => r.ponderado > 0).map((r) => (
                   <Box key={r.id}>
                     <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
-                      <Typography fontWeight={600}>{r.nombre}</Typography>
+                      <Typography fontWeight={600} sx={{ fontStyle: r.es_faltante ? "italic" : "normal" }}>
+                        {r.nombre}{r.es_faltante && " (virtual)"}
+                      </Typography>
                       <Typography>
                         {fmtPct(r.participacion)}
                         {totProy.ganancia > 0 && <> · {fmtMoney(r.ganancia, "USD")}</>}
@@ -407,7 +431,7 @@ export default function InversoresPage() {
                       <Box sx={{
                         height: "100%",
                         width: `${Math.min(100, r.participacion)}%`,
-                        bgcolor: "secondary.main",
+                        bgcolor: r.es_faltante ? "rgba(15,42,74,0.35)" : "secondary.main",
                       }} />
                     </Box>
                   </Box>
@@ -428,13 +452,6 @@ export default function InversoresPage() {
               onChange={e => setFormInv({ ...formInv, nombre: e.target.value })} /></Grid>
             <Grid item xs={12}><TextField label="Contacto" fullWidth value={formInv.contacto}
               onChange={e => setFormInv({ ...formInv, contacto: e.target.value })} /></Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField select label="Moneda habitual" fullWidth value={formInv.moneda_habitual}
-                onChange={e => setFormInv({ ...formInv, moneda_habitual: e.target.value })}>
-                <MenuItem value="USD">USD</MenuItem>
-                <MenuItem value="ARS">ARS</MenuItem>
-              </TextField>
-            </Grid>
           </Grid>
         </DialogContent>
         <DialogActions>
@@ -451,10 +468,7 @@ export default function InversoresPage() {
           <Grid container spacing={2}>
             <Grid item xs={12} sm={6}>
               <TextField select label="Inversor" fullWidth required value={formAp.inversor_id}
-                onChange={e => {
-                  const inv = inversores.find(i => i.id === e.target.value);
-                  setFormAp({ ...formAp, inversor_id: e.target.value, moneda: inv?.moneda_habitual ?? formAp.moneda });
-                }}>
+                onChange={e => setFormAp({ ...formAp, inversor_id: e.target.value })}>
                 {inversores.map(i => <MenuItem key={i.id} value={i.id}>{i.nombre}</MenuItem>)}
               </TextField>
             </Grid>
@@ -485,35 +499,27 @@ export default function InversoresPage() {
               </TextField>
             </Grid>
 
-            <Grid item xs={12} sm={3}>
+            <Grid item xs={12} sm={4}>
               <TextField label="Cantidad m²" type="number" fullWidth value={formAp.cantidad_m2}
                 onChange={e => setFormAp({ ...formAp, cantidad_m2: e.target.value })} />
             </Grid>
-            <Grid item xs={12} sm={3}>
-              <TextField label="Costo m²" type="number" fullWidth value={formAp.costo_m2}
+            <Grid item xs={12} sm={4}>
+              <TextField label="Costo m² (USD)" type="number" fullWidth value={formAp.costo_m2}
                 onChange={e => setFormAp({ ...formAp, costo_m2: e.target.value })} />
             </Grid>
-            <Grid item xs={12} sm={3}>
+            <Grid item xs={12} sm={4}>
               <TextField
-                label="Monto"
+                label="Monto (USD)"
                 type="number"
                 fullWidth
                 value={formAp.monto}
-                helperText={montoSugerido ? `Sugerido: ${fmtMoney(montoSugerido, formAp.moneda)}` : " "}
+                helperText={montoSugerido ? `Sugerido: ${fmtMoney(montoSugerido, "USD")}` : " "}
                 onChange={e => setFormAp({ ...formAp, monto: e.target.value })}
                 onFocus={() => {
                   if (formAp.monto === "" && montoSugerido) setFormAp(f => ({ ...f, monto: String(montoSugerido) }));
                 }}
               />
             </Grid>
-            <Grid item xs={12} sm={3}>
-              <TextField select label="Moneda" fullWidth value={formAp.moneda}
-                onChange={e => setFormAp({ ...formAp, moneda: e.target.value })}>
-                <MenuItem value="USD">USD</MenuItem>
-                <MenuItem value="ARS">ARS</MenuItem>
-              </TextField>
-            </Grid>
-
             <Grid item xs={12}>
               <Box sx={{
                 p: 1.5, borderRadius: 2,
@@ -589,12 +595,18 @@ export default function InversoresPage() {
 
 function KPI({ title, value, hint }) {
   return (
-    <Grid item xs={12} sm={6} md={3}>
-      <Card variant="outlined">
-        <CardContent>
-          <Typography variant="caption" color="text.secondary">{title}</Typography>
-          <Typography variant="h6" sx={{ mt: 0.5 }}>{value}</Typography>
-          {hint && <Typography variant="caption" color="text.secondary">{hint}</Typography>}
+    <Grid item xs={12} sm={6} md={3} sx={{ display: "flex" }}>
+      <Card variant="outlined" sx={{ width: "100%", display: "flex", flexDirection: "column" }}>
+        <CardContent sx={{ flexGrow: 1, display: "flex", flexDirection: "column", "&:last-child": { pb: 2 } }}>
+          <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.4 }}>
+            {title}
+          </Typography>
+          <Typography variant="h5" sx={{ mt: 0.5, fontVariantNumeric: "tabular-nums" }}>
+            {value}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: "auto", minHeight: 16 }}>
+            {hint || " "}
+          </Typography>
         </CardContent>
       </Card>
     </Grid>
