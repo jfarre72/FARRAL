@@ -26,8 +26,10 @@ export default function Home() {
       }
       const totUSD = (aportes ?? []).filter(a => a.moneda === "USD").reduce((s,a) => s + Number(a.monto || 0), 0);
       const totARS = (aportes ?? []).filter(a => a.moneda === "ARS").reduce((s,a) => s + Number(a.monto || 0), 0);
-      const m2Vendidos = (aportes ?? []).reduce((s,a) => s + Number(a.cantidad_m2 || 0), 0);
-      const pctVendido = proyecto.m2_totales > 0 ? (m2Vendidos / Number(proyecto.m2_totales)) * 100 : 0;
+      const venta = Number(proyecto.precio_venta_estimado || 0);
+      const costo = Number(proyecto.costo_total_estimado  || 0);
+      const ganancia = venta - costo;
+      const costoM2 = (costo > 0 && Number(proyecto.m2_totales) > 0) ? costo / Number(proyecto.m2_totales) : 0;
       // Avance ponderado por subtareas (mismo criterio que Línea de tiempo)
       const sorted = [...(hitos ?? [])].sort((a, b) => a.orden - b.orden);
       const fraccion = (h) => {
@@ -41,7 +43,7 @@ export default function Home() {
         return s + peso * fraccion(h);
       }, 0));
       setStats({
-        totUSD, totARS, m2Vendidos, pctVendido, avance,
+        totUSD, totARS, venta, costo, ganancia, costoM2, avance,
         nInversores: inversores?.length ?? 0,
         hitos: hitos ?? [],
       });
@@ -86,12 +88,13 @@ export default function Home() {
       </Box>
 
       <Grid container spacing={2}>
-        <KPI title="Avance de obra" value={fmtPct(stats?.avance ?? 0, 0)} hint="último hito completado" />
-        <KPI title="m² vendidos"    value={`${fmtNum(stats?.m2Vendidos ?? 0)} m²`} hint={`de ${fmtNum(proyecto.m2_totales)} totales`} />
-        <KPI title="% vendido"      value={fmtPct(stats?.pctVendido ?? 0)} />
-        <KPI title="Inversores"     value={fmtNum(stats?.nInversores ?? 0, 0)} />
-        <KPI title="Aportes USD"    value={fmtMoney(stats?.totUSD ?? 0, "USD")} />
-        <KPI title="Aportes ARS"    value={fmtMoney(stats?.totARS ?? 0, "ARS")} />
+        <KPI title="Avance de obra"   value={fmtPct(stats?.avance ?? 0, 0)} hint="ponderado por tareas" />
+        <KPI title="Inversores"       value={fmtNum(stats?.nInversores ?? 0, 0)} />
+        <KPI title="Venta estimada"   value={fmtMoney(stats?.venta ?? 0, "USD")} />
+        <KPI title="Costo estimado"   value={fmtMoney(stats?.costo ?? 0, "USD")} hint={`Costo m² ${fmtMoney(stats?.costoM2 ?? 0, "USD")}`} />
+        <KPI title="Ganancia estim."  value={fmtMoney(stats?.ganancia ?? 0, "USD")} />
+        <KPI title="Aportes USD"      value={fmtMoney(stats?.totUSD ?? 0, "USD")} />
+        <KPI title="Aportes ARS"      value={fmtMoney(stats?.totARS ?? 0, "ARS")} />
       </Grid>
 
       <Card>
