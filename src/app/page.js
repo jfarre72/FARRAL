@@ -1,5 +1,5 @@
 "use client";
-import { Card, CardContent, Grid, Typography, Stack, Button, Alert, Box, LinearProgress } from "@mui/material";
+import { Card, CardContent, Grid, Typography, Stack, Button, Alert, Box, LinearProgress, Chip } from "@mui/material";
 import Link from "next/link";
 import { useProjects } from "@/components/ProjectContext";
 import { useEffect, useState } from "react";
@@ -25,11 +25,22 @@ export default function Home() {
         tareas = data ?? [];
       }
       const totUSD = (aportes ?? []).filter(a => a.moneda === "USD").reduce((s,a) => s + Number(a.monto || 0), 0);
-      const totARS = (aportes ?? []).filter(a => a.moneda === "ARS").reduce((s,a) => s + Number(a.monto || 0), 0);
       const venta = Number(proyecto.precio_venta_estimado || 0);
       const costo = Number(proyecto.costo_total_estimado  || 0);
       const ganancia = venta - costo;
       const costoM2 = (costo > 0 && Number(proyecto.m2_totales) > 0) ? costo / Number(proyecto.m2_totales) : 0;
+      const pctRecaudado = costo > 0 ? (totUSD / costo) * 100 : 0;
+      // Rendimiento anualizado del proyecto
+      const diasProy = (() => {
+        if (!proyecto.fecha_inicio || !proyecto.fecha_fin) return 365;
+        const a = new Date(proyecto.fecha_inicio + "T00:00:00");
+        const b = new Date(proyecto.fecha_fin + "T00:00:00");
+        return Math.max(1, Math.round((b - a) / 86400000));
+      })();
+      const roiProy = costo > 0 ? ganancia / costo : 0;
+      const anualProy = (costo > 0 && (1 + roiProy) > 0)
+        ? (Math.pow(1 + roiProy, 365/diasProy) - 1) * 100
+        : null;
       // Avance ponderado por subtareas (mismo criterio que Línea de tiempo)
       const sorted = [...(hitos ?? [])].sort((a, b) => a.orden - b.orden);
       const fraccion = (h) => {
@@ -43,7 +54,8 @@ export default function Home() {
         return s + peso * fraccion(h);
       }, 0));
       setStats({
-        totUSD, totARS, venta, costo, ganancia, costoM2, avance,
+        totUSD, venta, costo, ganancia, costoM2, avance,
+        pctRecaudado, anualProy,
         nInversores: inversores?.length ?? 0,
         hitos: hitos ?? [],
       });
@@ -81,10 +93,29 @@ export default function Home() {
   return (
     <Stack spacing={3}>
       <Box>
-        <Typography variant="h4">{proyecto.nombre}</Typography>
-        {proyecto.descripcion && (
-          <Typography color="text.secondary">{proyecto.descripcion}</Typography>
-        )}
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
+          <Box sx={{ flexGrow: 1 }}>
+            <Typography variant="h4">{proyecto.nombre}</Typography>
+            {proyecto.descripcion && (
+              <Typography color="text.secondary">{proyecto.descripcion}</Typography>
+            )}
+          </Box>
+          <Stack direction="row" spacing={1} flexWrap="wrap">
+            {stats?.anualProy != null && (
+              <Chip
+                color="success"
+                variant="filled"
+                label={`Rendimiento anualizado · ${fmtPct(stats.anualProy, 2)}`}
+                sx={{ fontWeight: 700 }}
+              />
+            )}
+            <Chip
+              color="primary"
+              variant="outlined"
+              label={`Recaudado · ${fmtPct(stats?.pctRecaudado ?? 0, 1)}`}
+            />
+          </Stack>
+        </Stack>
       </Box>
 
       <Grid container spacing={2}>
@@ -92,9 +123,8 @@ export default function Home() {
         <KPI title="Inversores"       value={fmtNum(stats?.nInversores ?? 0, 0)} />
         <KPI title="Venta estimada"   value={fmtMoney(stats?.venta ?? 0, "USD")} />
         <KPI title="Costo estimado"   value={fmtMoney(stats?.costo ?? 0, "USD")} hint={`Costo m² ${fmtMoney(stats?.costoM2 ?? 0, "USD")}`} />
-        <KPI title="Ganancia estim."  value={fmtMoney(stats?.ganancia ?? 0, "USD")} />
-        <KPI title="Aportes USD"      value={fmtMoney(stats?.totUSD ?? 0, "USD")} />
-        <KPI title="Aportes ARS"      value={fmtMoney(stats?.totARS ?? 0, "ARS")} />
+        <KPI title="Ganancia estim."  value={fmtMoney(stats?.ganancia ?? 0, "USD")} hint={stats?.anualProy != null ? `Anualizado ${fmtPct(stats.anualProy, 2)}` : " "} />
+        <KPI title="Aportes USD"      value={fmtMoney(stats?.totUSD ?? 0, "USD")} hint={`${fmtPct(stats?.pctRecaudado ?? 0, 1)} del costo`} />
       </Grid>
 
       <Card>
@@ -121,12 +151,18 @@ export default function Home() {
 
 function KPI({ title, value, hint }) {
   return (
-    <Grid item xs={12} sm={6} md={4} lg={2}>
-      <Card>
-        <CardContent>
-          <Typography variant="caption" color="text.secondary">{title}</Typography>
-          <Typography variant="h5" sx={{ mt: 0.5 }}>{value}</Typography>
-          {hint && <Typography variant="caption" color="text.secondary">{hint}</Typography>}
+    <Grid item xs={12} sm={6} md={4} lg={3} sx={{ display: "flex" }}>
+      <Card sx={{ width: "100%", display: "flex", flexDirection: "column" }}>
+        <CardContent sx={{ flexGrow: 1, display: "flex", flexDirection: "column", "&:last-child": { pb: 2 } }}>
+          <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.4 }}>
+            {title}
+          </Typography>
+          <Typography variant="h5" sx={{ mt: 0.5, fontVariantNumeric: "tabular-nums" }}>
+            {value}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: "auto", minHeight: 16 }}>
+            {hint || " "}
+          </Typography>
         </CardContent>
       </Card>
     </Grid>

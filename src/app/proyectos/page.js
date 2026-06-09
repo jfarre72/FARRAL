@@ -18,6 +18,7 @@ const empty = {
   m2_cubiertos: "", m2_semicubiertos: "", m2_totales: "", m2_terreno: "",
   costo_m2_pozo: "", precio_venta_m2: "",
   precio_venta_estimado: "", costo_total_estimado: "",
+  fecha_inversor_faltante: "",
   fecha_inicio: "", fecha_fin: "",
 };
 
@@ -44,6 +45,7 @@ export default function ProyectosPage() {
       precio_venta_m2: p.precio_venta_m2 ?? "",
       precio_venta_estimado: p.precio_venta_estimado ?? "",
       costo_total_estimado: p.costo_total_estimado ?? "",
+      fecha_inversor_faltante: p.fecha_inversor_faltante ?? "",
       fecha_inicio: p.fecha_inicio ?? "",
       fecha_fin: p.fecha_fin ?? "",
     });
@@ -65,6 +67,7 @@ export default function ProyectosPage() {
       precio_venta_m2: numOrNull(form.precio_venta_m2),
       precio_venta_estimado: numOrNull(form.precio_venta_estimado),
       costo_total_estimado: numOrNull(form.costo_total_estimado),
+      fecha_inversor_faltante: form.fecha_inversor_faltante || null,
       fecha_inicio: form.fecha_inicio || null,
       fecha_fin: form.fecha_fin || null,
     };
@@ -212,6 +215,13 @@ export default function ProyectosPage() {
                     : "—"
                 }
                 helperText="costo total / m² totales" />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField label="Fecha del inversor 'Faltante'" type="date" fullWidth
+                InputLabelProps={{ shrink: true }}
+                value={form.fecha_inversor_faltante}
+                helperText="Desde cuándo se considera el capital faltante para la ponderación"
+                onChange={(e) => setForm({ ...form, fecha_inversor_faltante: e.target.value })} />
             </Grid>
             <Grid item xs={12}>
               <Divider />

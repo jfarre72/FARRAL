@@ -21,6 +21,7 @@ create table if not exists public.proyectos (
   precio_venta_m2 numeric(14,2) default 0,
   precio_venta_estimado numeric(16,2) default 0,
   costo_total_estimado  numeric(16,2) default 0,
+  fecha_inversor_faltante date,
   fecha_inicio    date,
   fecha_fin       date,
   created_at      timestamptz not null default now(),
