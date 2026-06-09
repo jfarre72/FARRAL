@@ -5,15 +5,18 @@ import CssBaseline from "@mui/material/CssBaseline";
 import theme from "@/theme/theme";
 import { ProjectProvider } from "@/components/ProjectContext";
 import AppShell from "@/components/AppShell";
+import AuthGate from "@/components/AuthGate";
 
 export default function Providers({ children }) {
   return (
     <AppRouterCacheProvider>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <ProjectProvider>
-          <AppShell>{children}</AppShell>
-        </ProjectProvider>
+        <AuthGate>
+          <ProjectProvider>
+            <AppShell>{children}</AppShell>
+          </ProjectProvider>
+        </AuthGate>
       </ThemeProvider>
     </AppRouterCacheProvider>
   );

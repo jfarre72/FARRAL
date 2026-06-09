@@ -10,9 +10,11 @@ import AccountBalanceIcon from "@mui/icons-material/AccountBalance";
 import GroupsIcon from "@mui/icons-material/Groups";
 import TimelineIcon from "@mui/icons-material/Timeline";
 import PointOfSaleIcon from "@mui/icons-material/PointOfSale";
+import LogoutIcon from "@mui/icons-material/Logout";
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "@mui/material/styles";
+import { logout } from "@/components/AuthGate";
 import { useProjects } from "@/components/ProjectContext";
 
 const NAV = [
@@ -103,6 +105,11 @@ export default function AppShell({ children }) {
               ))}
             </Select>
           </FormControl>
+          <Tooltip title="Cerrar sesión">
+            <IconButton color="inherit" onClick={logout} sx={{ ml: 1 }}>
+              <LogoutIcon />
+            </IconButton>
+          </Tooltip>
         </Toolbar>
       </AppBar>
 

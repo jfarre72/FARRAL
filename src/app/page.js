@@ -33,6 +33,7 @@ export default function Home() {
       const costo = Number(proyecto.costo_total_estimado  || 0);
       const ganancia = venta - costo;
       const costoM2 = (costo > 0 && Number(proyecto.m2_totales) > 0) ? costo / Number(proyecto.m2_totales) : 0;
+      const ventaM2 = (venta > 0 && Number(proyecto.m2_totales) > 0) ? venta / Number(proyecto.m2_totales) : 0;
       const pctRecaudado = costo > 0 ? (totUSD / costo) * 100 : 0;
       // Rendimiento anualizado del proyecto (fórmula simple: ROI × 365 / días)
       const diasProy = (() => {
@@ -56,7 +57,7 @@ export default function Home() {
         return s + peso * fraccion(h);
       }, 0));
       setStats({
-        totUSD, efectivoUSD, venta, costo, ganancia, costoM2, avance,
+        totUSD, efectivoUSD, venta, costo, ganancia, costoM2, ventaM2, avance,
         pctRecaudado, anualProy,
         nInversores: inversores?.length ?? 0,
         hitos: hitos ?? [],
@@ -123,7 +124,7 @@ export default function Home() {
       <Grid container spacing={2}>
         <KPI title="Avance de obra"   value={fmtPct(stats?.avance ?? 0, 0)} hint="ponderado por tareas" />
         <KPI title="Inversores"       value={fmtNum(stats?.nInversores ?? 0, 0)} />
-        <KPI title="Venta estimada"   value={fmtMoney(stats?.venta ?? 0, "USD")} />
+        <KPI title="Venta estimada"   value={fmtMoney(stats?.venta ?? 0, "USD")} hint={`Precio m² ${fmtMoney(stats?.ventaM2 ?? 0, "USD")}`} />
         <KPI title="Costo estimado"   value={fmtMoney(stats?.costo ?? 0, "USD")} hint={`Costo m² ${fmtMoney(stats?.costoM2 ?? 0, "USD")}`} />
         <KPI title="Ganancia estim."  value={fmtMoney(stats?.ganancia ?? 0, "USD")} hint={stats?.anualProy != null ? `Anualizado ${fmtPct(stats.anualProy, 2)}` : " "} />
         <KPI
