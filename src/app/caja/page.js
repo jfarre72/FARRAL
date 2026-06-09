@@ -44,6 +44,16 @@ export default function CajaPage() {
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
   const [tab, setTab] = useState(0);
+  const [filtroMoneda, setFiltroMoneda] = useState("all");
+  // Presupuestos para imputación
+  const [contratistas, setContratistas] = useState([]);
+  const [presupuestos, setPresupuestos] = useState([]);
+  const [itemsByPres, setItemsByPres] = useState({});
+  // Imputación dentro del form de egreso
+  const [imputarA, setImputarA] = useState(false);
+  const [impContratistaId, setImpContratistaId] = useState("");
+  const [impPresupuestoId, setImpPresupuestoId] = useState("");
+  const [impMontos, setImpMontos] = useState({}); // { item_id: monto }
   const [aportes, setAportes] = useState([]);
   const [inversores, setInversores] = useState([]);
   const [movs, setMovs] = useState([]);
@@ -65,16 +75,28 @@ export default function CajaPage() {
   const reload = async () => {
     if (!proyecto) return;
     setLoading(true);
-    const [r1, r2, r3, r4] = await Promise.all([
+    const [r1, r2, r3, r4, r5, r6, r7] = await Promise.all([
       supabase.from("aportes").select("*").eq("proyecto_id", proyecto.id).order("fecha", { ascending: false }),
       supabase.from("inversores").select("id,nombre").eq("proyecto_id", proyecto.id),
       supabase.from("movimientos_caja").select("*").eq("proyecto_id", proyecto.id).order("fecha", { ascending: false }),
       supabase.from("categorias_egreso").select("nombre").order("nombre"),
+      supabase.from("contratistas").select("id,nombre,rubro").eq("proyecto_id", proyecto.id).order("nombre"),
+      supabase.from("presupuestos").select("id,nombre,contratista_id,moneda,estado").eq("proyecto_id", proyecto.id).order("fecha", { ascending: false }),
+      supabase.from("presupuesto_items").select("id,presupuesto_id,nombre,monto_presupuestado,avance_pct").order("orden"),
     ]);
     setAportes(r1.data ?? []);
     setInversores(r2.data ?? []);
     setMovs(r3.data ?? []);
     setCategorias((r4.data ?? []).map(c => c.nombre));
+    setContratistas(r5.data ?? []);
+    setPresupuestos(r6.data ?? []);
+    // index items por presupuesto
+    const idx = {};
+    for (const it of (r7.data ?? [])) {
+      if (!idx[it.presupuesto_id]) idx[it.presupuesto_id] = [];
+      idx[it.presupuesto_id].push(it);
+    }
+    setItemsByPres(idx);
     setLoading(false);
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
@@ -162,6 +184,56 @@ export default function CajaPage() {
     return [...fromAportes, ...fromMovs].sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
   }, [aportes, movs, inversores]);
 
+  // Lista visible según filtro + delta y saldo running por fila
+  const visible = useMemo(() => {
+    const caja = filtroMoneda;
+    const deltaPara = (row, c) => {
+      const monto = Number(row.monto || 0);
+      if (row.kind === "aporte") return row.moneda === c ? +monto : 0;
+      const mv = row.raw ?? {};
+      if (mv.tipo === "ingreso") return mv.moneda === c ? +monto : 0;
+      if (mv.tipo === "egreso") {
+        if (mv.con_cambio) {
+          let d = 0;
+          if (mv.cambio_moneda_origen === c) d -= Number(mv.cambio_monto_origen || 0);
+          if (mv.moneda === c) {
+            const tc = Number(mv.cambio_tipo_cambio || 0);
+            const monOrigen = Number(mv.cambio_monto_origen || 0);
+            const entrada = mv.cambio_moneda_origen === "USD" ? monOrigen * tc : (tc > 0 ? monOrigen / tc : 0);
+            d += entrada;
+            if (Number(mv.monto || 0) > 0) d -= Number(mv.monto || 0);
+          }
+          return d;
+        }
+        return mv.moneda === c ? -monto : 0;
+      }
+      if (mv.tipo === "cambio") {
+        let d = 0;
+        if (mv.moneda === c) d -= monto;
+        if (mv.moneda_destino === c) d += Number(mv.monto_destino || 0);
+        return d;
+      }
+      return 0;
+    };
+
+    const filtered = unified.filter(row => {
+      if (caja === "all") return true;
+      return deltaPara(row, caja) !== 0;
+    });
+    if (caja === "all") {
+      return filtered.map(r => ({ ...r, _delta: null, _saldo: null }));
+    }
+    const asc = [...filtered].sort((a, b) => a.fecha > b.fecha ? 1 : -1);
+    let saldo = 0;
+    const acc = {};
+    for (const r of asc) {
+      const d = deltaPara(r, caja);
+      saldo += d;
+      acc[r.id] = { delta: d, saldo };
+    }
+    return filtered.map(r => ({ ...r, _delta: acc[r.id]?.delta ?? 0, _saldo: acc[r.id]?.saldo ?? 0 }));
+  }, [unified, filtroMoneda]);
+
   if (!proyecto) return <Alert severity="info">Seleccioná o creá un proyecto para gestionar la caja.</Alert>;
 
   // ----- Cálculos del dialog -----
@@ -187,7 +259,9 @@ export default function CajaPage() {
       moneda: tipo === "cambio" ? "USD" : "ARS",
       moneda_destino: tipo === "cambio" ? "ARS" : "ARS",
     });
-    setEditId(null); setKeepCompPath(null); setFile(null); setErr(null); setOpen(true);
+    setEditId(null); setKeepCompPath(null); setFile(null); setErr(null);
+    setImputarA(false); setImpContratistaId(""); setImpPresupuestoId(""); setImpMontos({});
+    setOpen(true);
   };
 
   const openEdit = (mv) => {
@@ -209,6 +283,27 @@ export default function CajaPage() {
     setKeepCompPath(mv.comprobante_url ?? null);
     setFile(null); setErr(null);
     setDetail(null);
+    // Cargo las imputaciones existentes del movimiento
+    setImputarA(false); setImpContratistaId(""); setImpPresupuestoId(""); setImpMontos({});
+    if (mv.tipo === "egreso") {
+      supabase.from("imputaciones_pago")
+        .select("item_id, monto, presupuesto_items(presupuesto_id, presupuestos(contratista_id))")
+        .eq("movimiento_id", mv.id)
+        .then(({ data }) => {
+          if (!data || data.length === 0) return;
+          const first = data[0];
+          const presId = first.presupuesto_items?.presupuesto_id;
+          const contId = first.presupuesto_items?.presupuestos?.contratista_id;
+          if (presId && contId) {
+            const montos = {};
+            for (const r of data) montos[r.item_id] = String(r.monto || 0);
+            setImputarA(true);
+            setImpContratistaId(contId);
+            setImpPresupuestoId(presId);
+            setImpMontos(montos);
+          }
+        });
+    }
     setOpen(true);
   };
 
@@ -309,13 +404,32 @@ export default function CajaPage() {
     }
 
     let res;
+    let movId = editId;
     if (editId) {
       res = await supabase.from("movimientos_caja").update(payload).eq("id", editId);
     } else {
-      res = await supabase.from("movimientos_caja").insert(payload);
+      res = await supabase.from("movimientos_caja").insert(payload).select("id").single();
+      if (res.data?.id) movId = res.data.id;
     }
+    if (res.error) { setSaving(false); setErr(res.error.message); return; }
+
+    // Sincronizo imputaciones (sólo para egresos)
+    if (form.tipo === "egreso" && movId) {
+      // borro las viejas
+      await supabase.from("imputaciones_pago").delete().eq("movimiento_id", movId);
+      if (imputarA && impPresupuestoId) {
+        const rows = Object.entries(impMontos)
+          .map(([item_id, monto]) => ({ item_id, monto: Number(monto || 0) }))
+          .filter(r => r.monto > 0)
+          .map(r => ({ ...r, movimiento_id: movId }));
+        if (rows.length > 0) {
+          const ins = await supabase.from("imputaciones_pago").insert(rows);
+          if (ins.error) { setSaving(false); setErr("Error guardando imputaciones: " + ins.error.message); return; }
+        }
+      }
+    }
+
     setSaving(false);
-    if (res.error) { setErr(res.error.message); return; }
     setOpen(false); reload();
   };
 
@@ -387,8 +501,21 @@ export default function CajaPage() {
       {tab === 0 && (
         <Card>
           <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
-            {unified.length === 0 ? (
-              <EmptyState text="Aún no hay movimientos." />
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }} flexWrap="wrap" gap={1}>
+              <Typography variant="caption" color="text.secondary">
+                {visible.length} movimiento{visible.length === 1 ? "" : "s"}
+              </Typography>
+              <ToggleButtonGroup
+                exclusive size="small" value={filtroMoneda}
+                onChange={(_, v) => v && setFiltroMoneda(v)}
+              >
+                <ToggleButton value="all">Todas</ToggleButton>
+                <ToggleButton value="USD">Caja USD</ToggleButton>
+                <ToggleButton value="ARS">Caja ARS</ToggleButton>
+              </ToggleButtonGroup>
+            </Stack>
+            {visible.length === 0 ? (
+              <EmptyState text="No hay movimientos en esta vista." />
             ) : (
               <Box sx={{ overflowX: "auto" }}>
                 <Table size="small">
@@ -399,15 +526,23 @@ export default function CajaPage() {
                       <TableCell>Detalle</TableCell>
                       <TableCell>Categoría</TableCell>
                       <TableCell align="right">Monto</TableCell>
+                      {filtroMoneda !== "all" && <TableCell align="right">Saldo</TableCell>}
                       <TableCell>Comprob.</TableCell>
                       <TableCell align="right"></TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {unified.map((m) => (
+                    {visible.map((m) => {
+                      const ingresoColor   = "rgba(30,142,62,0.07)";
+                      const egresoColor    = "rgba(192,57,43,0.05)";
+                      const bg =
+                        m._delta != null
+                          ? (m._delta > 0 ? ingresoColor : m._delta < 0 ? egresoColor : undefined)
+                          : (m.tipo === "ingreso" ? ingresoColor : m.tipo === "egreso" ? egresoColor : undefined);
+                      return (
                       <TableRow
                         key={m.id} hover
-                        sx={{ cursor: "pointer" }}
+                        sx={{ cursor: "pointer", bgcolor: bg }}
                         onClick={() => setDetail(m)}
                       >
                         <TableCell sx={{ whiteSpace: "nowrap" }}>{m.fecha}</TableCell>
@@ -434,14 +569,31 @@ export default function CajaPage() {
                         </TableCell>
                         <TableCell>{m.categoria ? <Chip size="small" label={m.categoria} /> : <Typography variant="body2" color="text.secondary">—</Typography>}</TableCell>
                         <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
-                          <Typography
-                            component="span"
-                            color={m.tipo === "ingreso" ? "success.main" : m.tipo === "egreso" ? "error.main" : "text.primary"}
-                            fontWeight={700}
-                          >
-                            {m.tipo === "egreso" ? "−" : m.tipo === "ingreso" ? "+" : ""}{fmtMoney(m.monto, m.moneda)}
-                          </Typography>
+                          {filtroMoneda === "all" ? (
+                            <Typography
+                              component="span"
+                              color={m.tipo === "ingreso" ? "success.main" : m.tipo === "egreso" ? "error.main" : "text.primary"}
+                              fontWeight={700}
+                            >
+                              {m.tipo === "egreso" ? "−" : m.tipo === "ingreso" ? "+" : ""}{fmtMoney(m.monto, m.moneda)}
+                            </Typography>
+                          ) : (
+                            <Typography
+                              component="span"
+                              color={m._delta > 0 ? "success.main" : m._delta < 0 ? "error.main" : "text.primary"}
+                              fontWeight={700}
+                            >
+                              {m._delta > 0 ? "+" : m._delta < 0 ? "−" : ""}{fmtMoney(Math.abs(m._delta || 0), filtroMoneda)}
+                            </Typography>
+                          )}
                         </TableCell>
+                        {filtroMoneda !== "all" && (
+                          <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                            <Typography component="span" fontWeight={600} sx={{ fontVariantNumeric: "tabular-nums" }}>
+                              {fmtMoney(m._saldo || 0, filtroMoneda)}
+                            </Typography>
+                          </TableCell>
+                        )}
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           {m.comprobante_url
                             ? <Tooltip title="Ver comprobante"><IconButton size="small" component={Link} href={publicUrl(m.comprobante_url)} target="_blank"><ReceiptLongIcon fontSize="small" /></IconButton></Tooltip>
@@ -456,7 +608,8 @@ export default function CajaPage() {
                           ) : <span />}
                         </TableCell>
                       </TableRow>
-                    ))}
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </Box>
@@ -765,6 +918,133 @@ export default function CajaPage() {
                         </Alert>
                       </Stack>
                     )}
+                  </Box>
+                </Grid>
+              )}
+
+              {/* Imputación a presupuesto (egresos) */}
+              {form.tipo === "egreso" && (
+                <Grid item xs={12}>
+                  <Box sx={{
+                    p: 1.5, borderRadius: 2,
+                    border: "1px solid", borderColor: "divider",
+                    bgcolor: "rgba(15,42,74,0.025)",
+                  }}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={imputarA}
+                          onChange={(e) => {
+                            setImputarA(e.target.checked);
+                            if (!e.target.checked) {
+                              setImpContratistaId(""); setImpPresupuestoId(""); setImpMontos({});
+                            }
+                          }}
+                        />
+                      }
+                      label={
+                        <Stack>
+                          <Typography fontWeight={600}>Imputar este pago a un presupuesto</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Vincula este egreso a ítems de un presupuesto para llevar el pagado vs ejecutado.
+                          </Typography>
+                        </Stack>
+                      }
+                      sx={{ alignItems: "flex-start", m: 0 }}
+                    />
+
+                    {imputarA && (() => {
+                      const opcionesPres = presupuestos.filter(p => !impContratistaId || p.contratista_id === impContratistaId);
+                      const items = impPresupuestoId ? (itemsByPres[impPresupuestoId] ?? []) : [];
+                      const sumImp = Object.values(impMontos).reduce((s, v) => s + Number(v || 0), 0);
+                      const totalEgreso = Number(form.monto || 0);
+                      const diff = Math.abs(sumImp - totalEgreso);
+                      const allInOne = (itemId) => {
+                        setImpMontos({ [itemId]: String(totalEgreso) });
+                      };
+                      return (
+                        <Stack spacing={2} sx={{ mt: 2 }}>
+                          <Grid container spacing={2}>
+                            <Grid item xs={12} sm={6}>
+                              <TextField select fullWidth label="Contratista"
+                                value={impContratistaId}
+                                onChange={(e) => {
+                                  setImpContratistaId(e.target.value);
+                                  setImpPresupuestoId("");
+                                  setImpMontos({});
+                                }}
+                              >
+                                {contratistas.length === 0 && <MenuItem value="" disabled>Sin contratistas</MenuItem>}
+                                {contratistas.map(c => <MenuItem key={c.id} value={c.id}>{c.nombre}</MenuItem>)}
+                              </TextField>
+                            </Grid>
+                            <Grid item xs={12} sm={6}>
+                              <TextField select fullWidth label="Presupuesto"
+                                value={impPresupuestoId}
+                                onChange={(e) => { setImpPresupuestoId(e.target.value); setImpMontos({}); }}
+                                disabled={!impContratistaId}
+                              >
+                                {opcionesPres.length === 0 && <MenuItem value="" disabled>Sin presupuestos</MenuItem>}
+                                {opcionesPres.map(p => <MenuItem key={p.id} value={p.id}>{p.nombre} ({p.moneda})</MenuItem>)}
+                              </TextField>
+                            </Grid>
+                          </Grid>
+
+                          {impPresupuestoId && items.length === 0 && (
+                            <Alert severity="warning">Este presupuesto no tiene ítems cargados.</Alert>
+                          )}
+
+                          {items.length > 0 && (
+                            <Box sx={{ overflowX: "auto" }}>
+                              <Table size="small">
+                                <TableHead>
+                                  <TableRow>
+                                    <TableCell>Ítem</TableCell>
+                                    <TableCell align="right">Presupuestado</TableCell>
+                                    <TableCell align="right">Avance %</TableCell>
+                                    <TableCell align="right" sx={{ minWidth: 140 }}>Imputar</TableCell>
+                                  </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                  {items.map(it => (
+                                    <TableRow key={it.id}>
+                                      <TableCell>{it.nombre}</TableCell>
+                                      <TableCell align="right">{fmtMoney(it.monto_presupuestado, form.moneda)}</TableCell>
+                                      <TableCell align="right">{fmtNum(it.avance_pct, 2)}%</TableCell>
+                                      <TableCell align="right">
+                                        <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="flex-end">
+                                          <TextField
+                                            size="small" type="number" sx={{ width: 130 }}
+                                            value={impMontos[it.id] ?? ""}
+                                            onChange={(e) => setImpMontos(prev => ({ ...prev, [it.id]: e.target.value }))}
+                                          />
+                                          {items.length > 1 && (
+                                            <Tooltip title="Imputar todo el egreso a este ítem">
+                                              <IconButton size="small" onClick={() => allInOne(it.id)}><span style={{ fontSize: 14, fontWeight: 700 }}>·</span></IconButton>
+                                            </Tooltip>
+                                          )}
+                                        </Stack>
+                                      </TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </Box>
+                          )}
+
+                          {items.length > 0 && (
+                            <Alert severity={diff < 0.01 ? "success" : "warning"} sx={{ py: 0.5 }}>
+                              Total imputado: <b>{fmtMoney(sumImp, form.moneda)}</b> · Total egreso: <b>{fmtMoney(totalEgreso, form.moneda)}</b>
+                              {diff >= 0.01 && (
+                                <Typography variant="caption" display="block" sx={{ mt: 0.3 }}>
+                                  Diferencia: {fmtMoney(Math.abs(totalEgreso - sumImp), form.moneda)} ({sumImp > totalEgreso ? "te pasaste" : "falta imputar"}).
+                                </Typography>
+                              )}
+                            </Alert>
+                          )}
+                        </Stack>
+                      );
+                    })()}
                   </Box>
                 </Grid>
               )}

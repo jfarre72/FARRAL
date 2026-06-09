@@ -10,6 +10,7 @@ import AccountBalanceIcon from "@mui/icons-material/AccountBalance";
 import GroupsIcon from "@mui/icons-material/Groups";
 import TimelineIcon from "@mui/icons-material/Timeline";
 import PointOfSaleIcon from "@mui/icons-material/PointOfSale";
+import RequestQuoteIcon from "@mui/icons-material/RequestQuote";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -21,8 +22,9 @@ const NAV = [
   { label: "Inicio",          href: "/",            icon: <HomeIcon /> },
   { label: "Proyectos",       href: "/proyectos",   icon: <AccountBalanceIcon /> },
   { label: "Inversores",      href: "/inversores",  icon: <GroupsIcon /> },
-  { label: "Caja",            href: "/caja",        icon: <PointOfSaleIcon /> },
-  { label: "Línea de tiempo", href: "/linea-tiempo",icon: <TimelineIcon /> },
+  { label: "Caja",            href: "/caja",          icon: <PointOfSaleIcon /> },
+  { label: "Presupuestos",    href: "/presupuestos",  icon: <RequestQuoteIcon /> },
+  { label: "Hitos plan",      href: "/linea-tiempo",  icon: <TimelineIcon /> },
 ];
 
 const DRAWER_WIDTH = 240;

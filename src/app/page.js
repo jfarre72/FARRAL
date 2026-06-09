@@ -13,11 +13,40 @@ export default function Home() {
   useEffect(() => {
     if (!proyecto) { setStats(null); return; }
     (async () => {
-      const [{ data: aportes }, { data: hitos }, { data: inversores }] = await Promise.all([
+      const [{ data: aportes }, { data: hitos }, { data: inversores }, { data: movs }] = await Promise.all([
         supabase.from("aportes").select("*").eq("proyecto_id", proyecto.id),
         supabase.from("hitos").select("*").eq("proyecto_id", proyecto.id).order("orden"),
         supabase.from("inversores").select("id").eq("proyecto_id", proyecto.id),
+        supabase.from("movimientos_caja").select("*").eq("proyecto_id", proyecto.id),
       ]);
+      // Saldos de caja
+      let cajaUSD = 0, cajaARS = 0;
+      for (const a of aportes ?? []) {
+        if (a.entra_a_caja === false) continue;
+        const m = Number(a.monto || 0);
+        if (a.moneda === "USD") cajaUSD += m; else cajaARS += m;
+      }
+      for (const mv of movs ?? []) {
+        const m = Number(mv.monto || 0);
+        if (mv.tipo === "ingreso") {
+          if (mv.moneda === "USD") cajaUSD += m; else cajaARS += m;
+        } else if (mv.tipo === "egreso") {
+          if (mv.con_cambio) {
+            const tc = Number(mv.cambio_tipo_cambio || 0);
+            const monOrigen = Number(mv.cambio_monto_origen || 0);
+            if (mv.cambio_moneda_origen === "USD") cajaUSD -= monOrigen; else cajaARS -= monOrigen;
+            const entrada = mv.cambio_moneda_origen === "USD" ? monOrigen * tc : (tc > 0 ? monOrigen / tc : 0);
+            if (mv.moneda === "USD") cajaUSD += entrada; else cajaARS += entrada;
+            if (m > 0) { if (mv.moneda === "USD") cajaUSD -= m; else cajaARS -= m; }
+          } else {
+            if (mv.moneda === "USD") cajaUSD -= m; else cajaARS -= m;
+          }
+        } else if (mv.tipo === "cambio") {
+          const md = Number(mv.monto_destino || 0);
+          if (mv.moneda === "USD") cajaUSD -= m; else cajaARS -= m;
+          if (mv.moneda_destino === "USD") cajaUSD += md; else cajaARS += md;
+        }
+      }
       const hitoIds = (hitos ?? []).map(h => h.id);
       let tareas = [];
       if (hitoIds.length) {
@@ -58,7 +87,7 @@ export default function Home() {
       }, 0));
       setStats({
         totUSD, efectivoUSD, venta, costo, ganancia, costoM2, ventaM2, avance,
-        pctRecaudado, anualProy,
+        pctRecaudado, anualProy, cajaUSD, cajaARS,
         nInversores: inversores?.length ?? 0,
         hitos: hitos ?? [],
       });
@@ -121,21 +150,13 @@ export default function Home() {
         </Stack>
       </Box>
 
-      <Grid container spacing={2}>
-        <KPI title="Avance de obra"   value={fmtPct(stats?.avance ?? 0, 0)} hint="ponderado por tareas" />
-        <KPI title="Inversores"       value={fmtNum(stats?.nInversores ?? 0, 0)} />
-        <KPI title="Venta estimada"   value={fmtMoney(stats?.venta ?? 0, "USD")} hint={`Precio m² ${fmtMoney(stats?.ventaM2 ?? 0, "USD")}`} />
-        <KPI title="Costo estimado"   value={fmtMoney(stats?.costo ?? 0, "USD")} hint={`Costo m² ${fmtMoney(stats?.costoM2 ?? 0, "USD")}`} />
-        <KPI title="Ganancia estim."  value={fmtMoney(stats?.ganancia ?? 0, "USD")} hint={stats?.anualProy != null ? `Anualizado ${fmtPct(stats.anualProy, 2)}` : " "} />
-        <KPI
-          title="Aportes USD"
-          value={fmtMoney(stats?.totUSD ?? 0, "USD")}
-          hint={
-            stats && stats.totUSD !== stats.efectivoUSD
-              ? `Efectivo en caja ${fmtMoney(stats.efectivoUSD, "USD")}`
-              : `${fmtPct(stats?.pctRecaudado ?? 0, 1)} del costo`
-          }
-        />
+      <Grid container spacing={1.5}>
+        <KPI title="Avance"          value={fmtPct(stats?.avance ?? 0, 0)} hint="ponderado por tareas" />
+        <KPI title="Venta estim."    value={fmtMoney(stats?.venta ?? 0, "USD")} hint={`m² ${fmtMoney(stats?.ventaM2 ?? 0, "USD")}`} />
+        <KPI title="Costo estim."    value={fmtMoney(stats?.costo ?? 0, "USD")} hint={`m² ${fmtMoney(stats?.costoM2 ?? 0, "USD")}`} />
+        <KPI title="Ganancia estim." value={fmtMoney(stats?.ganancia ?? 0, "USD")} hint={stats?.anualProy != null ? `Anualizado ${fmtPct(stats.anualProy, 2)}` : " "} />
+        <KPI title="Caja USD"        value={fmtMoney(stats?.cajaUSD ?? 0, "USD")} hint="saldo actual" accent="#1E8E3E" />
+        <KPI title="Caja ARS"        value={fmtMoney(stats?.cajaARS ?? 0, "ARS")} hint="saldo actual" accent="#0F2A4A" />
       </Grid>
 
       <Card>
@@ -160,18 +181,23 @@ export default function Home() {
   );
 }
 
-function KPI({ title, value, hint }) {
+function KPI({ title, value, hint, accent }) {
   return (
-    <Grid item xs={12} sm={6} md={4} lg={3} sx={{ display: "flex" }}>
-      <Card sx={{ width: "100%", display: "flex", flexDirection: "column" }}>
-        <CardContent sx={{ flexGrow: 1, display: "flex", flexDirection: "column", "&:last-child": { pb: 2 } }}>
-          <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.4 }}>
+    <Grid item xs={6} sm={4} md={2} sx={{ display: "flex" }}>
+      <Card sx={{ width: "100%", display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" }}>
+        {accent && <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, bgcolor: accent }} />}
+        <CardContent sx={{ flexGrow: 1, display: "flex", flexDirection: "column", p: 1.5, "&:last-child": { pb: 1.5 } }}>
+          <Typography variant="caption" color="text.secondary"
+            sx={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: 11, lineHeight: 1.3 }}>
             {title}
           </Typography>
-          <Typography variant="h5" sx={{ mt: 0.5, fontVariantNumeric: "tabular-nums" }}>
+          <Typography sx={{
+            mt: 0.5, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+            fontSize: { xs: 18, sm: 19, md: 19, lg: 21 }, lineHeight: 1.2,
+          }}>
             {value}
           </Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ mt: "auto", minHeight: 16 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: "auto", minHeight: 14, fontSize: 11 }}>
             {hint || " "}
           </Typography>
         </CardContent>

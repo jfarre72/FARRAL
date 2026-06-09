@@ -3,7 +3,8 @@ import {
   Card, CardContent, Stack, Typography, Button, Grid, Tabs, Tab, Alert,
   Table, TableBody, TableCell, TableHead, TableRow, IconButton, Dialog,
   DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Box,
-  Chip, Tooltip, Divider, LinearProgress, FormControlLabel, Switch, useMediaQuery
+  Chip, Tooltip, Divider, LinearProgress, FormControlLabel, Switch,
+  TableSortLabel, useMediaQuery
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
@@ -51,6 +52,13 @@ export default function InversoresPage() {
   // What-if: fecha de venta del proyecto editable desde el Resumen.
   // Reemplaza temporalmente a fecha_fin. Persiste por proyecto en localStorage.
   const [fechaVentaOverride, setFechaVentaOverride] = useState("");
+
+  const [orderBy, setOrderBy] = useState("aportesUSD");
+  const [orderDir, setOrderDir] = useState("desc");
+  const handleSort = (col) => {
+    if (orderBy === col) setOrderDir(d => d === "asc" ? "desc" : "asc");
+    else { setOrderBy(col); setOrderDir("desc"); }
+  };
   useEffect(() => {
     if (!proyecto) return;
     const k = `farral.fechaVentaOverride.${proyecto.id}`;
@@ -289,17 +297,30 @@ export default function InversoresPage() {
               <Table size="small">
                 <TableHead>
                   <TableRow>
-                    <TableCell>Inversor</TableCell>
-                    <TableCell align="right">Aporte (USD)</TableCell>
-                    <TableCell align="right">Ponderado</TableCell>
-                    <TableCell align="right">% participación</TableCell>
-                    <TableCell align="right">Ganancia estim.</TableCell>
-                    <TableCell align="right">% ganancia</TableCell>
-                    <TableCell align="right">Total a devolver</TableCell>
+                    <SortHeader col="nombre"         label="Inversor"          orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                    <SortHeader col="aportesUSD"     label="Aporte (USD)"      align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                    <SortHeader col="ponderado"      label="Ponderado"         align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                    <SortHeader col="participacion"  label="% participación"   align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                    <SortHeader col="ganancia"       label="Ganancia estim."   align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                    <SortHeader col="gananciaPct"    label="% ganancia"        align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                    <SortHeader col="totalDevolver"  label="Total a devolver"  align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {resumen.map(r => (
+                  {(() => {
+                    const cmp = (a, b) => {
+                      if (a.es_faltante && !b.es_faltante) return 1;
+                      if (b.es_faltante && !a.es_faltante) return -1;
+                      const av = a[orderBy], bv = b[orderBy];
+                      if (typeof av === "string") {
+                        return orderDir === "asc"
+                          ? String(av || "").localeCompare(String(bv || ""))
+                          : String(bv || "").localeCompare(String(av || ""));
+                      }
+                      return orderDir === "asc" ? Number(av || 0) - Number(bv || 0) : Number(bv || 0) - Number(av || 0);
+                    };
+                    return [...resumen].sort(cmp);
+                  })().map(r => (
                     <TableRow
                       key={r.id} hover
                       sx={r.es_faltante ? { bgcolor: "rgba(15,42,74,0.04)" } : undefined}
@@ -665,5 +686,20 @@ function KPI({ title, value, hint }) {
         </CardContent>
       </Card>
     </Grid>
+  );
+}
+
+function SortHeader({ col, label, align = "left", orderBy, orderDir, onSort }) {
+  const active = orderBy === col;
+  return (
+    <TableCell align={align} sortDirection={active ? orderDir : false}>
+      <TableSortLabel
+        active={active}
+        direction={active ? orderDir : "asc"}
+        onClick={() => onSort(col)}
+      >
+        {label}
+      </TableSortLabel>
+    </TableCell>
   );
 }

@@ -123,7 +123,7 @@ export default function LineaTiempoPage() {
   return (
     <Stack spacing={3}>
       <Box>
-        <Typography variant="h5">Línea de tiempo</Typography>
+        <Typography variant="h5">Hitos plan</Typography>
         <Typography variant="body2">Etapas, tareas y avance del proyecto.</Typography>
       </Box>
 
