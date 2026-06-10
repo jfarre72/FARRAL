@@ -168,8 +168,12 @@ export default function LineaTiempoPage() {
                 const isOpen = expanded[h.id] ?? false;
                 return (
                   <Box key={h.id} sx={{ py: 1.25, px: { xs: 0.5, sm: 1 } }}>
-                    {/* Fila principal: todo en una línea en desktop */}
-                    <Stack direction="row" spacing={1.5} alignItems="center">
+                    {/* Fila principal: toda la fila es clickeable */}
+                    <Stack
+                      direction="row" spacing={1.5} alignItems="center"
+                      sx={{ cursor: "pointer", borderRadius: 2, p: 0.5, "&:hover": { bgcolor: "rgba(15,42,74,0.03)" } }}
+                      onClick={() => setExpanded(p => ({ ...p, [h.id]: !isOpen }))}
+                    >
                       {done
                         ? <CheckCircleIcon color="success" />
                         : <RadioButtonUncheckedIcon sx={{ color: "rgba(15,42,74,0.3)" }} />}
@@ -195,7 +199,7 @@ export default function LineaTiempoPage() {
 
                       {/* Fechas: ocultas en mobile (van en el detalle) */}
                       {!isSm && (
-                        <>
+                        <Box onClick={(e) => e.stopPropagation()} sx={{ display: "flex", gap: 1.5 }}>
                           <TextField
                             label="Estimada" type="date" InputLabelProps={{ shrink: true }}
                             sx={{ width: 165 }}
@@ -210,21 +214,23 @@ export default function LineaTiempoPage() {
                             disabled={savingId === h.id}
                             onChange={(e) => updateHito(h.id, { fecha_real: e.target.value || null })}
                           />
-                        </>
+                        </Box>
                       )}
 
                       {/* Completado SIEMPRE a la derecha */}
-                      <Tooltip title={ts.length > 0 ? "Se completa al tildar todas las tareas" : "Marcar etapa como completada"}>
-                        <span>
-                          <Checkbox
-                            checked={done}
-                            disabled={savingId === h.id || ts.length > 0}
-                            onChange={(e) => updateHito(h.id, { completado: e.target.checked })}
-                          />
-                        </span>
-                      </Tooltip>
+                      <Box onClick={(e) => e.stopPropagation()}>
+                        <Tooltip title={ts.length > 0 ? "Se completa al tildar todas las tareas" : "Marcar etapa como completada"}>
+                          <span>
+                            <Checkbox
+                              checked={done}
+                              disabled={savingId === h.id || ts.length > 0}
+                              onChange={(e) => updateHito(h.id, { completado: e.target.checked })}
+                            />
+                          </span>
+                        </Tooltip>
+                      </Box>
 
-                      <IconButton size="small" onClick={() => setExpanded(p => ({ ...p, [h.id]: !isOpen }))}>
+                      <IconButton size="small" tabIndex={-1} sx={{ pointerEvents: "none" }} onClick={() => setExpanded(p => ({ ...p, [h.id]: !isOpen }))}>
                         {isOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                       </IconButton>
                     </Stack>

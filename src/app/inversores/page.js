@@ -216,17 +216,26 @@ export default function InversoresPage() {
           <Typography variant="h5">Inversores</Typography>
           <Typography variant="body2">Aportes, participación y composición del proyecto.</Typography>
         </Box>
-        <Stack direction="row" spacing={1} sx={{ flexShrink: 0, flexWrap: "wrap" }}>
+        <Stack
+          direction="row" spacing={1} useFlexGap flexWrap="wrap"
+          sx={{ flexShrink: 0, width: { xs: "100%", sm: "auto" } }}
+        >
           {anualProy != null && (
             <Chip
               color="success"
               variant="filled"
               label={`Rendimiento anualizado · ${fmtPct(anualProy, 2)}`}
-              sx={{ fontWeight: 700 }}
+              sx={{ fontWeight: 700, width: { xs: "100%", sm: "auto" } }}
             />
           )}
-          <Button startIcon={<AddIcon />} variant="outlined" onClick={openNewInv}>Nuevo inversor</Button>
-          <Button startIcon={<PaidIcon />} variant="contained" color="secondary"
+          <Button
+            sx={{ flex: { xs: 1, sm: "initial" } }}
+            startIcon={<AddIcon />} variant="outlined" onClick={openNewInv}>
+            Nuevo inversor
+          </Button>
+          <Button
+            sx={{ flex: { xs: 1, sm: "initial" } }}
+            startIcon={<PaidIcon />} variant="contained" color="secondary"
             disabled={inversores.length === 0} onClick={() => openNewAp("")}>
             Registrar aporte
           </Button>
@@ -236,7 +245,7 @@ export default function InversoresPage() {
       {loading && <LinearProgress />}
 
       <Box>
-        <Tabs value={tab} onChange={(_, v) => setTab(v)}>
+        <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>
           <Tab label="Resumen" />
           <Tab label="Inversores" />
           <Tab label="Aportes" />
@@ -671,13 +680,20 @@ export default function InversoresPage() {
 
 function KPI({ title, value, hint }) {
   return (
-    <Grid item xs={12} sm={6} md={3} sx={{ display: "flex" }}>
+    <Grid item xs={6} sm={6} md={3} sx={{ display: "flex" }}>
       <Card variant="outlined" sx={{ width: "100%", display: "flex", flexDirection: "column" }}>
-        <CardContent sx={{ flexGrow: 1, display: "flex", flexDirection: "column", "&:last-child": { pb: 2 } }}>
-          <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.4 }}>
+        <CardContent sx={{
+          flexGrow: 1, display: "flex", flexDirection: "column",
+          p: { xs: 1.2, sm: 2 }, "&:last-child": { pb: { xs: 1.2, sm: 2 } },
+        }}>
+          <Typography variant="caption" color="text.secondary"
+            sx={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: { xs: 10, sm: 11 } }}>
             {title}
           </Typography>
-          <Typography variant="h5" sx={{ mt: 0.5, fontVariantNumeric: "tabular-nums" }}>
+          <Typography sx={{
+            mt: 0.5, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+            fontSize: { xs: 15, sm: 22 }, lineHeight: 1.2, wordBreak: "break-word",
+          }}>
             {value}
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ mt: "auto", minHeight: 16 }}>

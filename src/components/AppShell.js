@@ -69,7 +69,7 @@ export default function AppShell({ children }) {
         position="fixed"
         sx={{ zIndex: theme.zIndex.drawer + 1 }}
       >
-        <Toolbar sx={{ gap: 2 }}>
+        <Toolbar sx={{ gap: { xs: 1, sm: 2 }, px: { xs: 1.5, sm: 3 } }}>
           {!isMd && (
             <IconButton color="inherit" edge="start" onClick={() => setOpen(true)}>
               <MenuIcon />
@@ -80,7 +80,8 @@ export default function AppShell({ children }) {
           <FormControl
             size="small"
             sx={{
-              minWidth: 220,
+              minWidth: { xs: 130, sm: 220 },
+              maxWidth: { xs: 160, sm: "none" },
               "& .MuiOutlinedInput-root": {
                 bgcolor: "rgba(255,255,255,0.08)",
                 color: "white",

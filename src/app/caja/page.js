@@ -469,7 +469,7 @@ export default function CajaPage() {
           <Typography variant="h5">Caja</Typography>
           <Typography variant="body2">Saldos, ingresos, egresos y cambios del proyecto.</Typography>
         </Box>
-        <Stack direction="row" spacing={1} sx={{ flexShrink: 0, flexWrap: "wrap" }}>
+        <Stack direction="row" spacing={1} sx={{ flexShrink: 0, width: { xs: "100%", sm: "auto" }, "& > button": { flex: { xs: 1, sm: "initial" } } }}>
           <Button startIcon={<ArrowUpwardIcon />} variant="outlined" color="success" onClick={() => openNew("ingreso")}>Ingreso</Button>
           <Button startIcon={<SwapHorizIcon />} variant="outlined" color="primary" onClick={() => openNew("cambio")}>Cambio</Button>
           <Button startIcon={<ArrowDownwardIcon />} variant="contained" color="secondary" onClick={() => openNew("egreso")}>Egreso</Button>
@@ -491,7 +491,7 @@ export default function CajaPage() {
       </Grid>
 
       <Box>
-        <Tabs value={tab} onChange={(_, v) => setTab(v)}>
+        <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>
           <Tab label="Movimientos" />
           <Tab label="Egresos por categoría" />
         </Tabs>
@@ -501,17 +501,22 @@ export default function CajaPage() {
       {tab === 0 && (
         <Card>
           <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }} flexWrap="wrap" gap={1}>
+            <Stack
+              direction={{ xs: "column", sm: "row" }}
+              justifyContent="space-between" alignItems={{ xs: "stretch", sm: "center" }}
+              sx={{ mb: 1.5 }} spacing={1}
+            >
               <Typography variant="caption" color="text.secondary">
                 {visible.length} movimiento{visible.length === 1 ? "" : "s"}
               </Typography>
               <ToggleButtonGroup
                 exclusive size="small" value={filtroMoneda}
                 onChange={(_, v) => v && setFiltroMoneda(v)}
+                sx={{ width: { xs: "100%", sm: "auto" }, "& > button": { flex: { xs: 1, sm: "initial" } } }}
               >
                 <ToggleButton value="all">Todas</ToggleButton>
-                <ToggleButton value="USD">Caja USD</ToggleButton>
-                <ToggleButton value="ARS">Caja ARS</ToggleButton>
+                <ToggleButton value="USD">USD</ToggleButton>
+                <ToggleButton value="ARS">ARS</ToggleButton>
               </ToggleButtonGroup>
             </Stack>
             {visible.length === 0 ? (

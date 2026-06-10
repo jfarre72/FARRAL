@@ -257,7 +257,7 @@ export default function PresupuestosPage() {
           <Typography variant="h5">Presupuestos</Typography>
           <Typography variant="body2">Contratistas, ítems, avance y pagos imputados.</Typography>
         </Box>
-        <Stack direction="row" spacing={1} sx={{ flexShrink: 0, flexWrap: "wrap" }}>
+        <Stack direction="row" spacing={1} sx={{ flexShrink: 0, width: { xs: "100%", sm: "auto" }, "& > button": { flex: { xs: 1, sm: "initial" } } }}>
           <Button startIcon={<PersonAddAlt1Icon />} variant="outlined" onClick={openNewCont}>
             Nuevo contratista
           </Button>
@@ -271,7 +271,7 @@ export default function PresupuestosPage() {
       {loading && <LinearProgress />}
 
       <Box>
-        <Tabs value={tab} onChange={(_, v) => setTab(v)}>
+        <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>
           <Tab label="Presupuestos" />
           <Tab label="Resumen por contratista" />
           <Tab label="Contratistas" />

@@ -123,16 +123,16 @@ export default function Home() {
   }
 
   return (
-    <Stack spacing={3}>
+    <Stack spacing={{ xs: 2, sm: 3 }}>
       <Box>
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
-          <Box sx={{ flexGrow: 1 }}>
-            <Typography variant="h4">{proyecto.nombre}</Typography>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={{ xs: 1, sm: 1 }} alignItems={{ xs: "flex-start", sm: "center" }}>
+          <Box sx={{ flexGrow: 1, width: "100%" }}>
+            <Typography variant="h4" sx={{ fontSize: { xs: 24, sm: 32 } }}>{proyecto.nombre}</Typography>
             {proyecto.descripcion && (
               <Typography color="text.secondary">{proyecto.descripcion}</Typography>
             )}
           </Box>
-          <Stack direction="row" spacing={1} flexWrap="wrap">
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
             {stats?.anualProy != null && (
               <Chip
                 color="success"
@@ -186,18 +186,23 @@ function KPI({ title, value, hint, accent }) {
     <Grid item xs={6} sm={4} md={2} sx={{ display: "flex" }}>
       <Card sx={{ width: "100%", display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" }}>
         {accent && <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, bgcolor: accent }} />}
-        <CardContent sx={{ flexGrow: 1, display: "flex", flexDirection: "column", p: 1.5, "&:last-child": { pb: 1.5 } }}>
+        <CardContent sx={{
+          flexGrow: 1, display: "flex", flexDirection: "column",
+          p: { xs: 1.2, sm: 1.5 },
+          "&:last-child": { pb: { xs: 1.2, sm: 1.5 } },
+        }}>
           <Typography variant="caption" color="text.secondary"
-            sx={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: 11, lineHeight: 1.3 }}>
+            sx={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: { xs: 10, sm: 11 }, lineHeight: 1.25 }}>
             {title}
           </Typography>
           <Typography sx={{
             mt: 0.5, fontWeight: 700, fontVariantNumeric: "tabular-nums",
-            fontSize: { xs: 18, sm: 19, md: 19, lg: 21 }, lineHeight: 1.2,
+            fontSize: { xs: 15, sm: 18, md: 19, lg: 21 }, lineHeight: 1.2,
+            wordBreak: "break-word",
           }}>
             {value}
           </Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ mt: "auto", minHeight: 14, fontSize: 11 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: "auto", minHeight: 14, fontSize: { xs: 10, sm: 11 } }}>
             {hint || " "}
           </Typography>
         </CardContent>
