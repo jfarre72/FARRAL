@@ -21,6 +21,11 @@ import { fmtMoney, fmtNum } from "@/components/Money";
 
 const BUCKET = "comprobantes";
 
+const ETAPAS_DEFAULT = [
+  "Inicio", "Cimentación", "Estructura",
+  "Obra cerrada", "Instalaciones + revoques", "Terminada",
+];
+
 const emptyMov = {
   tipo: "egreso",
   fecha: new Date().toISOString().slice(0, 10),
@@ -28,6 +33,7 @@ const emptyMov = {
   moneda: "ARS",
   monto: "",
   categoria: "",
+  etapa: "",
   descripcion: "",
   // Cambio integrado dentro de egreso:
   con_cambio: false,
@@ -58,6 +64,7 @@ export default function CajaPage() {
   const [inversores, setInversores] = useState([]);
   const [movs, setMovs] = useState([]);
   const [categorias, setCategorias] = useState([]);
+  const [hitos, setHitos] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Dialog principal (crear / editar mov)
@@ -75,7 +82,7 @@ export default function CajaPage() {
   const reload = async () => {
     if (!proyecto) return;
     setLoading(true);
-    const [r1, r2, r3, r4, r5, r6, r7] = await Promise.all([
+    const [r1, r2, r3, r4, r5, r6, r7, r8] = await Promise.all([
       supabase.from("aportes").select("*").eq("proyecto_id", proyecto.id).order("fecha", { ascending: false }),
       supabase.from("inversores").select("id,nombre").eq("proyecto_id", proyecto.id),
       supabase.from("movimientos_caja").select("*").eq("proyecto_id", proyecto.id).order("fecha", { ascending: false }),
@@ -83,6 +90,7 @@ export default function CajaPage() {
       supabase.from("contratistas").select("id,nombre,rubro").eq("proyecto_id", proyecto.id).order("nombre"),
       supabase.from("presupuestos").select("id,nombre,contratista_id,moneda,estado").eq("proyecto_id", proyecto.id).order("fecha", { ascending: false }),
       supabase.from("presupuesto_items").select("id,presupuesto_id,nombre,monto_presupuestado,avance_pct").order("orden"),
+      supabase.from("hitos").select("nombre,orden").eq("proyecto_id", proyecto.id).order("orden"),
     ]);
     setAportes(r1.data ?? []);
     setInversores(r2.data ?? []);
@@ -90,6 +98,7 @@ export default function CajaPage() {
     setCategorias((r4.data ?? []).map(c => c.nombre));
     setContratistas(r5.data ?? []);
     setPresupuestos(r6.data ?? []);
+    setHitos((r8.data ?? []).map(h => h.nombre));
     // index items por presupuesto
     const idx = {};
     for (const it of (r7.data ?? [])) {
@@ -155,6 +164,26 @@ export default function CajaPage() {
       .sort((a, b) => (b.ARS + b.USD) - (a.ARS + a.USD));
   }, [movs]);
 
+  // ----- Egresos por etapa -----
+  const porEtapa = useMemo(() => {
+    const orden = (hitos.length > 0 ? hitos : ETAPAS_DEFAULT);
+    const ordenIdx = Object.fromEntries(orden.map((n, i) => [n, i]));
+    const map = {};
+    for (const mv of movs) {
+      if (mv.tipo !== "egreso") continue;
+      const k = mv.etapa || "Sin etapa";
+      if (!map[k]) map[k] = { ARS: 0, USD: 0, n: 0 };
+      map[k][mv.moneda] += Number(mv.monto || 0);
+      map[k].n += 1;
+    }
+    return Object.entries(map).map(([etapa, v]) => ({ etapa, ...v }))
+      .sort((a, b) => {
+        if (a.etapa === "Sin etapa") return 1;
+        if (b.etapa === "Sin etapa") return -1;
+        return (ordenIdx[a.etapa] ?? 999) - (ordenIdx[b.etapa] ?? 999);
+      });
+  }, [movs, hitos]);
+
   // ----- Listado unificado -----
   const invName = (id) => inversores.find(i => i.id === id)?.nombre ?? "—";
   const unified = useMemo(() => {
@@ -174,7 +203,7 @@ export default function CajaPage() {
         ? `Cambio ${mv.moneda} → ${mv.moneda_destino} @ ${fmtNum(mv.tipo_cambio, 2)}`
         : (mv.descripcion || (mv.tipo === "ingreso" ? "Ingreso" : "Egreso")),
       observacion: mv.descripcion ?? null,
-      categoria: mv.categoria, comprobante_url: mv.comprobante_url, raw: mv,
+      categoria: mv.categoria, etapa: mv.etapa, comprobante_url: mv.comprobante_url, raw: mv,
       moneda_destino: mv.moneda_destino, monto_destino: mv.monto_destino,
       con_cambio: mv.con_cambio,
       cambio_moneda_origen: mv.cambio_moneda_origen,
@@ -272,6 +301,7 @@ export default function CajaPage() {
       moneda: mv.moneda ?? "ARS",
       monto: mv.monto ?? "",
       categoria: mv.categoria ?? "",
+      etapa: mv.etapa ?? "",
       descripcion: mv.descripcion ?? "",
       con_cambio: !!mv.con_cambio,
       cambio_moneda_origen: mv.cambio_moneda_origen ?? "USD",
@@ -373,6 +403,7 @@ export default function CajaPage() {
         moneda: form.moneda,
         monto: monto,
         categoria: null,
+        etapa: null,
         descripcion: form.descripcion || null,
         comprobante_url,
         moneda_destino: form.moneda_destino,
@@ -391,6 +422,7 @@ export default function CajaPage() {
         moneda: form.moneda,
         monto: monto,
         categoria: form.tipo === "egreso" ? (categoriaFinal || null) : null,
+        etapa: form.etapa || null,
         descripcion: form.descripcion || null,
         comprobante_url,
         moneda_destino: null,
@@ -479,7 +511,7 @@ export default function CajaPage() {
       {loading && <LinearProgress />}
 
       {/* Saldos */}
-      <Grid container spacing={2}>
+      <Grid container spacing={2} justifyContent="center">
         <Grid item xs={12} sm={6}>
           <SaldoCard label="Saldo caja USD" saldo={saldos.usd} currency="USD"
             ingresos={saldos.ingUSD} egresos={saldos.egrUSD} accent="#1E8E3E" />
@@ -494,6 +526,7 @@ export default function CajaPage() {
         <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>
           <Tab label="Movimientos" />
           <Tab label="Egresos por categoría" />
+          <Tab label="Egresos por etapa" />
         </Tabs>
         <Divider />
       </Box>
@@ -572,7 +605,14 @@ export default function CajaPage() {
                             </Typography>
                           )}
                         </TableCell>
-                        <TableCell>{m.categoria ? <Chip size="small" label={m.categoria} /> : <Typography variant="body2" color="text.secondary">—</Typography>}</TableCell>
+                        <TableCell>
+                          {(m.categoria || m.etapa) ? (
+                            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                              {m.categoria && <Chip size="small" label={m.categoria} />}
+                              {m.etapa && <Chip size="small" label={m.etapa} variant="outlined" color="primary" />}
+                            </Stack>
+                          ) : <Typography variant="body2" color="text.secondary">—</Typography>}
+                        </TableCell>
                         <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
                           {filtroMoneda === "all" ? (
                             <Typography
@@ -654,6 +694,71 @@ export default function CajaPage() {
         </Card>
       )}
 
+      {tab === 2 && (
+        <Card>
+          <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
+            {porEtapa.length === 0 ? (
+              <EmptyState text="Aún no hay egresos asociados a una etapa." />
+            ) : (() => {
+              const totARS = porEtapa.reduce((s, e) => s + e.ARS, 0);
+              const totUSD = porEtapa.reduce((s, e) => s + e.USD, 0);
+              return (
+                <Box sx={{ overflowX: "auto" }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Etapa</TableCell>
+                        <TableCell align="right"># egresos</TableCell>
+                        <TableCell align="right">Total ARS</TableCell>
+                        <TableCell align="right">Total USD</TableCell>
+                        <TableCell align="right">% del total (ARS)</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {porEtapa.map((e) => {
+                        const pctARS = totARS > 0 ? (e.ARS / totARS) * 100 : 0;
+                        return (
+                          <TableRow key={e.etapa} hover>
+                            <TableCell>
+                              <Chip
+                                size="small"
+                                label={e.etapa}
+                                color={e.etapa === "Sin etapa" ? "default" : "primary"}
+                                variant={e.etapa === "Sin etapa" ? "outlined" : "filled"}
+                              />
+                            </TableCell>
+                            <TableCell align="right">{e.n}</TableCell>
+                            <TableCell align="right">{e.ARS ? fmtMoney(e.ARS, "ARS") : "—"}</TableCell>
+                            <TableCell align="right">{e.USD ? fmtMoney(e.USD, "USD") : "—"}</TableCell>
+                            <TableCell align="right">
+                              {e.ARS > 0 ? (
+                                <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}>
+                                  <Box sx={{ width: 80, height: 6, bgcolor: "rgba(15,42,74,0.08)", borderRadius: 3, overflow: "hidden" }}>
+                                    <Box sx={{ height: "100%", width: `${Math.min(100, pctARS)}%`, bgcolor: "secondary.main" }} />
+                                  </Box>
+                                  <Typography variant="caption" color="text.secondary">{pctARS.toFixed(1)}%</Typography>
+                                </Box>
+                              ) : "—"}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                      <TableRow sx={{ bgcolor: "rgba(15,42,74,0.04)" }}>
+                        <TableCell sx={{ fontWeight: 700 }}>Total</TableCell>
+                        <TableCell />
+                        <TableCell align="right" sx={{ fontWeight: 700 }}>{totARS ? fmtMoney(totARS, "ARS") : "—"}</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700 }}>{totUSD ? fmtMoney(totUSD, "USD") : "—"}</TableCell>
+                        <TableCell />
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </Box>
+              );
+            })()}
+          </CardContent>
+        </Card>
+      )}
+
       {/* DETAIL DIALOG */}
       <Dialog open={!!detail} onClose={() => setDetail(null)} fullWidth maxWidth="sm" fullScreen={fullScreen}>
         <DialogTitle>Detalle del movimiento</DialogTitle>
@@ -665,6 +770,7 @@ export default function CajaPage() {
               <DetailRow label="Detalle" value={detail.detalle} />
               {detail.observacion && <DetailRow label="Observación" value={detail.observacion} />}
               {detail.categoria && <DetailRow label="Categoría" value={<Chip size="small" label={detail.categoria} />} />}
+              {detail.etapa && <DetailRow label="Etapa" value={<Chip size="small" color="primary" variant="outlined" label={detail.etapa} />} />}
               <DetailRow
                 label="Monto"
                 value={
@@ -839,6 +945,21 @@ export default function CajaPage() {
                         helperText="Escribí una nueva para crearla" />
                     )}
                   />
+                </Grid>
+              )}
+
+              {form.tipo === "egreso" && (
+                <Grid item xs={12} sm={6}>
+                  <TextField select label="Etapa" fullWidth
+                    value={form.etapa}
+                    onChange={e => setForm({ ...form, etapa: e.target.value })}
+                    helperText="Asociar a una etapa de obra"
+                  >
+                    <MenuItem value="">(Sin etapa)</MenuItem>
+                    {(hitos.length > 0 ? hitos : ETAPAS_DEFAULT).map(et => (
+                      <MenuItem key={et} value={et}>{et}</MenuItem>
+                    ))}
+                  </TextField>
                 </Grid>
               )}
 

@@ -231,6 +231,7 @@ create table if not exists public.movimientos_caja (
   moneda          text not null check (moneda in ('USD','ARS')),
   monto           numeric(16,2) not null default 0,
   categoria       text,
+  etapa           text,
   descripcion     text,
   comprobante_url text,
   moneda_destino  text check (moneda_destino in ('USD','ARS')),

@@ -150,7 +150,7 @@ export default function Home() {
         </Stack>
       </Box>
 
-      <Grid container spacing={1.5}>
+      <Grid container spacing={1.5} justifyContent="center">
         <KPI title="Avance"          value={fmtPct(stats?.avance ?? 0, 0)} hint="ponderado por tareas" />
         <KPI title="Venta estim."    value={fmtMoney(stats?.venta ?? 0, "USD")} hint={`m² ${fmtMoney(stats?.ventaM2 ?? 0, "USD")}`} />
         <KPI title="Costo estim."    value={fmtMoney(stats?.costo ?? 0, "USD")} hint={`m² ${fmtMoney(stats?.costoM2 ?? 0, "USD")}`} />
