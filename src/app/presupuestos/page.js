@@ -13,6 +13,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import PersonAddAlt1Icon from "@mui/icons-material/PersonAddAlt1";
 import RequestQuoteIcon from "@mui/icons-material/RequestQuote";
+import PrintIcon from "@mui/icons-material/Print";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
@@ -72,13 +73,23 @@ export default function PresupuestosPage() {
     const presIds = new Set((r2.data ?? []).map(p => p.id));
     const localItems = allItems.filter(it => presIds.has(it.presupuesto_id));
     setItems(localItems);
-    // Imputaciones por ítem
+    // Imputaciones por ítem + movimientos de caja asociados
     const itemIds = localItems.map(i => i.id);
     if (itemIds.length > 0) {
       const { data: imp } = await supabase.from("imputaciones_pago")
-        .select("item_id, monto")
+        .select("id, item_id, monto, movimiento_id")
         .in("item_id", itemIds);
-      setImputaciones(imp ?? []);
+      const impArr = imp ?? [];
+      const movIds = Array.from(new Set(impArr.map(r => r.movimiento_id).filter(Boolean)));
+      let movMap = {};
+      if (movIds.length > 0) {
+        const { data: mv } = await supabase.from("movimientos_caja")
+          .select("id, fecha, descripcion, moneda, monto, categoria, comprobante_url")
+          .in("id", movIds);
+        for (const m of (mv ?? [])) movMap[m.id] = m;
+      }
+      // Enriquezco cada imputación con el movimiento
+      setImputaciones(impArr.map(r => ({ ...r, movimiento: movMap[r.movimiento_id] ?? null })));
     } else {
       setImputaciones([]);
     }
@@ -99,6 +110,55 @@ export default function PresupuestosPage() {
 
   const itemsDe = (presId) => items.filter(it => it.presupuesto_id === presId);
   const contratistaName = (id) => contratistas.find(c => c.id === id)?.nombre ?? "—";
+
+  // Imputaciones agrupadas por presupuesto (cada fila = un movimiento × presupuesto)
+  // Devuelve una lista cronológica de pagos para el presupuesto indicado.
+  const pagosDePresupuesto = (presId) => {
+    const its = itemsDe(presId);
+    const itemIds = new Set(its.map(i => i.id));
+    const itemName = (id) => its.find(i => i.id === id)?.nombre ?? "—";
+    // group by movimiento_id
+    const byMov = {};
+    for (const r of imputaciones) {
+      if (!itemIds.has(r.item_id)) continue;
+      const mid = r.movimiento_id;
+      if (!byMov[mid]) byMov[mid] = { movimiento_id: mid, mov: r.movimiento, total: 0, items: [] };
+      byMov[mid].total += Number(r.monto || 0);
+      byMov[mid].items.push({ nombre: itemName(r.item_id), monto: Number(r.monto || 0) });
+    }
+    return Object.values(byMov)
+      .filter(p => p.mov)
+      .sort((a, b) => (a.mov.fecha < b.mov.fecha ? -1 : 1));
+  };
+
+  // Imputaciones para todos los presupuestos de un contratista (vista global)
+  const pagosDeContratista = (contId) => {
+    const presIds = presupuestos.filter(p => p.contratista_id === contId).map(p => p.id);
+    const presIdsSet = new Set(presIds);
+    const itemsCont = items.filter(it => presIdsSet.has(it.presupuesto_id));
+    const itemMap = {};
+    for (const it of itemsCont) itemMap[it.id] = it;
+    const presMap = {};
+    for (const p of presupuestos) presMap[p.id] = p;
+    const byMov = {};
+    for (const r of imputaciones) {
+      const it = itemMap[r.item_id];
+      if (!it) continue;
+      const key = `${r.movimiento_id}__${it.presupuesto_id}`;
+      if (!byMov[key]) byMov[key] = {
+        movimiento_id: r.movimiento_id,
+        presupuesto_id: it.presupuesto_id,
+        presupuesto_nombre: presMap[it.presupuesto_id]?.nombre ?? "—",
+        moneda: presMap[it.presupuesto_id]?.moneda ?? "ARS",
+        mov: r.movimiento, total: 0, items: [],
+      };
+      byMov[key].total += Number(r.monto || 0);
+      byMov[key].items.push({ nombre: itemMap[r.item_id]?.nombre ?? "—", monto: Number(r.monto || 0) });
+    }
+    return Object.values(byMov)
+      .filter(p => p.mov)
+      .sort((a, b) => (a.mov.fecha < b.mov.fecha ? -1 : 1));
+  };
 
   // Cálculos por presupuesto
   const calcPresupuesto = (p) => {
@@ -247,6 +307,167 @@ export default function PresupuestosPage() {
     if (error) { alert(error.message); reload(); }
   };
 
+  // --- Estado del Dialog de detalle por contratista ---
+  const [detalleCont, setDetalleCont] = useState(null);
+
+  // --- Construir HTML imprimible ---
+  const htmlHeader = (titulo, sub) => `
+    <div class="head">
+      <div>
+        <h1><span style="color:#0F2A4A">FARRAL</span><span class="accent">APP</span></h1>
+        <div style="font-size:18px;font-weight:700;margin-top:8px">${escapeHtml(titulo)}</div>
+        ${sub ? `<div class="muted" style="margin-top:2px">${escapeHtml(sub)}</div>` : ""}
+      </div>
+      <div class="meta">
+        <div><b>${escapeHtml(proyecto?.nombre ?? "—")}</b></div>
+        <div>${new Date().toLocaleDateString("es-AR")}</div>
+      </div>
+    </div>
+  `;
+
+  const htmlPagosPresupuesto = (p) => {
+    const its = itemsDe(p.id);
+    const k = calcPresupuesto(p);
+    const pagos = pagosDePresupuesto(p.id);
+    const moneda = p.moneda;
+    const cont = contratistas.find(c => c.id === p.contratista_id);
+    let saldo = k.tot;
+    const filasPagos = pagos.map(pg => {
+      saldo -= pg.total;
+      const detalle = pg.items.map(i => `${escapeHtml(i.nombre)}: ${fmtMoneyHtml(i.monto, moneda)}`).join("<br>");
+      return `<tr>
+        <td>${escapeHtml(pg.mov.fecha)}</td>
+        <td>${escapeHtml(pg.mov.descripcion || "")}<div class="muted">${detalle}</div></td>
+        <td class="right neg">−${fmtMoneyHtml(pg.total, moneda)}</td>
+        <td class="right">${fmtMoneyHtml(saldo, moneda)}</td>
+      </tr>`;
+    }).join("");
+    const filasItems = its.map(it => {
+      const pres = Number(it.monto_presupuestado || 0);
+      const av = Number(it.avance_pct || 0);
+      const valAv = pres * av / 100;
+      const pag = pagadoPorItem[it.id] || 0;
+      return `<tr>
+        <td>${escapeHtml(it.nombre)}${it.etapa ? `<div class="muted">${escapeHtml(it.etapa)}</div>` : ""}</td>
+        <td class="right">${fmtMoneyHtml(pres, moneda)}</td>
+        <td class="right">${av}%</td>
+        <td class="right">${fmtMoneyHtml(valAv, moneda)}</td>
+        <td class="right">${fmtMoneyHtml(pag, moneda)}</td>
+        <td class="right">${fmtMoneyHtml(pres - pag, moneda)}</td>
+      </tr>`;
+    }).join("");
+    return `
+      ${htmlHeader(p.nombre, `${cont?.nombre ?? ""} · ${p.fecha} · ${moneda}`)}
+      <div class="kpis">
+        <div class="kpi"><div class="label">Total presupuesto</div><div class="value">${fmtMoneyHtml(k.tot, moneda)}</div></div>
+        <div class="kpi"><div class="label">Avance valorizado</div><div class="value">${fmtMoneyHtml(k.valAvance, moneda)}</div></div>
+        <div class="kpi"><div class="label">Pagado</div><div class="value">${fmtMoneyHtml(k.pagado, moneda)}</div></div>
+        <div class="kpi"><div class="label">Saldo pendiente</div><div class="value">${fmtMoneyHtml(k.saldo, moneda)}</div></div>
+      </div>
+      ${p.observaciones ? `<div class="muted" style="margin-top:8px">${escapeHtml(p.observaciones)}</div>` : ""}
+      <h2>Ítems del presupuesto</h2>
+      ${its.length === 0 ? `<div class="muted">Sin ítems.</div>` : `<table>
+        <thead><tr>
+          <th>Ítem</th><th class="right">Presupuestado</th><th class="right">Avance %</th>
+          <th class="right">Valor avance</th><th class="right">Pagado</th><th class="right">Saldo</th>
+        </tr></thead>
+        <tbody>${filasItems}</tbody>
+      </table>`}
+      <h2>Historial de pagos</h2>
+      ${pagos.length === 0
+        ? `<div class="muted">No hay pagos imputados a este presupuesto.</div>`
+        : `<table>
+          <thead><tr>
+            <th>Fecha</th><th>Detalle del pago</th><th class="right">Monto</th><th class="right">Saldo restante</th>
+          </tr></thead>
+          <tbody>${filasPagos}
+            <tr class="totalrow">
+              <td colspan="2">Total pagado</td>
+              <td class="right neg">−${fmtMoneyHtml(k.pagado, moneda)}</td>
+              <td class="right">${fmtMoneyHtml(k.saldo, moneda)}</td>
+            </tr>
+          </tbody>
+        </table>`}
+    `;
+  };
+
+  const htmlPagosContratista = (c) => {
+    const pres = presupuestos.filter(p => p.contratista_id === c.id);
+    const pagos = pagosDeContratista(c.id);
+    // Totales por moneda
+    const totalesPorMoneda = {};
+    for (const p of pres) {
+      const k = calcPresupuesto(p);
+      const m = p.moneda;
+      if (!totalesPorMoneda[m]) totalesPorMoneda[m] = { tot: 0, valAvance: 0, pagado: 0, saldo: 0 };
+      totalesPorMoneda[m].tot += k.tot;
+      totalesPorMoneda[m].valAvance += k.valAvance;
+      totalesPorMoneda[m].pagado += k.pagado;
+      totalesPorMoneda[m].saldo += k.saldo;
+    }
+    // Saldo running por moneda
+    const saldoMoneda = {};
+    for (const m of Object.keys(totalesPorMoneda)) saldoMoneda[m] = totalesPorMoneda[m].tot;
+
+    const filasPagos = pagos.map(pg => {
+      saldoMoneda[pg.moneda] = (saldoMoneda[pg.moneda] ?? 0) - pg.total;
+      const detalle = pg.items.map(i => `${escapeHtml(i.nombre)}: ${fmtMoneyHtml(i.monto, pg.moneda)}`).join("<br>");
+      return `<tr>
+        <td>${escapeHtml(pg.mov.fecha)}</td>
+        <td>${escapeHtml(pg.presupuesto_nombre)}</td>
+        <td>${escapeHtml(pg.mov.descripcion || "")}<div class="muted">${detalle}</div></td>
+        <td class="right neg">−${fmtMoneyHtml(pg.total, pg.moneda)}</td>
+        <td class="right">${fmtMoneyHtml(saldoMoneda[pg.moneda] ?? 0, pg.moneda)}</td>
+      </tr>`;
+    }).join("");
+
+    const filasPres = pres.map(p => {
+      const k = calcPresupuesto(p);
+      return `<tr>
+        <td>${escapeHtml(p.nombre)}<div class="muted">${escapeHtml(p.fecha)} · ${escapeHtml(p.estado)}</div></td>
+        <td>${escapeHtml(p.moneda)}</td>
+        <td class="right">${fmtMoneyHtml(k.tot, p.moneda)}</td>
+        <td class="right">${fmtMoneyHtml(k.valAvance, p.moneda)}</td>
+        <td class="right">${fmtMoneyHtml(k.pagado, p.moneda)}</td>
+        <td class="right bold">${fmtMoneyHtml(k.saldo, p.moneda)}</td>
+      </tr>`;
+    }).join("");
+
+    const kpisHtml = Object.entries(totalesPorMoneda).map(([m, t]) => `
+      <div class="kpi"><div class="label">Total ${m}</div><div class="value">${fmtMoneyHtml(t.tot, m)}</div></div>
+      <div class="kpi"><div class="label">Pagado ${m}</div><div class="value">${fmtMoneyHtml(t.pagado, m)}</div></div>
+      <div class="kpi"><div class="label">Saldo ${m}</div><div class="value">${fmtMoneyHtml(t.saldo, m)}</div></div>
+    `).join("");
+
+    const sub = [c.rubro, c.telefono].filter(Boolean).join(" · ");
+    return `
+      ${htmlHeader(`Resumen contratista: ${c.nombre}`, sub)}
+      <div class="kpis">${kpisHtml || `<div class="muted">Sin datos.</div>`}</div>
+      <h2>Presupuestos (${pres.length})</h2>
+      ${pres.length === 0
+        ? `<div class="muted">Sin presupuestos.</div>`
+        : `<table>
+          <thead><tr>
+            <th>Presupuesto</th><th>Moneda</th>
+            <th class="right">Total</th><th class="right">Avance valoriz.</th>
+            <th class="right">Pagado</th><th class="right">Saldo</th>
+          </tr></thead>
+          <tbody>${filasPres}</tbody>
+        </table>`}
+      <h2>Historial cronológico de pagos</h2>
+      ${pagos.length === 0
+        ? `<div class="muted">No hay pagos imputados a este contratista.</div>`
+        : `<table>
+          <thead><tr>
+            <th>Fecha</th><th>Presupuesto</th><th>Detalle</th>
+            <th class="right">Monto</th><th class="right">Saldo restante</th>
+          </tr></thead>
+          <tbody>${filasPagos}</tbody>
+        </table>`}
+      ${c.observaciones ? `<h2>Observaciones</h2><div class="muted">${escapeHtml(c.observaciones)}</div>` : ""}
+    `;
+  };
+
   return (
     <Stack spacing={3}>
       <Stack
@@ -334,9 +555,13 @@ export default function PresupuestosPage() {
                   </Grid>
                 </AccordionSummary>
                 <AccordionDetails sx={{ pt: 0 }}>
-                  <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ mb: 1 }}>
+                  <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ mb: 1, flexWrap: "wrap" }}>
                     <Button size="small" startIcon={<AddIcon />} variant="outlined" onClick={() => openNewItem(p.id)}>
                       Nuevo ítem
+                    </Button>
+                    <Button size="small" startIcon={<PrintIcon />} variant="outlined" color="primary"
+                      onClick={() => imprimir(htmlPagosPresupuesto(p), `Presupuesto - ${p.nombre}`)}>
+                      Imprimir / PDF
                     </Button>
                     <Button size="small" startIcon={<EditIcon />} onClick={() => openEditPres(p)}>Editar</Button>
                     <Button size="small" color="error" startIcon={<DeleteIcon />} onClick={() => delPres(p.id)}>Eliminar</Button>
@@ -422,6 +647,57 @@ export default function PresupuestosPage() {
                       {p.observaciones}
                     </Typography>
                   )}
+
+                  {/* Historial de pagos imputados a este presupuesto */}
+                  {(() => {
+                    const pagos = pagosDePresupuesto(p.id);
+                    if (pagos.length === 0) return null;
+                    const k2 = calcPresupuesto(p);
+                    let saldo = k2.tot;
+                    return (
+                      <>
+                        <Typography variant="subtitle2" sx={{ mt: 3, mb: 1 }}>
+                          Historial de pagos ({pagos.length})
+                        </Typography>
+                        <Box sx={{ overflowX: "auto" }}>
+                          <Table size="small">
+                            <TableHead>
+                              <TableRow>
+                                <TableCell>Fecha</TableCell>
+                                <TableCell>Detalle del pago</TableCell>
+                                <TableCell align="right">Monto</TableCell>
+                                <TableCell align="right">Saldo</TableCell>
+                              </TableRow>
+                            </TableHead>
+                            <TableBody>
+                              {pagos.map(pg => {
+                                saldo -= pg.total;
+                                return (
+                                  <TableRow key={pg.movimiento_id} hover>
+                                    <TableCell sx={{ whiteSpace: "nowrap" }}>{pg.mov.fecha}</TableCell>
+                                    <TableCell>
+                                      <Typography variant="body2">{pg.mov.descripcion || "—"}</Typography>
+                                      <Typography variant="caption" color="text.secondary">
+                                        {pg.items.map(i => `${i.nombre}: ${fmtMoney(i.monto, p.moneda)}`).join(" · ")}
+                                      </Typography>
+                                    </TableCell>
+                                    <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                                      <Typography component="span" color="error.main" fontWeight={700}>
+                                        −{fmtMoney(pg.total, p.moneda)}
+                                      </Typography>
+                                    </TableCell>
+                                    <TableCell align="right" sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                                      {fmtMoney(saldo, p.moneda)}
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </Box>
+                      </>
+                    );
+                  })()}
                 </AccordionDetails>
               </Accordion>
             );
@@ -447,11 +723,16 @@ export default function PresupuestosPage() {
                       <TableCell align="right">Pagado</TableCell>
                       <TableCell align="right">Saldo</TableCell>
                       <TableCell align="right">Avance − Pagado</TableCell>
+                      <TableCell align="right"></TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {porContratista.map(c => (
-                      <TableRow key={c.id} hover>
+                      <TableRow
+                        key={c.id} hover
+                        sx={{ cursor: "pointer" }}
+                        onClick={() => setDetalleCont(c)}
+                      >
                         <TableCell>
                           <Stack>
                             <Typography fontWeight={600}>{c.nombre}</Typography>
@@ -468,6 +749,13 @@ export default function PresupuestosPage() {
                             color={c.dif > 0 ? "success.main" : c.dif < 0 ? "error.main" : "text.primary"}>
                             {fmtNum(c.dif, 0)}
                           </Typography>
+                        </TableCell>
+                        <TableCell align="right" onClick={(e) => e.stopPropagation()}>
+                          <Tooltip title="Imprimir / PDF">
+                            <IconButton size="small" onClick={() => imprimir(htmlPagosContratista(c), `Contratista - ${c.nombre}`)}>
+                              <PrintIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -603,6 +891,157 @@ export default function PresupuestosPage() {
         </DialogActions>
       </Dialog>
 
+      {/* DIALOG: detalle de contratista */}
+      <Dialog open={!!detalleCont} onClose={() => setDetalleCont(null)} fullWidth maxWidth="lg" fullScreen={fullScreen}>
+        <DialogTitle>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+            <Box>
+              <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                {detalleCont?.nombre}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {[detalleCont?.rubro, detalleCont?.telefono].filter(Boolean).join(" · ") || "Sin datos de contacto"}
+              </Typography>
+            </Box>
+            <Button
+              variant="contained" color="secondary" startIcon={<PrintIcon />}
+              onClick={() => detalleCont && imprimir(htmlPagosContratista(detalleCont), `Contratista - ${detalleCont.nombre}`)}
+            >
+              Imprimir / PDF
+            </Button>
+          </Stack>
+        </DialogTitle>
+        <DialogContent dividers>
+          {detalleCont && (() => {
+            const pres = presupuestos.filter(p => p.contratista_id === detalleCont.id);
+            const pagos = pagosDeContratista(detalleCont.id);
+            // KPIs por moneda
+            const totalesPorMoneda = {};
+            for (const p of pres) {
+              const k = calcPresupuesto(p);
+              if (!totalesPorMoneda[p.moneda]) totalesPorMoneda[p.moneda] = { tot: 0, pagado: 0, saldo: 0 };
+              totalesPorMoneda[p.moneda].tot += k.tot;
+              totalesPorMoneda[p.moneda].pagado += k.pagado;
+              totalesPorMoneda[p.moneda].saldo += k.saldo;
+            }
+            const saldoMoneda = { ...Object.fromEntries(Object.entries(totalesPorMoneda).map(([m, t]) => [m, t.tot])) };
+
+            return (
+              <Stack spacing={2.5}>
+                {/* KPIs por moneda */}
+                <Grid container spacing={1.5}>
+                  {Object.entries(totalesPorMoneda).map(([m, t]) => (
+                    <>
+                      <KPICard title={`Total ${m}`}  value={fmtMoney(t.tot, m)} />
+                      <KPICard title={`Pagado ${m}`} value={fmtMoney(t.pagado, m)} />
+                      <KPICard title={`Saldo ${m}`}  value={fmtMoney(t.saldo, m)} accent="#E07A1F" />
+                    </>
+                  ))}
+                </Grid>
+
+                {/* Presupuestos */}
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom>Presupuestos ({pres.length})</Typography>
+                  {pres.length === 0 ? (
+                    <Typography color="text.secondary" variant="body2">Sin presupuestos.</Typography>
+                  ) : (
+                    <Box sx={{ overflowX: "auto" }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Presupuesto</TableCell>
+                            <TableCell>Moneda</TableCell>
+                            <TableCell align="right">Total</TableCell>
+                            <TableCell align="right">Pagado</TableCell>
+                            <TableCell align="right">Saldo</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {pres.map(p => {
+                            const k = calcPresupuesto(p);
+                            return (
+                              <TableRow key={p.id} hover>
+                                <TableCell>
+                                  <Stack>
+                                    <Typography fontWeight={600}>{p.nombre}</Typography>
+                                    <Typography variant="caption" color="text.secondary">{p.fecha} · {p.estado}</Typography>
+                                  </Stack>
+                                </TableCell>
+                                <TableCell>{p.moneda}</TableCell>
+                                <TableCell align="right">{fmtMoney(k.tot, p.moneda)}</TableCell>
+                                <TableCell align="right">{fmtMoney(k.pagado, p.moneda)}</TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 700 }}>{fmtMoney(k.saldo, p.moneda)}</TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </Box>
+                  )}
+                </Box>
+
+                {/* Pagos cronológicos */}
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Historial cronológico de pagos ({pagos.length})
+                  </Typography>
+                  {pagos.length === 0 ? (
+                    <Typography color="text.secondary" variant="body2">
+                      No hay pagos imputados a este contratista.
+                    </Typography>
+                  ) : (
+                    <Box sx={{ overflowX: "auto" }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Fecha</TableCell>
+                            <TableCell>Presupuesto</TableCell>
+                            <TableCell>Detalle</TableCell>
+                            <TableCell align="right">Monto</TableCell>
+                            <TableCell align="right">Saldo</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {pagos.map(pg => {
+                            saldoMoneda[pg.moneda] = (saldoMoneda[pg.moneda] ?? 0) - pg.total;
+                            return (
+                              <TableRow key={pg.movimiento_id + "__" + pg.presupuesto_id} hover>
+                                <TableCell sx={{ whiteSpace: "nowrap" }}>{pg.mov.fecha}</TableCell>
+                                <TableCell>
+                                  <Typography variant="body2">{pg.presupuesto_nombre}</Typography>
+                                  <Typography variant="caption" color="text.secondary">{pg.moneda}</Typography>
+                                </TableCell>
+                                <TableCell>
+                                  <Typography variant="body2">{pg.mov.descripcion || "—"}</Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    {pg.items.map(i => `${i.nombre}: ${fmtMoney(i.monto, pg.moneda)}`).join(" · ")}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                                  <Typography component="span" color="error.main" fontWeight={700}>
+                                    −{fmtMoney(pg.total, pg.moneda)}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell align="right" sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                                  {fmtMoney(saldoMoneda[pg.moneda] ?? 0, pg.moneda)}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </Box>
+                  )}
+                </Box>
+              </Stack>
+            );
+          })()}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button onClick={() => setDetalleCont(null)}>Cerrar</Button>
+        </DialogActions>
+      </Dialog>
+
       {/* DIALOG: item */}
       <Dialog open={openItem} onClose={() => setOpenItem(false)} fullWidth maxWidth="sm" fullScreen={fullScreen}>
         <DialogTitle>{editItemId ? "Editar ítem" : "Nuevo ítem"}</DialogTitle>
@@ -651,6 +1090,78 @@ export default function PresupuestosPage() {
         </DialogActions>
       </Dialog>
     </Stack>
+  );
+}
+
+// --- Imprimir / exportar PDF ---
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function fmtMoneyHtml(value, currency = "ARS") {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+  const f = new Intl.NumberFormat("es-AR", { style: "currency", currency, maximumFractionDigits: 0 });
+  return f.format(Number(value));
+}
+
+function imprimir(htmlBody, titulo) {
+  const w = window.open("", "_blank", "width=900,height=700");
+  if (!w) {
+    alert("No se pudo abrir la ventana de impresión. Permití pop-ups e intentá de nuevo.");
+    return;
+  }
+  w.document.write(`<!DOCTYPE html><html lang="es"><head>
+<meta charset="utf-8">
+<title>${escapeHtml(titulo)}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; padding: 24px; color: #1A1F2B; margin: 0; }
+  h1 { color: #0F2A4A; margin: 0 0 4px; font-size: 22px; letter-spacing: -0.3px; }
+  h1 .accent { color: #E07A1F; }
+  h2 { color: #0F2A4A; margin: 24px 0 8px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+  th { text-align: left; background: #f5f6f8; padding: 6px 8px; font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px; color: #5b6573; border-bottom: 1px solid #ddd; }
+  td { padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: top; }
+  .right { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .bold { font-weight: 700; }
+  .muted { color: #5b6573; font-size: 11px; }
+  .kpis { display: flex; gap: 12px; margin: 12px 0 0; flex-wrap: wrap; }
+  .kpi { border: 1px solid #ddd; border-radius: 8px; padding: 8px 12px; min-width: 140px; }
+  .kpi .label { font-size: 10px; color: #5b6573; text-transform: uppercase; letter-spacing: 0.4px; }
+  .kpi .value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; border-bottom: 2px solid #0F2A4A; padding-bottom: 10px; margin-bottom: 8px; }
+  .meta { text-align: right; font-size: 11px; color: #5b6573; }
+  .footer { margin-top: 32px; font-size: 10px; color: #5b6573; border-top: 1px solid #eee; padding-top: 8px; }
+  .pos { color: #1E8E3E; font-weight: 700; }
+  .neg { color: #C0392B; font-weight: 700; }
+  .totalrow td { background: #f5f6f8; font-weight: 700; }
+  @media print { body { padding: 16px; } .noprint { display: none; } }
+</style>
+</head><body>
+  <div class="noprint" style="margin-bottom: 12px;">
+    <button onclick="window.print()" style="background:#E07A1F;color:#fff;border:0;border-radius:8px;padding:8px 16px;font-weight:600;cursor:pointer;">Imprimir / Guardar PDF</button>
+  </div>
+  ${htmlBody}
+  <div class="footer">FARRALAPP · ${new Date().toLocaleString("es-AR")}</div>
+</body></html>`);
+  w.document.close();
+}
+
+function KPICard({ title, value, accent }) {
+  return (
+    <Grid item xs={6} sm={4} md={3}>
+      <Card variant="outlined" sx={{ position: "relative", overflow: "hidden" }}>
+        {accent && <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, bgcolor: accent }} />}
+        <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
+          <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: 10 }}>
+            {title}
+          </Typography>
+          <Typography fontWeight={700} sx={{ fontSize: { xs: 16, sm: 18 }, fontVariantNumeric: "tabular-nums", mt: 0.25 }}>
+            {value}
+          </Typography>
+        </CardContent>
+      </Card>
+    </Grid>
   );
 }
 
