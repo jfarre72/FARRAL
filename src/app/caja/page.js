@@ -1007,31 +1007,47 @@ export default function CajaPage() {
                                     <TableCell>Ítem</TableCell>
                                     <TableCell align="right">Presupuestado</TableCell>
                                     <TableCell align="right">Avance %</TableCell>
+                                    <TableCell align="right">Valor avance</TableCell>
                                     <TableCell align="right" sx={{ minWidth: 140 }}>Imputar</TableCell>
                                   </TableRow>
                                 </TableHead>
                                 <TableBody>
-                                  {items.map(it => (
-                                    <TableRow key={it.id}>
-                                      <TableCell>{it.nombre}</TableCell>
-                                      <TableCell align="right">{fmtMoney(it.monto_presupuestado, form.moneda)}</TableCell>
-                                      <TableCell align="right">{fmtNum(it.avance_pct, 2)}%</TableCell>
-                                      <TableCell align="right">
-                                        <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="flex-end">
-                                          <TextField
-                                            size="small" type="number" sx={{ width: 130 }}
-                                            value={impMontos[it.id] ?? ""}
-                                            onChange={(e) => setImpMontos(prev => ({ ...prev, [it.id]: e.target.value }))}
-                                          />
-                                          {items.length > 1 && (
-                                            <Tooltip title="Imputar todo el egreso a este ítem">
-                                              <IconButton size="small" onClick={() => allInOne(it.id)}><span style={{ fontSize: 14, fontWeight: 700 }}>·</span></IconButton>
-                                            </Tooltip>
-                                          )}
-                                        </Stack>
-                                      </TableCell>
-                                    </TableRow>
-                                  ))}
+                                  {items.map(it => {
+                                    const presup = Number(it.monto_presupuestado || 0);
+                                    const valorAv = presup * Number(it.avance_pct || 0) / 100;
+                                    const imputadoEsteItem = Number(impMontos[it.id] || 0);
+                                    const excedeAvance = imputadoEsteItem > valorAv + 0.01;
+                                    return (
+                                      <TableRow key={it.id}>
+                                        <TableCell>{it.nombre}</TableCell>
+                                        <TableCell align="right">{fmtMoney(presup, form.moneda)}</TableCell>
+                                        <TableCell align="right">{fmtNum(it.avance_pct, 2)}%</TableCell>
+                                        <TableCell align="right">{fmtMoney(valorAv, form.moneda)}</TableCell>
+                                        <TableCell align="right">
+                                          <Stack direction="column" alignItems="flex-end" spacing={0.25}>
+                                            <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="flex-end">
+                                              <TextField
+                                                size="small" type="number" sx={{ width: 130 }}
+                                                value={impMontos[it.id] ?? ""}
+                                                error={excedeAvance}
+                                                onChange={(e) => setImpMontos(prev => ({ ...prev, [it.id]: e.target.value }))}
+                                              />
+                                              {items.length > 1 && (
+                                                <Tooltip title="Imputar todo el egreso a este ítem">
+                                                  <IconButton size="small" onClick={() => allInOne(it.id)}><span style={{ fontSize: 14, fontWeight: 700 }}>·</span></IconButton>
+                                                </Tooltip>
+                                              )}
+                                            </Stack>
+                                            {excedeAvance && (
+                                              <Typography variant="caption" color="warning.main">
+                                                Supera el valor avance ({fmtMoney(valorAv, form.moneda)})
+                                              </Typography>
+                                            )}
+                                          </Stack>
+                                        </TableCell>
+                                      </TableRow>
+                                    );
+                                  })}
                                 </TableBody>
                               </Table>
                             </Box>

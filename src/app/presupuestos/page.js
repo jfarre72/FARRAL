@@ -23,7 +23,7 @@ const emptyPresupuesto = {
   nombre: "", contratista_id: "", fecha: new Date().toISOString().slice(0,10),
   moneda: "ARS", estado: "activo", observaciones: "",
 };
-const emptyItem = { nombre: "", etapa: "", monto_presupuestado: "", avance_pct: 0, estado: "pendiente", observaciones: "" };
+const emptyItem = { nombre: "", etapa: "", monto_presupuestado: "", avance_pct: "", estado: "pendiente", observaciones: "" };
 
 export default function PresupuestosPage() {
   const { proyecto } = useProjects();
@@ -37,6 +37,8 @@ export default function PresupuestosPage() {
   const [items, setItems] = useState([]);
   const [imputaciones, setImputaciones] = useState([]); // {item_id, monto}
   const [filtroContratista, setFiltroContratista] = useState("all");
+  // Edición local del avance % por ítem (string para permitir vacío al borrar)
+  const [avanceDraft, setAvanceDraft] = useState({}); // { itemId: string }
 
   // Dialogs
   const [openCont, setOpenCont] = useState(false);
@@ -204,7 +206,7 @@ export default function PresupuestosPage() {
     setFormItem({
       nombre: it.nombre, etapa: it.etapa ?? "",
       monto_presupuestado: it.monto_presupuestado ?? "",
-      avance_pct: it.avance_pct ?? 0,
+      avance_pct: it.avance_pct ?? "",
       estado: it.estado, observaciones: it.observaciones ?? "",
     });
     setEditItemId(it.id); setErrItem(null); setOpenItem(true);
@@ -379,8 +381,20 @@ export default function PresupuestosPage() {
                                   <TextField
                                     size="small" type="number" sx={{ width: 90 }}
                                     inputProps={{ min: 0, max: 100, step: 1 }}
-                                    value={it.avance_pct ?? 0}
-                                    onChange={(e) => updateAvance(it.id, e.target.value)}
+                                    value={avanceDraft[it.id] ?? String(it.avance_pct ?? "")}
+                                    onChange={(e) => setAvanceDraft(prev => ({ ...prev, [it.id]: e.target.value }))}
+                                    onBlur={(e) => {
+                                      const v = e.target.value === "" ? 0 : Number(e.target.value);
+                                      updateAvance(it.id, v);
+                                      setAvanceDraft(prev => {
+                                        const n = { ...prev };
+                                        delete n[it.id];
+                                        return n;
+                                      });
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") e.target.blur();
+                                    }}
                                   />
                                 </TableCell>
                                 <TableCell align="right">{fmtMoney(valAv, p.moneda)}</TableCell>
