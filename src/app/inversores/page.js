@@ -780,12 +780,23 @@ function DetalleInversor({ r, aportesC, totProy }) {
             ({items.length} {items.length === 1 ? "aporte" : "aportes"})
           </Typography>
         </Stack>
-        <Chip
-          size="small"
-          variant="outlined"
-          label={`Fecha de venta: ${fmtDate(totProy.fechaCorte)}`}
-          sx={{ fontSize: 11, fontWeight: 600, bgcolor: "background.paper" }}
-        />
+        <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+          <Chip
+            size="small"
+            variant="outlined"
+            label={`Fecha de venta: ${fmtDate(totProy.fechaCorte)}`}
+            sx={{ fontSize: 11, fontWeight: 600, bgcolor: "background.paper" }}
+          />
+          {totProy.ganancia > 0 && (
+            <Chip
+              size="small"
+              variant="outlined"
+              color="success"
+              label={`Ganancia proyecto: ${fmtMoney(totProy.ganancia, "USD")}`}
+              sx={{ fontSize: 11, fontWeight: 700, bgcolor: "background.paper" }}
+            />
+          )}
+        </Stack>
       </Stack>
 
       {items.length === 0 ? (
@@ -854,14 +865,21 @@ function DetalleInversor({ r, aportesC, totProy }) {
       {/* Frase resumen de cálculo */}
       <Box sx={{ mt: 1.5, px: 0.5 }}>
         <Typography variant="caption" color="text.secondary">
-          Ponderación = Σ(monto × días). % participación = ponderado / total. Total a devolver = aporte + ganancia.
+          Ponderación = Σ(monto × días). % participación = ponderado / total. Ganancia = % participación × ganancia del proyecto. Total a devolver = aporte + ganancia.
         </Typography>
+        {totProy.ganancia > 0 && (
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.25 }}>
+            Ganancia del proyecto utilizada para el cálculo: <Box component="span" fontWeight={700} sx={{ color: "success.main" }}>{fmtMoney(totProy.ganancia, "USD")}</Box>
+            {" "}(= venta {fmtMoney(totProy.venta, "USD")} − costo {fmtMoney(totProy.costo, "USD")}).
+          </Typography>
+        )}
         {!r.es_faltante && (
           <Typography variant="body2" sx={{ mt: 0.5 }}>
             <Box component="span" fontWeight={600}>{r.nombre}</Box> aporta <Box component="span" fontWeight={600}>{fmtMoney(r.aportesUSD, "USD")}</Box>,
             su ponderado es <Box component="span" fontWeight={600}>{fmtNum(r.ponderado, 0)}</Box> ({fmtPct(r.participacion)} del proyecto).
             {totProy.ganancia > 0 && (
-              <> Le corresponderían <Box component="span" fontWeight={700} sx={{ color: "success.main" }}>{fmtMoney(r.ganancia, "USD")}</Box> de ganancia,
+              <> Le corresponderían <Box component="span" fontWeight={700} sx={{ color: "success.main" }}>{fmtMoney(r.ganancia, "USD")}</Box> de ganancia
+              ({fmtPct(r.participacion)} × {fmtMoney(totProy.ganancia, "USD")}),
               total a devolver <Box component="span" fontWeight={700}>{fmtMoney(r.totalDevolver, "USD")}</Box>.</>
             )}
           </Typography>
