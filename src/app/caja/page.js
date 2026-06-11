@@ -17,7 +17,7 @@ import AttachFileIcon from "@mui/icons-material/AttachFile";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
-import { fmtMoney, fmtNum, fmtDate } from "@/components/Money";
+import { fmtMoney, fmtNum, fmtDate, fmtPct } from "@/components/Money";
 
 const BUCKET = "comprobantes";
 
@@ -531,6 +531,80 @@ export default function CajaPage() {
             ingresos={saldos.ingARS} egresos={saldos.egrARS} accent="#0F2A4A" />
         </Grid>
       </Grid>
+
+      {/* Resumen en USD vs costo total estimado */}
+      {(() => {
+        const costo = Number(proyecto?.costo_total_estimado || 0);
+        const ingresos = saldos.ingUSD;
+        const gastado = saldos.egrUSD;
+        const pctGastado = costo > 0 ? Math.min(100, (gastado / costo) * 100) : 0;
+        const pctIngreso = costo > 0 ? Math.min(100, (ingresos / costo) * 100) : 0;
+        return (
+          <Card>
+            <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ sm: "stretch" }} justifyContent="space-between">
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.5, fontSize: 11 }}>
+                    Resumen en USD
+                  </Typography>
+                  <Stack direction="row" spacing={3} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Total ingresos USD</Typography>
+                      <Typography variant="h6" sx={{ fontVariantNumeric: "tabular-nums", color: "success.main" }}>
+                        {fmtMoney(ingresos, "USD")}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Total gastado USD</Typography>
+                      <Typography variant="h6" sx={{ fontVariantNumeric: "tabular-nums", color: "error.main" }}>
+                        {fmtMoney(gastado, "USD")}
+                      </Typography>
+                    </Box>
+                    {costo > 0 && (
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">Costo total estim.</Typography>
+                        <Typography variant="h6" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                          {fmtMoney(costo, "USD")}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Stack>
+                </Box>
+              </Stack>
+
+              {costo > 0 && (
+                <Box sx={{ mt: 2 }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="baseline" sx={{ mb: 0.5 }}>
+                    <Typography variant="body2" fontWeight={600}>
+                      Llevamos gastado <Box component="span" sx={{ color: "error.main" }}>{fmtPct(pctGastado, 1)}</Box> del presupuesto · equivale a {fmtMoney(gastado, "USD")}
+                    </Typography>
+                  </Stack>
+                  <Box sx={{ position: "relative", height: 12, bgcolor: "rgba(15,42,74,0.06)", borderRadius: 6, overflow: "hidden" }}>
+                    <Box sx={{
+                      position: "absolute", top: 0, left: 0, height: "100%",
+                      width: `${pctIngreso}%`, bgcolor: "rgba(30,142,62,0.35)", transition: "width .4s",
+                    }} />
+                    <Box sx={{
+                      position: "absolute", top: 0, left: 0, height: "100%",
+                      width: `${pctGastado}%`,
+                      backgroundImage: "linear-gradient(90deg, #C0392B 0%, #E07A1F 100%)",
+                      transition: "width .4s",
+                    }} />
+                  </Box>
+                  <Stack direction="row" justifyContent="space-between" sx={{ mt: 0.75 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      Ingresado USD · {fmtPct(pctIngreso, 1)} ({fmtMoney(ingresos, "USD")})
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Gastado USD · {fmtPct(pctGastado, 1)} ({fmtMoney(gastado, "USD")})
+                    </Typography>
+                  </Stack>
+                </Box>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       <Box>
         <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>
