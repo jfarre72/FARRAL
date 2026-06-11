@@ -389,7 +389,7 @@ export default function InversoresPage() {
                       </TableRow>
                       {isOpen && (
                         <TableRow sx={{ height: "auto !important", "&:hover": { bgcolor: "transparent" }, "& > td": { p: 0, border: 0 } }}>
-                          <TableCell colSpan={8} sx={{ bgcolor: "rgba(15,42,74,0.02)", borderBottom: "1px solid rgba(15,42,74,0.1)" }}>
+                          <TableCell colSpan={8}>
                             <DetalleInversor r={r} aportesC={aportesC} totProy={totProy} />
                           </TableCell>
                         </TableRow>
@@ -758,14 +758,34 @@ function DetalleInversor({ r, aportesC, totProy }) {
     : aportesC.filter(a => a.inversor_id === r.id);
 
   return (
-    <Box sx={{ px: { xs: 1, sm: 3 }, py: 2 }}>
-      <Stack direction="row" alignItems="baseline" spacing={1} sx={{ mb: 1 }}>
-        <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>
-          Detalle de aportes
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          ({items.length} {items.length === 1 ? "aporte" : "aportes"})
-        </Typography>
+    <Box sx={{
+      m: { xs: 1, sm: 2 },
+      p: { xs: 1.5, sm: 2.5 },
+      bgcolor: "rgba(15,42,74,0.045)",
+      border: "1px solid rgba(15,42,74,0.10)",
+      borderRadius: 2,
+    }}>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        justifyContent="space-between"
+        alignItems={{ xs: "flex-start", sm: "baseline" }}
+        spacing={0.5}
+        sx={{ mb: 1 }}
+      >
+        <Stack direction="row" alignItems="baseline" spacing={1}>
+          <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>
+            Detalle de aportes
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            ({items.length} {items.length === 1 ? "aporte" : "aportes"})
+          </Typography>
+        </Stack>
+        <Chip
+          size="small"
+          variant="outlined"
+          label={`Fecha de venta: ${fmtDate(totProy.fechaCorte)}`}
+          sx={{ fontSize: 11, fontWeight: 600, bgcolor: "background.paper" }}
+        />
       </Stack>
 
       {items.length === 0 ? (
