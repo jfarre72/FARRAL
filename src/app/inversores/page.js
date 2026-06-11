@@ -813,11 +813,14 @@ function DetalleInversor({ r, aportesC, totProy }) {
                 <TableCell align="right">Ponderado</TableCell>
                 <TableCell align="right">% participación</TableCell>
                 <TableCell align="right">Ganancia estim.</TableCell>
-                <TableCell>Observación</TableCell>
+                <TableCell align="right">% ganancia</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {items.map((a, idx) => (
+              {items.map((a, idx) => {
+                const monto = Number(a.monto || 0);
+                const pctGan = monto > 0 ? (Number(a._ganancia || 0) / monto) * 100 : 0;
+                return (
                 <TableRow key={a.id ?? idx}>
                   <TableCell sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtDate(a.fecha)}</TableCell>
                   <TableCell sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtDate(a._fechaInicioCalculo)}</TableCell>
@@ -833,17 +836,10 @@ function DetalleInversor({ r, aportesC, totProy }) {
                   <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtNum(a._ponderado, 0)}</TableCell>
                   <TableCell align="right">{fmtPct(a._participacion)}</TableCell>
                   <TableCell align="right">{totProy.ganancia > 0 ? fmtMoney(a._ganancia, "USD") : "—"}</TableCell>
-                  <TableCell>
-                    {a.observacion ? (
-                      <Typography variant="body2" color="text.secondary" sx={{
-                        maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      }}>
-                        {a.observacion}
-                      </Typography>
-                    ) : "—"}
-                  </TableCell>
+                  <TableCell align="right">{totProy.ganancia > 0 && monto > 0 ? fmtPct(pctGan) : "—"}</TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
               {items.length > 1 && (
                 <TableRow sx={{ bgcolor: "rgba(15,42,74,0.04)" }}>
                   <TableCell colSpan={2} sx={{ fontWeight: 700 }}>Totales</TableCell>
@@ -854,7 +850,9 @@ function DetalleInversor({ r, aportesC, totProy }) {
                   <TableCell align="right" sx={{ fontWeight: 700 }}>
                     {totProy.ganancia > 0 ? fmtMoney(r.ganancia, "USD") : "—"}
                   </TableCell>
-                  <TableCell />
+                  <TableCell align="right" sx={{ fontWeight: 700 }}>
+                    {totProy.ganancia > 0 && r.aportesUSD > 0 ? fmtPct(r.gananciaPct) : "—"}
+                  </TableCell>
                 </TableRow>
               )}
             </TableBody>
