@@ -25,14 +25,17 @@ const theme = createTheme({
   },
   shape: { borderRadius: 12 },
   typography: {
-    fontFamily: '"Inter","Roboto","Helvetica","Arial",sans-serif',
+    fontFamily: 'var(--font-sans), "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+    h3: { fontWeight: 700, letterSpacing: -0.6 },
     h4: { fontWeight: 700, letterSpacing: -0.4 },
     h5: { fontWeight: 700, letterSpacing: -0.3 },
-    h6: { fontWeight: 600 },
+    h6: { fontWeight: 600, letterSpacing: -0.1 },
     subtitle1: { fontWeight: 600 },
     subtitle2: { fontWeight: 600, color: TEXT_2 },
-    body2: { color: TEXT_2 },
+    body1: { letterSpacing: 0 },
+    body2: { color: TEXT_2, letterSpacing: 0 },
     button: { textTransform: "none", fontWeight: 600, letterSpacing: 0 },
+    caption: { letterSpacing: 0.1 },
   },
   components: {
     MuiAppBar: {
@@ -159,27 +162,42 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           "& .MuiTableCell-head": {
-            backgroundColor: alpha(NAVY, 0.04),
+            backgroundColor: alpha(NAVY, 0.035),
             color: TEXT_2,
             fontWeight: 600,
-            fontSize: 12,
+            fontSize: 11,
             textTransform: "uppercase",
-            letterSpacing: 0.4,
+            letterSpacing: 0.6,
             borderBottom: `1px solid ${BORDER}`,
+            paddingTop: 10,
+            paddingBottom: 10,
+            whiteSpace: "nowrap",
           },
         },
       },
     },
     MuiTableCell: {
       styleOverrides: {
-        root: { borderBottom: `1px solid ${BORDER}` },
+        root: {
+          borderBottom: `1px solid ${BORDER}`,
+          paddingTop: 12,
+          paddingBottom: 12,
+          fontSize: 13.5,
+        },
+        sizeSmall: {
+          paddingTop: 10,
+          paddingBottom: 10,
+          paddingLeft: 12,
+          paddingRight: 12,
+        },
       },
     },
     MuiTableRow: {
       styleOverrides: {
         root: {
+          height: 52,
           "&:last-of-type .MuiTableCell-root": { borderBottom: "none" },
-          "&:hover": { backgroundColor: alpha(NAVY, 0.025) },
+          "&:hover": { backgroundColor: alpha(NAVY, 0.03) },
         },
       },
     },

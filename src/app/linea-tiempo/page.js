@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "@mui/material/styles";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
+import { fmtDate } from "@/components/Money";
 
 export default function LineaTiempoPage() {
   const { proyecto } = useProjects();
@@ -141,8 +142,8 @@ export default function LineaTiempoPage() {
               </Box>
             </Box>
             <Stack spacing={0.5} sx={{ width: { xs: "100%", sm: "auto" } }}>
-              <Chip label={`Inicio estim.: ${proyecto.fecha_inicio ?? "—"}`} variant="outlined" />
-              <Chip label={`Fin estim.: ${proyecto.fecha_fin ?? "—"}`} variant="outlined" />
+              <Chip label={`Inicio estim.: ${fmtDate(proyecto.fecha_inicio)}`} variant="outlined" />
+              <Chip label={`Fin estim.: ${fmtDate(proyecto.fecha_fin)}`} variant="outlined" />
               {proximo && <Chip label={`En curso: ${proximo.nombre}`} color="primary" />}
             </Stack>
           </Stack>

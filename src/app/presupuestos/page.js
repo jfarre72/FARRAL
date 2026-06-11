@@ -17,7 +17,7 @@ import PrintIcon from "@mui/icons-material/Print";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
-import { fmtMoney, fmtNum, fmtPct } from "@/components/Money";
+import { fmtMoney, fmtNum, fmtPct, fmtDate } from "@/components/Money";
 
 const emptyContratista = { nombre: "", telefono: "", rubro: "", observaciones: "" };
 const emptyPresupuesto = {
@@ -336,7 +336,7 @@ export default function PresupuestosPage() {
       saldo -= pg.total;
       const detalle = pg.items.map(i => `${escapeHtml(i.nombre)}: ${fmtMoneyHtml(i.monto, moneda)}`).join("<br>");
       return `<tr>
-        <td>${escapeHtml(pg.mov.fecha)}</td>
+        <td>${escapeHtml(fmtDate(pg.mov.fecha))}</td>
         <td>${escapeHtml(pg.mov.descripcion || "")}<div class="muted">${detalle}</div></td>
         <td class="right neg">−${fmtMoneyHtml(pg.total, moneda)}</td>
         <td class="right">${fmtMoneyHtml(saldo, moneda)}</td>
@@ -357,7 +357,7 @@ export default function PresupuestosPage() {
       </tr>`;
     }).join("");
     return `
-      ${htmlHeader(p.nombre, `${cont?.nombre ?? ""} · ${p.fecha} · ${moneda}`)}
+      ${htmlHeader(p.nombre, `${cont?.nombre ?? ""} · ${fmtDate(p.fecha)} · ${moneda}`)}
       <div class="kpis">
         <div class="kpi"><div class="label">Total presupuesto</div><div class="value">${fmtMoneyHtml(k.tot, moneda)}</div></div>
         <div class="kpi"><div class="label">Avance valorizado</div><div class="value">${fmtMoneyHtml(k.valAvance, moneda)}</div></div>
@@ -413,7 +413,7 @@ export default function PresupuestosPage() {
       saldoMoneda[pg.moneda] = (saldoMoneda[pg.moneda] ?? 0) - pg.total;
       const detalle = pg.items.map(i => `${escapeHtml(i.nombre)}: ${fmtMoneyHtml(i.monto, pg.moneda)}`).join("<br>");
       return `<tr>
-        <td>${escapeHtml(pg.mov.fecha)}</td>
+        <td>${escapeHtml(fmtDate(pg.mov.fecha))}</td>
         <td>${escapeHtml(pg.presupuesto_nombre)}</td>
         <td>${escapeHtml(pg.mov.descripcion || "")}<div class="muted">${detalle}</div></td>
         <td class="right neg">−${fmtMoneyHtml(pg.total, pg.moneda)}</td>
@@ -424,7 +424,7 @@ export default function PresupuestosPage() {
     const filasPres = pres.map(p => {
       const k = calcPresupuesto(p);
       return `<tr>
-        <td>${escapeHtml(p.nombre)}<div class="muted">${escapeHtml(p.fecha)} · ${escapeHtml(p.estado)}</div></td>
+        <td>${escapeHtml(p.nombre)}<div class="muted">${escapeHtml(fmtDate(p.fecha))} · ${escapeHtml(p.estado)}</div></td>
         <td>${escapeHtml(p.moneda)}</td>
         <td class="right">${fmtMoneyHtml(k.tot, p.moneda)}</td>
         <td class="right">${fmtMoneyHtml(k.valAvance, p.moneda)}</td>
@@ -536,7 +536,7 @@ export default function PresupuestosPage() {
                       <Stack>
                         <Typography fontWeight={700}>{p.nombre}</Typography>
                         <Typography variant="caption" color="text.secondary">
-                          {contratistaName(p.contratista_id)} · {p.fecha} · {p.moneda}
+                          {contratistaName(p.contratista_id)} · {fmtDate(p.fecha)} · {p.moneda}
                         </Typography>
                       </Stack>
                     </Grid>
@@ -674,7 +674,7 @@ export default function PresupuestosPage() {
                                 saldo -= pg.total;
                                 return (
                                   <TableRow key={pg.movimiento_id} hover>
-                                    <TableCell sx={{ whiteSpace: "nowrap" }}>{pg.mov.fecha}</TableCell>
+                                    <TableCell sx={{ whiteSpace: "nowrap" }}>{fmtDate(pg.mov.fecha)}</TableCell>
                                     <TableCell>
                                       <Typography variant="body2">{pg.mov.descripcion || "—"}</Typography>
                                       <Typography variant="caption" color="text.secondary">
@@ -964,7 +964,7 @@ export default function PresupuestosPage() {
                                 <TableCell>
                                   <Stack>
                                     <Typography fontWeight={600}>{p.nombre}</Typography>
-                                    <Typography variant="caption" color="text.secondary">{p.fecha} · {p.estado}</Typography>
+                                    <Typography variant="caption" color="text.secondary">{fmtDate(p.fecha)} · {p.estado}</Typography>
                                   </Stack>
                                 </TableCell>
                                 <TableCell>{p.moneda}</TableCell>
@@ -1006,7 +1006,7 @@ export default function PresupuestosPage() {
                             saldoMoneda[pg.moneda] = (saldoMoneda[pg.moneda] ?? 0) - pg.total;
                             return (
                               <TableRow key={pg.movimiento_id + "__" + pg.presupuesto_id} hover>
-                                <TableCell sx={{ whiteSpace: "nowrap" }}>{pg.mov.fecha}</TableCell>
+                                <TableCell sx={{ whiteSpace: "nowrap" }}>{fmtDate(pg.mov.fecha)}</TableCell>
                                 <TableCell>
                                   <Typography variant="body2">{pg.presupuesto_nombre}</Typography>
                                   <Typography variant="caption" color="text.secondary">{pg.moneda}</Typography>

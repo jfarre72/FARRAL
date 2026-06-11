@@ -17,7 +17,7 @@ import AttachFileIcon from "@mui/icons-material/AttachFile";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
-import { fmtMoney, fmtNum } from "@/components/Money";
+import { fmtMoney, fmtNum, fmtDate } from "@/components/Money";
 
 const BUCKET = "comprobantes";
 
@@ -481,7 +481,17 @@ export default function CajaPage() {
       return (
         <Stack direction="row" spacing={0.5} alignItems="center">
           <Chip size="small" color="error" variant="outlined" icon={<ArrowDownwardIcon />} label="Egreso" />
-          {m.con_cambio && <Chip size="small" color="primary" variant="outlined" icon={<SwapHorizIcon />} label="con cambio" />}
+          {m.con_cambio && (
+            <Tooltip title="Pago con cambio de moneda">
+              <Box sx={{
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                width: 22, height: 22, borderRadius: "50%",
+                bgcolor: "rgba(15,42,74,0.08)", color: "primary.main",
+              }}>
+                <SwapHorizIcon sx={{ fontSize: 14 }} />
+              </Box>
+            </Tooltip>
+          )}
         </Stack>
       );
     }
@@ -556,23 +566,24 @@ export default function CajaPage() {
               <EmptyState text="No hay movimientos en esta vista." />
             ) : (
               <Box sx={{ overflowX: "auto" }}>
-                <Table size="small">
+                <Table size="small" sx={{ "& tbody tr": { height: 56 } }}>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Fecha</TableCell>
-                      <TableCell>Tipo</TableCell>
+                      <TableCell sx={{ width: 110 }}>Fecha</TableCell>
+                      <TableCell sx={{ width: 130 }}>Tipo</TableCell>
                       <TableCell>Detalle</TableCell>
                       <TableCell>Categoría</TableCell>
+                      <TableCell>Etapa</TableCell>
                       <TableCell align="right">Monto</TableCell>
                       {filtroMoneda !== "all" && <TableCell align="right">Saldo</TableCell>}
-                      <TableCell>Comprob.</TableCell>
-                      <TableCell align="right"></TableCell>
+                      <TableCell sx={{ width: 70 }}>Comprob.</TableCell>
+                      <TableCell align="right" sx={{ width: 90 }}></TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {visible.map((m) => {
-                      const ingresoColor   = "rgba(30,142,62,0.07)";
-                      const egresoColor    = "rgba(192,57,43,0.05)";
+                      const ingresoColor   = "rgba(30,142,62,0.06)";
+                      const egresoColor    = "rgba(192,57,43,0.04)";
                       const bg =
                         m._delta != null
                           ? (m._delta > 0 ? ingresoColor : m._delta < 0 ? egresoColor : undefined)
@@ -580,38 +591,38 @@ export default function CajaPage() {
                       return (
                       <TableRow
                         key={m.id} hover
-                        sx={{ cursor: "pointer", bgcolor: bg }}
+                        sx={{ cursor: "pointer", bgcolor: bg, "& td": { verticalAlign: "middle" } }}
                         onClick={() => setDetail(m)}
                       >
-                        <TableCell sx={{ whiteSpace: "nowrap" }}>{m.fecha}</TableCell>
+                        <TableCell sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtDate(m.fecha)}</TableCell>
                         <TableCell>{tipoChip(m)}</TableCell>
                         <TableCell>
-                          <Typography variant="body2">{m.detalle}</Typography>
-                          {m.observacion && (
-                            <Typography variant="caption" color="text.secondary" display="block" sx={{
-                              maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          <Typography variant="body2" fontWeight={500} color="text.primary" sx={{
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 340,
+                          }}>
+                            {m.detalle}
+                          </Typography>
+                          {(m.observacion || m.con_cambio || m.tipo === "cambio") && (
+                            <Typography variant="caption" color="text.secondary" sx={{
+                              display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 340,
                             }}>
-                              {m.observacion}
-                            </Typography>
-                          )}
-                          {m.con_cambio && (
-                            <Typography variant="caption" color="text.secondary" display="block">
-                              Cambio: {fmtMoney(m.cambio_monto_origen, m.cambio_moneda_origen)} @ {fmtNum(m.cambio_tipo_cambio, 2)}
-                            </Typography>
-                          )}
-                          {m.tipo === "cambio" && (
-                            <Typography variant="caption" color="text.secondary" display="block">
-                              → {fmtMoney(m.monto_destino, m.moneda_destino)}
+                              {m.observacion
+                                ? m.observacion
+                                : m.con_cambio
+                                  ? `Cambio: ${fmtMoney(m.cambio_monto_origen, m.cambio_moneda_origen)} · TC ${fmtNum(m.cambio_tipo_cambio, 2)}`
+                                  : `→ ${fmtMoney(m.monto_destino, m.moneda_destino)} · TC ${fmtNum(m.raw?.tipo_cambio, 2)}`}
                             </Typography>
                           )}
                         </TableCell>
                         <TableCell>
-                          {(m.categoria || m.etapa) ? (
-                            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                              {m.categoria && <Chip size="small" label={m.categoria} />}
-                              {m.etapa && <Chip size="small" label={m.etapa} variant="outlined" color="primary" />}
-                            </Stack>
-                          ) : <Typography variant="body2" color="text.secondary">—</Typography>}
+                          {m.categoria
+                            ? <Chip size="small" label={m.categoria} />
+                            : <Typography variant="body2" color="text.disabled">—</Typography>}
+                        </TableCell>
+                        <TableCell>
+                          {m.etapa
+                            ? <Chip size="small" label={m.etapa} variant="outlined" color="primary" />
+                            : <Typography variant="body2" color="text.disabled">—</Typography>}
                         </TableCell>
                         <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
                           {filtroMoneda === "all" ? (
@@ -765,7 +776,7 @@ export default function CajaPage() {
         <DialogContent dividers>
           {detail && (
             <Stack spacing={1.2}>
-              <DetailRow label="Fecha" value={detail.fecha} />
+              <DetailRow label="Fecha" value={fmtDate(detail.fecha)} />
               <DetailRow label="Tipo" value={tipoChip(detail)} />
               <DetailRow label="Detalle" value={detail.detalle} />
               {detail.observacion && <DetailRow label="Observación" value={detail.observacion} />}

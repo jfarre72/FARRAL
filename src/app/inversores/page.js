@@ -14,7 +14,7 @@ import PaidIcon from "@mui/icons-material/Paid";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
-import { fmtMoney, fmtNum, fmtPct, anualizada } from "@/components/Money";
+import { fmtMoney, fmtNum, fmtPct, fmtDate, anualizada } from "@/components/Money";
 import DonutChart from "@/components/DonutChart";
 import { computePonderacion } from "@/lib/ponderacion";
 
@@ -430,8 +430,8 @@ export default function InversoresPage() {
                   <TableBody>
                     {aportesC.map(a => (
                       <TableRow key={a.id} hover>
-                        <TableCell sx={{ whiteSpace: "nowrap" }}>{a.fecha}</TableCell>
-                        <TableCell sx={{ whiteSpace: "nowrap" }}>{a._fechaInicioCalculo}</TableCell>
+                        <TableCell sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtDate(a.fecha)}</TableCell>
+                        <TableCell sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtDate(a._fechaInicioCalculo)}</TableCell>
                         <TableCell>
                           <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
                             <span>{invName(a.inversor_id)}</span>

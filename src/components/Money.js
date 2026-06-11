@@ -22,6 +22,17 @@ export function fmtNum(value, digits = 2) {
 }
 
 /**
+ * Formatea fecha ISO (YYYY-MM-DD) como DD/MM/AAAA.
+ * Acepta también ISO con timestamp (toma la parte de fecha).
+ */
+export function fmtDate(iso) {
+  if (!iso) return "—";
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return String(iso);
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+/**
  * Tasa anualizada SIMPLE (no compuesta).
  *   anual = ROI × 365 / dias
  * Devuelve el porcentaje (ej. 18.42 para 18.42 %) o null si no se puede.
