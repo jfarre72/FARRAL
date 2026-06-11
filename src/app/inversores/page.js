@@ -4,14 +4,16 @@ import {
   Table, TableBody, TableCell, TableHead, TableRow, IconButton, Dialog,
   DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Box,
   Chip, Tooltip, Divider, LinearProgress, FormControlLabel, Switch,
-  TableSortLabel, useMediaQuery
+  TableSortLabel, Collapse, useMediaQuery
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
 import PaidIcon from "@mui/icons-material/Paid";
-import { useEffect, useMemo, useState } from "react";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
+import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtMoney, fmtNum, fmtPct, fmtDate, anualizada } from "@/components/Money";
@@ -58,6 +60,16 @@ export default function InversoresPage() {
   const handleSort = (col) => {
     if (orderBy === col) setOrderDir(d => d === "asc" ? "desc" : "asc");
     else { setOrderBy(col); setOrderDir("desc"); }
+  };
+
+  // Filas expandidas del Resumen por inversor
+  const [expandedInv, setExpandedInv] = useState(new Set());
+  const toggleExpand = (id) => {
+    setExpandedInv(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
   };
   useEffect(() => {
     if (!proyecto) return;
@@ -306,6 +318,7 @@ export default function InversoresPage() {
               <Table size="small">
                 <TableHead>
                   <TableRow>
+                    <TableCell sx={{ width: 40 }} />
                     <SortHeader col="nombre"         label="Inversor"          orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
                     <SortHeader col="aportesUSD"     label="Aporte (USD)"      align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
                     <SortHeader col="ponderado"      label="Ponderado"         align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
@@ -329,39 +342,61 @@ export default function InversoresPage() {
                       return orderDir === "asc" ? Number(av || 0) - Number(bv || 0) : Number(bv || 0) - Number(av || 0);
                     };
                     return [...resumen].sort(cmp);
-                  })().map(r => (
-                    <TableRow
-                      key={r.id} hover
-                      sx={r.es_faltante ? { bgcolor: "rgba(15,42,74,0.04)" } : undefined}
-                    >
-                      <TableCell>
-                        <Stack direction="row" alignItems="center" spacing={1}>
-                          <Box>
-                            <Typography fontWeight={600} sx={{ fontStyle: r.es_faltante ? "italic" : "normal" }}>
-                              {r.nombre}
-                            </Typography>
-                            {r.contacto && <Typography variant="caption" color="text.secondary">{r.contacto}</Typography>}
-                            {r.es_faltante && (
-                              <Typography variant="caption" color="text.secondary" display="block">
-                                desde {r.fechaInicio}
+                  })().map(r => {
+                    const isOpen = expandedInv.has(r.id);
+                    return (
+                    <React.Fragment key={r.id}>
+                      <TableRow
+                        hover
+                        onClick={() => toggleExpand(r.id)}
+                        sx={{
+                          cursor: "pointer",
+                          "& > td": { borderBottom: isOpen ? "none" : undefined },
+                          ...(r.es_faltante ? { bgcolor: "rgba(15,42,74,0.04)" } : {}),
+                        }}
+                      >
+                        <TableCell sx={{ width: 40, pr: 0 }}>
+                          <IconButton size="small" sx={{ pointerEvents: "none" }}>
+                            {isOpen ? <KeyboardArrowDownIcon fontSize="small" /> : <KeyboardArrowRightIcon fontSize="small" />}
+                          </IconButton>
+                        </TableCell>
+                        <TableCell>
+                          <Stack direction="row" alignItems="center" spacing={1}>
+                            <Box>
+                              <Typography fontWeight={600} sx={{ fontStyle: r.es_faltante ? "italic" : "normal" }}>
+                                {r.nombre}
                               </Typography>
-                            )}
-                          </Box>
-                          {r.es_faltante && <Chip size="small" label="virtual" variant="outlined" />}
-                        </Stack>
-                      </TableCell>
-                      <TableCell align="right">{fmtMoney(r.aportesUSD, "USD")}</TableCell>
-                      <TableCell align="right">{fmtNum(r.ponderado, 0)}</TableCell>
-                      <TableCell align="right">{fmtPct(r.participacion)}</TableCell>
-                      <TableCell align="right">{totProy.ganancia > 0 ? fmtMoney(r.ganancia, "USD") : "—"}</TableCell>
-                      <TableCell align="right">{totProy.ganancia > 0 && r.aportesUSD > 0 ? fmtPct(r.gananciaPct) : "—"}</TableCell>
-                      <TableCell align="right">
-                        <Typography fontWeight={700}>
-                          {totProy.ganancia > 0 ? fmtMoney(r.totalDevolver, "USD") : fmtMoney(r.aportesUSD, "USD")}
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                              {r.contacto && <Typography variant="caption" color="text.secondary">{r.contacto}</Typography>}
+                              {r.es_faltante && (
+                                <Typography variant="caption" color="text.secondary" display="block">
+                                  desde {fmtDate(r.fechaInicio)}
+                                </Typography>
+                              )}
+                            </Box>
+                            {r.es_faltante && <Chip size="small" label="virtual" variant="outlined" />}
+                          </Stack>
+                        </TableCell>
+                        <TableCell align="right">{fmtMoney(r.aportesUSD, "USD")}</TableCell>
+                        <TableCell align="right">{fmtNum(r.ponderado, 0)}</TableCell>
+                        <TableCell align="right">{fmtPct(r.participacion)}</TableCell>
+                        <TableCell align="right">{totProy.ganancia > 0 ? fmtMoney(r.ganancia, "USD") : "—"}</TableCell>
+                        <TableCell align="right">{totProy.ganancia > 0 && r.aportesUSD > 0 ? fmtPct(r.gananciaPct) : "—"}</TableCell>
+                        <TableCell align="right">
+                          <Typography fontWeight={700}>
+                            {totProy.ganancia > 0 ? fmtMoney(r.totalDevolver, "USD") : fmtMoney(r.aportesUSD, "USD")}
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                      <TableRow sx={{ "& > td": { p: 0, border: 0 } }}>
+                        <TableCell colSpan={8} sx={{ bgcolor: "rgba(15,42,74,0.02)" }}>
+                          <Collapse in={isOpen} timeout="auto" unmountOnExit>
+                            <DetalleInversor r={r} aportesC={aportesC} totProy={totProy} />
+                          </Collapse>
+                        </TableCell>
+                      </TableRow>
+                    </React.Fragment>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </Box>
@@ -702,6 +737,117 @@ function KPI({ title, value, hint }) {
         </CardContent>
       </Card>
     </Grid>
+  );
+}
+
+function DetalleInversor({ r, aportesC, totProy }) {
+  // Aportes reales del inversor; para Faltante, mostramos un único pseudo-aporte.
+  const items = r.es_faltante
+    ? [{
+        id: "__faltante__",
+        fecha: r.fechaInicio,
+        _fechaInicioCalculo: r.fechaInicio,
+        monto: r.aportesUSD,
+        _dias: r.diasProm,
+        _ponderado: r.ponderado,
+        _participacion: r.participacion,
+        _ganancia: r.ganancia,
+        observacion: "Aporte virtual (capital aún no comprometido)",
+        entra_a_caja: false,
+      }]
+    : aportesC.filter(a => a.inversor_id === r.id);
+
+  return (
+    <Box sx={{ px: { xs: 1, sm: 3 }, py: 2 }}>
+      <Stack direction="row" alignItems="baseline" spacing={1} sx={{ mb: 1 }}>
+        <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>
+          Detalle de aportes
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          ({items.length} {items.length === 1 ? "aporte" : "aportes"})
+        </Typography>
+      </Stack>
+
+      {items.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">Sin aportes registrados.</Typography>
+      ) : (
+        <Box sx={{ overflowX: "auto" }}>
+          <Table size="small" sx={{ "& thead .MuiTableCell-head": { bgcolor: "transparent" } }}>
+            <TableHead>
+              <TableRow>
+                <TableCell sx={{ width: 110 }}>Ingreso</TableCell>
+                <TableCell sx={{ width: 110 }}>Inicio cálc.</TableCell>
+                <TableCell align="right">Monto</TableCell>
+                <TableCell align="right">Días</TableCell>
+                <TableCell align="right">Ponderado</TableCell>
+                <TableCell align="right">% participación</TableCell>
+                <TableCell align="right">Ganancia estim.</TableCell>
+                <TableCell>Observación</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {items.map((a, idx) => (
+                <TableRow key={a.id ?? idx}>
+                  <TableCell sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtDate(a.fecha)}</TableCell>
+                  <TableCell sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtDate(a._fechaInicioCalculo)}</TableCell>
+                  <TableCell align="right">
+                    <Stack direction="row" justifyContent="flex-end" alignItems="center" spacing={0.75}>
+                      {a.entra_a_caja === false && (
+                        <Chip size="small" label="no caja" variant="outlined" sx={{ borderStyle: "dashed", height: 18, fontSize: 10 }} />
+                      )}
+                      <Typography component="span" fontWeight={600}>{fmtMoney(a.monto, "USD")}</Typography>
+                    </Stack>
+                  </TableCell>
+                  <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtNum(a._dias, 0)}</TableCell>
+                  <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtNum(a._ponderado, 0)}</TableCell>
+                  <TableCell align="right">{fmtPct(a._participacion)}</TableCell>
+                  <TableCell align="right">{totProy.ganancia > 0 ? fmtMoney(a._ganancia, "USD") : "—"}</TableCell>
+                  <TableCell>
+                    {a.observacion ? (
+                      <Typography variant="body2" color="text.secondary" sx={{
+                        maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>
+                        {a.observacion}
+                      </Typography>
+                    ) : "—"}
+                  </TableCell>
+                </TableRow>
+              ))}
+              {items.length > 1 && (
+                <TableRow sx={{ bgcolor: "rgba(15,42,74,0.04)" }}>
+                  <TableCell colSpan={2} sx={{ fontWeight: 700 }}>Totales</TableCell>
+                  <TableCell align="right" sx={{ fontWeight: 700 }}>{fmtMoney(r.aportesUSD, "USD")}</TableCell>
+                  <TableCell />
+                  <TableCell align="right" sx={{ fontWeight: 700 }}>{fmtNum(r.ponderado, 0)}</TableCell>
+                  <TableCell align="right" sx={{ fontWeight: 700 }}>{fmtPct(r.participacion)}</TableCell>
+                  <TableCell align="right" sx={{ fontWeight: 700 }}>
+                    {totProy.ganancia > 0 ? fmtMoney(r.ganancia, "USD") : "—"}
+                  </TableCell>
+                  <TableCell />
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </Box>
+      )}
+
+      {/* Frase resumen de cálculo */}
+      <Box sx={{ mt: 1.5, px: 0.5 }}>
+        <Typography variant="caption" color="text.secondary">
+          Ponderación = Σ(monto × días). % participación = ponderado / total. Total a devolver = aporte + ganancia.
+        </Typography>
+        {!r.es_faltante && (
+          <Typography variant="body2" sx={{ mt: 0.5 }}>
+            <Box component="span" fontWeight={600}>{r.nombre}</Box> aporta <Box component="span" fontWeight={600}>{fmtMoney(r.aportesUSD, "USD")}</Box>,
+            su ponderado es <Box component="span" fontWeight={600}>{fmtNum(r.ponderado, 0)}</Box> ({fmtPct(r.participacion)} del proyecto).
+            {totProy.ganancia > 0 && (
+              <> Le corresponderían <Box component="span" fontWeight={700} sx={{ color: "success.main" }}>{fmtMoney(r.ganancia, "USD")}</Box> de ganancia,
+              total a devolver <Box component="span" fontWeight={700}>{fmtMoney(r.totalDevolver, "USD")}</Box>.</>
+            )}
+          </Typography>
+        )}
+      </Box>
+    </Box>
   );
 }
 
