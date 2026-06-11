@@ -10,6 +10,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
+import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "@mui/material/styles";
 import { supabase } from "@/lib/supabaseClient";
@@ -47,7 +48,8 @@ export default function LineaTiempoPage() {
 
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
 
-  const tareasDe = (hitoId) => tareas.filter(t => t.hito_id === hitoId);
+  const tareasDe = (hitoId) =>
+    tareas.filter(t => t.hito_id === hitoId).sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
 
   // Fracción completada de un hito (por subtareas, o por flag completado)
   const fraccion = (h) => {
@@ -117,6 +119,37 @@ export default function LineaTiempoPage() {
   const delTarea = async (t) => {
     const { error } = await supabase.from("hito_tareas").delete().eq("id", t.id);
     if (error) alert(error.message); else reload();
+  };
+
+  // Drag & drop para reordenar tareas dentro de una etapa
+  const [drag, setDrag] = useState(null); // { hitoId, fromId }
+
+  const reordenarTareas = async (hitoId, fromId, toId) => {
+    if (fromId === toId) return;
+    const lista = tareasDe(hitoId);
+    const fromIdx = lista.findIndex(t => t.id === fromId);
+    const toIdx = lista.findIndex(t => t.id === toId);
+    if (fromIdx < 0 || toIdx < 0) return;
+
+    const nueva = [...lista];
+    const [movida] = nueva.splice(fromIdx, 1);
+    nueva.splice(toIdx, 0, movida);
+
+    // Reasignar orden 1..n y actualizar estado optimista
+    const conOrden = nueva.map((t, i) => ({ ...t, orden: i + 1 }));
+    setTareas(prev => prev.map(t => {
+      const u = conOrden.find(x => x.id === t.id);
+      return u ? { ...t, orden: u.orden } : t;
+    }));
+
+    // Persistir nuevos órdenes (sólo los que cambiaron)
+    const cambios = conOrden.filter(t => {
+      const orig = lista.find(x => x.id === t.id);
+      return orig && orig.orden !== t.orden;
+    });
+    await Promise.all(cambios.map(t =>
+      supabase.from("hito_tareas").update({ orden: t.orden }).eq("id", t.id)
+    ));
   };
 
   if (!proyecto) return <Alert severity="info">Seleccioná un proyecto.</Alert>;
@@ -261,8 +294,41 @@ export default function LineaTiempoPage() {
                         )}
 
                         <Stack spacing={0}>
-                          {ts.map((t) => (
-                            <Stack key={t.id} direction="row" alignItems="center" sx={{ "&:hover .del": { opacity: 1 } }}>
+                          {ts.map((t) => {
+                            const dragging = drag?.fromId === t.id;
+                            const isTarget = drag?.hitoId === h.id && drag?.overId === t.id && drag?.fromId !== t.id;
+                            return (
+                            <Stack
+                              key={t.id} direction="row" alignItems="center"
+                              onDragOver={(e) => {
+                                if (drag?.hitoId !== h.id) return;
+                                e.preventDefault();
+                                if (drag.overId !== t.id) setDrag(d => ({ ...d, overId: t.id }));
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                if (drag?.hitoId === h.id) reordenarTareas(h.id, drag.fromId, t.id);
+                                setDrag(null);
+                              }}
+                              sx={{
+                                "&:hover .del": { opacity: 1 },
+                                "&:hover .drag": { opacity: 1 },
+                                opacity: dragging ? 0.4 : 1,
+                                borderTop: isTarget ? "2px solid" : "2px solid transparent",
+                                borderTopColor: isTarget ? "secondary.main" : "transparent",
+                              }}
+                            >
+                              <Tooltip title="Arrastrá para reordenar">
+                                <IconButton
+                                  className="drag" size="small"
+                                  draggable
+                                  onDragStart={() => setDrag({ hitoId: h.id, fromId: t.id, overId: t.id })}
+                                  onDragEnd={() => setDrag(null)}
+                                  sx={{ cursor: "grab", opacity: { xs: 1, sm: 0 }, transition: "opacity .15s", touchAction: "none" }}
+                                >
+                                  <DragIndicatorIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
                               <FormControlLabel
                                 sx={{ flexGrow: 1, m: 0 }}
                                 control={<Checkbox size="small" checked={t.completado} onChange={() => toggleTarea(t)} />}
@@ -278,7 +344,8 @@ export default function LineaTiempoPage() {
                                 </IconButton>
                               </Tooltip>
                             </Stack>
-                          ))}
+                            );
+                          })}
                         </Stack>
 
                         <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
