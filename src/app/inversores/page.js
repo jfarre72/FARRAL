@@ -4,7 +4,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableRow, IconButton, Dialog,
   DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Box,
   Chip, Tooltip, Divider, LinearProgress, FormControlLabel, Switch,
-  TableSortLabel, Collapse, useMediaQuery
+  TableSortLabel, useMediaQuery
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
@@ -387,13 +387,13 @@ export default function InversoresPage() {
                           </Typography>
                         </TableCell>
                       </TableRow>
-                      <TableRow sx={{ "& > td": { p: 0, border: 0 } }}>
-                        <TableCell colSpan={8} sx={{ bgcolor: "rgba(15,42,74,0.02)" }}>
-                          <Collapse in={isOpen} timeout="auto" unmountOnExit>
+                      {isOpen && (
+                        <TableRow sx={{ height: "auto !important", "&:hover": { bgcolor: "transparent" }, "& > td": { p: 0, border: 0 } }}>
+                          <TableCell colSpan={8} sx={{ bgcolor: "rgba(15,42,74,0.02)", borderBottom: "1px solid rgba(15,42,74,0.1)" }}>
                             <DetalleInversor r={r} aportesC={aportesC} totProy={totProy} />
-                          </Collapse>
-                        </TableCell>
-                      </TableRow>
+                          </TableCell>
+                        </TableRow>
+                      )}
                     </React.Fragment>
                     );
                   })}
