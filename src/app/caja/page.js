@@ -675,16 +675,7 @@ export default function CajaPage() {
         );
       })()}
 
-      <Box>
-        <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>
-          <Tab label="Movimientos" />
-          <Tab label="Egresos por categoría" />
-          <Tab label="Egresos por etapa" />
-        </Tabs>
-        <Divider />
-      </Box>
-
-      {tab === 0 && (
+      {(
         <Card>
           <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
             <Stack
@@ -819,102 +810,6 @@ export default function CajaPage() {
                 </Table>
               </Box>
             )}
-          </CardContent>
-        </Card>
-      )}
-
-      {tab === 1 && (
-        <Card>
-          <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
-            {porCategoria.length === 0 ? (
-              <EmptyState text="Aún no hay egresos registrados." />
-            ) : (
-              <Box sx={{ overflowX: "auto" }}>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Categoría</TableCell>
-                      <TableCell align="right">Total ARS</TableCell>
-                      <TableCell align="right">Total USD</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {porCategoria.map((c) => (
-                      <TableRow key={c.cat} hover>
-                        <TableCell><Chip size="small" label={c.cat} /></TableCell>
-                        <TableCell align="right">{c.ARS ? fmtMoney(c.ARS, "ARS") : "—"}</TableCell>
-                        <TableCell align="right">{c.USD ? fmtMoney(c.USD, "USD") : "—"}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </Box>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {tab === 2 && (
-        <Card>
-          <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
-            {porEtapa.length === 0 ? (
-              <EmptyState text="Aún no hay egresos asociados a una etapa." />
-            ) : (() => {
-              const totARS = porEtapa.reduce((s, e) => s + e.ARS, 0);
-              const totUSD = porEtapa.reduce((s, e) => s + e.USD, 0);
-              return (
-                <Box sx={{ overflowX: "auto" }}>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Etapa</TableCell>
-                        <TableCell align="right"># egresos</TableCell>
-                        <TableCell align="right">Total ARS</TableCell>
-                        <TableCell align="right">Total USD</TableCell>
-                        <TableCell align="right">% del total (ARS)</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {porEtapa.map((e) => {
-                        const pctARS = totARS > 0 ? (e.ARS / totARS) * 100 : 0;
-                        return (
-                          <TableRow key={e.etapa} hover>
-                            <TableCell>
-                              <Chip
-                                size="small"
-                                label={e.etapa}
-                                color={e.etapa === "Sin etapa" ? "default" : "primary"}
-                                variant={e.etapa === "Sin etapa" ? "outlined" : "filled"}
-                              />
-                            </TableCell>
-                            <TableCell align="right">{e.n}</TableCell>
-                            <TableCell align="right">{e.ARS ? fmtMoney(e.ARS, "ARS") : "—"}</TableCell>
-                            <TableCell align="right">{e.USD ? fmtMoney(e.USD, "USD") : "—"}</TableCell>
-                            <TableCell align="right">
-                              {e.ARS > 0 ? (
-                                <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}>
-                                  <Box sx={{ width: 80, height: 6, bgcolor: "rgba(15,42,74,0.08)", borderRadius: 3, overflow: "hidden" }}>
-                                    <Box sx={{ height: "100%", width: `${Math.min(100, pctARS)}%`, bgcolor: "secondary.main" }} />
-                                  </Box>
-                                  <Typography variant="caption" color="text.secondary">{pctARS.toFixed(1)}%</Typography>
-                                </Box>
-                              ) : "—"}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                      <TableRow sx={{ bgcolor: "rgba(15,42,74,0.04)" }}>
-                        <TableCell sx={{ fontWeight: 700 }}>Total</TableCell>
-                        <TableCell />
-                        <TableCell align="right" sx={{ fontWeight: 700 }}>{totARS ? fmtMoney(totARS, "ARS") : "—"}</TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 700 }}>{totUSD ? fmtMoney(totUSD, "USD") : "—"}</TableCell>
-                        <TableCell />
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </Box>
-              );
-            })()}
           </CardContent>
         </Card>
       )}

@@ -156,21 +156,6 @@ export default function Home() {
               <Typography color="text.secondary">{proyecto.descripcion}</Typography>
             )}
           </Box>
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            {stats?.anualProy != null && (
-              <Chip
-                color="success"
-                variant="filled"
-                label={`Rendimiento anualizado · ${fmtPct(stats.anualProy, 2)}`}
-                sx={{ fontWeight: 700 }}
-              />
-            )}
-            <Chip
-              color="primary"
-              variant="outlined"
-              label={`Recaudado · ${fmtPct(stats?.pctRecaudado ?? 0, 1)}`}
-            />
-          </Stack>
         </Stack>
       </Box>
 

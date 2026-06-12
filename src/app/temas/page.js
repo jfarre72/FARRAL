@@ -242,21 +242,19 @@ export default function TemasPage() {
             </ToggleButtonGroup>
           </Stack>
 
-          {/* Buscador de temas */}
-          <TextField
-            size="small" fullWidth placeholder="Buscar tema, responsable u observación…"
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            sx={{ mb: 1.5 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>
-              ),
-            }}
-          />
-
-          {/* Alta rápida */}
-          <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+          {/* Buscador + alta rápida en una línea */}
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mb: 2 }}>
+            <TextField
+              size="small" placeholder="Buscar…"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              sx={{ width: { xs: "100%", sm: 240 }, flexShrink: 0 }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>
+                ),
+              }}
+            />
             <TextField
               size="small" fullWidth placeholder="Agregar tema rápido…"
               value={nuevo}
