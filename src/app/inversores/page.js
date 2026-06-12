@@ -53,7 +53,7 @@ export default function InversoresPage() {
   const [editApId, setEditApId] = useState(null);
   const [errAp, setErrAp] = useState(null);
 
-  // What-if: fecha de venta del proyecto editable desde el Resumen.
+  // What-if: fecha de entrega del proyecto editable desde el Resumen.
   // Reemplaza temporalmente a fecha_fin. Persiste por proyecto en localStorage.
   const [fechaVentaOverride, setFechaVentaOverride] = useState("");
 
@@ -322,7 +322,7 @@ export default function InversoresPage() {
       {tab === 0 && (
         <Card>
           <CardContent>
-            {/* Simulador de fecha de venta */}
+            {/* Simulador de fecha de entrega */}
             <Box sx={{
               mb: 2, p: 1.5, borderRadius: 2,
               border: "1px dashed", borderColor: "divider",
@@ -330,13 +330,13 @@ export default function InversoresPage() {
             }}>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }}>
                 <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                  <Typography variant="subtitle2">Simular fecha de venta</Typography>
+                  <Typography variant="subtitle2">Simular fecha de entrega</Typography>
                   <Typography variant="caption" color="text.secondary">
                     Reemplaza temporalmente la fecha de fin del proyecto para ver el impacto en ponderación, % participación, ganancia y rendimiento anualizado.
                   </Typography>
                 </Box>
                 <TextField
-                  type="date" label="Fecha de venta (simulada)"
+                  type="date" label="Fecha de entrega (simulada)"
                   InputLabelProps={{ shrink: true }}
                   sx={{ width: { xs: "100%", sm: 220 } }}
                   value={fechaVentaOverride}
@@ -859,7 +859,7 @@ function DetalleInversor({ r, aportesC, totProy }) {
           <Chip
             size="small"
             variant="outlined"
-            label={`Fecha de venta: ${fmtDate(totProy.fechaCorte)}`}
+            label={`Fecha de entrega: ${fmtDate(totProy.fechaCorte)}`}
             sx={{ fontSize: 11, fontWeight: 600, bgcolor: "background.paper" }}
           />
           {totProy.ganancia > 0 && (
