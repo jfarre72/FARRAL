@@ -18,6 +18,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtMoney, fmtNum, fmtPct, fmtDate } from "@/components/Money";
+import PresupuestoFotos from "@/components/PresupuestoFotos";
 
 const emptyContratista = { nombre: "", telefono: "", rubro: "", observaciones: "" };
 const emptyPresupuesto = {
@@ -647,6 +648,9 @@ export default function PresupuestosPage() {
                       {p.observaciones}
                     </Typography>
                   )}
+
+                  <Divider sx={{ my: 1.5 }} />
+                  <PresupuestoFotos presupuestoId={p.id} />
 
                   {/* Historial de pagos imputados a este presupuesto */}
                   {(() => {
