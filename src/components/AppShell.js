@@ -11,6 +11,7 @@ import GroupsIcon from "@mui/icons-material/Groups";
 import TimelineIcon from "@mui/icons-material/Timeline";
 import PointOfSaleIcon from "@mui/icons-material/PointOfSale";
 import RequestQuoteIcon from "@mui/icons-material/RequestQuote";
+import ChecklistIcon from "@mui/icons-material/Checklist";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -25,6 +26,7 @@ const NAV = [
   { label: "Caja",            href: "/caja",          icon: <PointOfSaleIcon /> },
   { label: "Presupuestos",    href: "/presupuestos",  icon: <RequestQuoteIcon /> },
   { label: "Hitos plan",      href: "/linea-tiempo",  icon: <TimelineIcon /> },
+  { label: "Seguimiento",     href: "/temas",         icon: <ChecklistIcon /> },
 ];
 
 const DRAWER_WIDTH = 240;
