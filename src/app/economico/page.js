@@ -7,7 +7,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
-import { fmtMoney, fmtPct, fmtDate } from "@/components/Money";
+import { fmtMoney, fmtPct, fmtDate, fmtNum } from "@/components/Money";
 import { getCache, setCache } from "@/lib/dataCache";
 
 // USD imputable a la etapa/concepto = el gasto REAL valuado en USD.
@@ -208,21 +208,26 @@ export default function EconomicoPage() {
                     <TableCell>Detalle</TableCell>
                     <TableCell>Categoría</TableCell>
                     <TableCell align="right">Monto</TableCell>
+                    <TableCell align="right">TC</TableCell>
                     <TableCell align="right">Imputado (USD)</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {detalleGastos.map(({ mv, usd }) => (
+                  {detalleGastos.map(({ mv, usd }) => {
+                    const tc = Number(mv.cambio_tipo_cambio || mv.tipo_cambio_gasto || 0);
+                    return (
                     <TableRow key={mv.id} hover>
                       <TableCell sx={{ whiteSpace: "nowrap" }}>{fmtDate(mv.fecha)}</TableCell>
                       <TableCell>{mv.descripcion || "—"}</TableCell>
                       <TableCell>{mv.categoria ? <Chip size="small" label={mv.categoria} /> : "—"}</TableCell>
                       <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>{fmtMoney(mv.monto, mv.moneda)}</TableCell>
+                      <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>{tc > 0 ? fmtNum(tc, 2) : "—"}</TableCell>
                       <TableCell align="right" sx={{ whiteSpace: "nowrap", fontWeight: 600 }}>{fmtMoney(usd, "USD")}</TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                   <TableRow sx={{ "& > td": { borderTop: "2px solid", borderColor: "divider" } }}>
-                    <TableCell colSpan={4}><Typography fontWeight={700}>Total imputado</Typography></TableCell>
+                    <TableCell colSpan={5}><Typography fontWeight={700}>Total imputado</Typography></TableCell>
                     <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totalDetalle, "USD")}</Typography></TableCell>
                   </TableRow>
                 </TableBody>
