@@ -13,6 +13,8 @@ import PointOfSaleIcon from "@mui/icons-material/PointOfSale";
 import RequestQuoteIcon from "@mui/icons-material/RequestQuote";
 import ChecklistIcon from "@mui/icons-material/Checklist";
 import InsightsIcon from "@mui/icons-material/Insights";
+import PhotoLibraryIcon from "@mui/icons-material/PhotoLibrary";
+import DescriptionIcon from "@mui/icons-material/Description";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -29,6 +31,8 @@ const NAV = [
   { label: "Hitos plan",      href: "/linea-tiempo",  icon: <TimelineIcon /> },
   { label: "Seguimiento",     href: "/temas",         icon: <ChecklistIcon /> },
   { label: "Indicadores",     href: "/indicadores",   icon: <InsightsIcon /> },
+  { label: "Galería",         href: "/galeria",       icon: <PhotoLibraryIcon /> },
+  { label: "Reportería",      href: "/reporteria",    icon: <DescriptionIcon /> },
 ];
 
 const DRAWER_WIDTH = 240;

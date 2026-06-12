@@ -66,6 +66,31 @@ function DateField({ value, onCommit, disabled, label, fullWidth, sx }) {
   );
 }
 
+// Input compacto de % (0-100) que guarda al salir del campo (blur/Enter).
+function PctField({ value, onCommit }) {
+  const [local, setLocal] = useState(String(value ?? 0));
+  const [focused, setFocused] = useState(false);
+  useEffect(() => { if (!focused) setLocal(String(value ?? 0)); }, [value, focused]);
+  const commit = () => {
+    setFocused(false);
+    const v = Math.max(0, Math.min(100, Math.round(Number(local) || 0)));
+    if (v !== Number(value)) onCommit(v);
+    setLocal(String(v));
+  };
+  return (
+    <TextField
+      type="number" size="small" value={local}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+      inputProps={{ min: 0, max: 100, style: { textAlign: "right", padding: "4px 6px", width: 38 } }}
+      InputProps={{ endAdornment: <Typography variant="caption" color="text.secondary">%</Typography> }}
+      sx={{ width: 78, flexShrink: 0 }}
+    />
+  );
+}
+
 export default function LineaTiempoPage() {
   const { proyecto } = useProjects();
   const theme = useTheme();
@@ -103,10 +128,13 @@ export default function LineaTiempoPage() {
   const tareasDe = (hitoId) =>
     tareas.filter(t => t.hito_id === hitoId).sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
 
-  // Fracción completada de un hito (por subtareas, o por flag completado)
+  // Avance de una tarea (0-100): usa 'avance', con fallback a completado.
+  const avanceTarea = (t) => (t.avance != null ? Number(t.avance) : (t.completado ? 100 : 0));
+
+  // Fracción completada de un hito (promedio de avance de subtareas).
   const fraccion = (h) => {
     const ts = tareasDe(h.id);
-    if (ts.length > 0) return ts.filter(t => t.completado).length / ts.length;
+    if (ts.length > 0) return ts.reduce((s, t) => s + avanceTarea(t), 0) / (ts.length * 100);
     return h.completado ? 1 : 0;
   };
 
@@ -151,10 +179,23 @@ export default function LineaTiempoPage() {
   };
 
   const toggleTarea = async (t) => {
-    // Optimista
-    setTareas(prev => prev.map(x => x.id === t.id ? { ...x, completado: !x.completado } : x));
-    const { error } = await supabase.from("hito_tareas")
-      .update({ completado: !t.completado }).eq("id", t.id);
+    const avance = t.completado ? 0 : 100;
+    const patch = { completado: !t.completado, avance, completado_at: !t.completado ? new Date().toISOString() : null };
+    setTareas(prev => prev.map(x => x.id === t.id ? { ...x, ...patch } : x));
+    const { error } = await supabase.from("hito_tareas").update(patch).eq("id", t.id);
+    if (error) { alert(error.message); reload(); }
+  };
+
+  // Setea el % de avance de una tarea; 100% la marca como completada.
+  const setAvanceTarea = async (t, valor) => {
+    const avance = Math.max(0, Math.min(100, Math.round(Number(valor) || 0)));
+    const completado = avance >= 100;
+    const eraCompleto = avanceTarea(t) >= 100;
+    const patch = { avance, completado };
+    if (completado && !eraCompleto) patch.completado_at = new Date().toISOString();
+    if (!completado) patch.completado_at = null;
+    setTareas(prev => prev.map(x => x.id === t.id ? { ...x, ...patch } : x));
+    const { error } = await supabase.from("hito_tareas").update(patch).eq("id", t.id);
     if (error) { alert(error.message); reload(); }
   };
 
@@ -434,6 +475,9 @@ export default function LineaTiempoPage() {
                                   </Typography>
                                 }
                               />
+                              <Box sx={{ px: 0.5 }} onClick={(e) => e.stopPropagation()}>
+                                <PctField value={avanceTarea(t)} onCommit={(v) => setAvanceTarea(t, v)} />
+                              </Box>
                               <Tooltip title="Eliminar tarea">
                                 <IconButton className="del" size="small" sx={{ opacity: { xs: 1, sm: 0 }, transition: "opacity .15s" }} onClick={() => delTarea(t)}>
                                   <DeleteOutlineIcon fontSize="small" />
