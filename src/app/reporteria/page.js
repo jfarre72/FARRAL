@@ -182,6 +182,7 @@ export default function ReporteriaPage() {
       title: `Reporte de avance — ${mesLabel}`,
       subtitle: `${esc(proyecto.nombre)} · Generado el ${fmtDate(new Date().toISOString())}`,
       bodyHtml: body,
+      logoUrl: `${window.location.origin}/logo-farral.png`,
     });
   };
 
