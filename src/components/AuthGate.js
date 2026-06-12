@@ -51,7 +51,7 @@ export default function AuthGate({ children }) {
               <Box
                 component="img" src="/logo-farral.png" alt="FARRAL"
                 onError={(e) => { e.currentTarget.style.display = "none"; }}
-                sx={{ width: "100%", maxWidth: 220, height: "auto", mx: "auto", display: "block", mb: 1 }}
+                sx={{ width: "100%", maxWidth: 220, height: "auto", display: "block", mx: "auto", alignSelf: "center", mb: 1 }}
               />
               <Box>
                 <Typography variant="h5" sx={{ fontWeight: 800 }}>

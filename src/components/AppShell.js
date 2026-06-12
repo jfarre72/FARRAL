@@ -48,10 +48,6 @@ export default function AppShell({ children }) {
 
   const drawer = (
     <Box sx={{ width: DRAWER_WIDTH, overflowX: "hidden" }} role="presentation">
-      <Toolbar sx={{ px: 2 }}>
-        <Logo />
-      </Toolbar>
-      <Divider />
       <List>
         {NAV.map((item) => (
           <ListItemButton
@@ -140,6 +136,7 @@ export default function AppShell({ children }) {
         </Drawer>
       ) : (
         <Drawer open={open} onClose={() => setOpen(false)}>
+          <Toolbar />
           {drawer}
         </Drawer>
       )}
