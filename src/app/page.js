@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useProjects } from "@/components/ProjectContext";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { fmtMoney, fmtNum, fmtPct } from "@/components/Money";
+import { fmtMoney, fmtNum, fmtPct, fmtDate } from "@/components/Money";
 
 export default function Home() {
   const { proyecto, loading, error } = useProjects();
@@ -240,7 +240,7 @@ export default function Home() {
                   </Typography>
                 </Stack>
                 <Typography color="text.secondary" variant="body2" sx={{ minWidth: 90, textAlign: "right" }}>
-                  {h.fecha_estimada ?? "—"}
+                  {fmtDate(h.fecha_estimada)}
                 </Typography>
               </Stack>
             ))}

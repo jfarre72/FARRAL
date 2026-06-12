@@ -11,7 +11,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
-import { fmtNum } from "@/components/Money";
+import { fmtNum, fmtDate } from "@/components/Money";
 
 const empty = {
   nombre: "", descripcion: "",
@@ -140,8 +140,8 @@ export default function ProyectosPage() {
                       <TableCell align="right">{fmtNum(p.m2_semicubiertos)}</TableCell>
                       <TableCell align="right">{fmtNum(p.m2_totales)}</TableCell>
                       <TableCell align="right">{fmtNum(p.m2_terreno)}</TableCell>
-                      <TableCell>{p.fecha_inicio ?? "—"}</TableCell>
-                      <TableCell>{p.fecha_fin ?? "—"}</TableCell>
+                      <TableCell>{fmtDate(p.fecha_inicio)}</TableCell>
+                      <TableCell>{fmtDate(p.fecha_fin)}</TableCell>
                       <TableCell align="right">
                         <Tooltip title="Editar"><IconButton onClick={() => openEdit(p)}><EditIcon fontSize="small" /></IconButton></Tooltip>
                         <Tooltip title="Eliminar"><IconButton onClick={() => handleDelete(p.id)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>

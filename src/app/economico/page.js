@@ -1,12 +1,13 @@
 "use client";
 import {
   Card, CardContent, Stack, Typography, Alert, Box, LinearProgress,
-  Table, TableHead, TableBody, TableRow, TableCell, TableContainer
+  Table, TableHead, TableBody, TableRow, TableCell, TableContainer,
+  Dialog, DialogTitle, DialogContent, DialogActions, Button, Chip
 } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
-import { fmtMoney, fmtPct } from "@/components/Money";
+import { fmtMoney, fmtPct, fmtDate } from "@/components/Money";
 import { getCache, setCache } from "@/lib/dataCache";
 
 // USD imputable a la etapa/concepto = el gasto REAL valuado en USD.
@@ -33,12 +34,15 @@ function Barra({ pct }) {
   );
 }
 
-function TablaSeguimiento({ titulo, filas, totalPlan, totalReal }) {
+function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick }) {
   const pctTot = totalPlan > 0 ? (totalReal / totalPlan) * 100 : null;
   return (
     <Card>
       <CardContent>
         <Typography variant="subtitle1" gutterBottom>{titulo}</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
+          Tocá una fila para ver el detalle de los gastos imputados.
+        </Typography>
         <TableContainer>
           <Table size="small" sx={{ minWidth: 560 }}>
             <TableHead>
@@ -53,8 +57,16 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal }) {
             <TableBody>
               {filas.map((f) => {
                 const pct = f.plan > 0 ? (f.real / f.plan) * 100 : null;
+                const clickable = f.real > 0;
                 return (
-                  <TableRow key={f.nombre} hover sx={f.otros ? { bgcolor: "rgba(15,42,74,0.03)" } : undefined}>
+                  <TableRow
+                    key={f.nombre} hover
+                    onClick={clickable ? () => onRowClick(f) : undefined}
+                    sx={{
+                      ...(f.otros ? { bgcolor: "rgba(15,42,74,0.03)" } : {}),
+                      cursor: clickable ? "pointer" : "default",
+                    }}
+                  >
                     <TableCell>
                       <Typography variant="body2" sx={{ fontStyle: f.otros ? "italic" : "normal" }}>{f.nombre}</Typography>
                     </TableCell>
@@ -91,6 +103,7 @@ export default function EconomicoPage() {
   const [hitos, setHitos] = useState(cacheInit?.hitos ?? []);
   const [movs, setMovs] = useState(cacheInit?.movs ?? []);
   const [loading, setLoading] = useState(true);
+  const [detalle, setDetalle] = useState(null); // { tipo: 'concepto'|'etapa', nombre, otros }
 
   const reload = async () => {
     if (!proyecto) return;
@@ -143,6 +156,24 @@ export default function EconomicoPage() {
     return { filasConcepto, totPlanC, totRealC, filasEtapa, totPlanE, totRealE };
   }, [conceptos, hitos, movs]);
 
+  // Egresos que componen la fila seleccionada, con su USD imputado.
+  const detalleGastos = useMemo(() => {
+    if (!detalle) return [];
+    const nombresC = new Set(conceptos.map(c => c.nombre));
+    return movs
+      .map(mv => ({ mv, usd: gastoUSD(mv) }))
+      .filter(({ mv, usd }) => {
+        if (usd <= 0) return false;
+        if (detalle.tipo === "etapa") return mv.etapa === detalle.nombre;
+        // concepto
+        if (detalle.otros) return !mv.concepto || !nombresC.has(mv.concepto);
+        return mv.concepto === detalle.nombre;
+      })
+      .sort((a, b) => (a.mv.fecha < b.mv.fecha ? 1 : -1));
+  }, [detalle, movs, conceptos]);
+
+  const totalDetalle = detalleGastos.reduce((s, d) => s + d.usd, 0);
+
   if (!proyecto) return <Alert severity="info">Seleccioná un proyecto.</Alert>;
 
   return (
@@ -156,8 +187,53 @@ export default function EconomicoPage() {
 
       {loading && <LinearProgress />}
 
-      <TablaSeguimiento titulo="Por concepto" filas={filasConcepto} totalPlan={totPlanC} totalReal={totRealC} />
-      <TablaSeguimiento titulo="Por etapa (Obra)" filas={filasEtapa} totalPlan={totPlanE} totalReal={totRealE} />
+      <TablaSeguimiento titulo="Por concepto" filas={filasConcepto} totalPlan={totPlanC} totalReal={totRealC}
+        onRowClick={(f) => setDetalle({ tipo: "concepto", nombre: f.nombre, otros: !!f.otros })} />
+      <TablaSeguimiento titulo="Por etapa (Obra)" filas={filasEtapa} totalPlan={totPlanE} totalReal={totRealE}
+        onRowClick={(f) => setDetalle({ tipo: "etapa", nombre: f.nombre })} />
+
+      <Dialog open={!!detalle} onClose={() => setDetalle(null)} fullWidth maxWidth="md">
+        <DialogTitle>
+          Gastos imputados · {detalle?.nombre}
+        </DialogTitle>
+        <DialogContent dividers>
+          {detalleGastos.length === 0 ? (
+            <Alert severity="info">No hay gastos imputados.</Alert>
+          ) : (
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Fecha</TableCell>
+                    <TableCell>Detalle</TableCell>
+                    <TableCell>Categoría</TableCell>
+                    <TableCell align="right">Monto</TableCell>
+                    <TableCell align="right">Imputado (USD)</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {detalleGastos.map(({ mv, usd }) => (
+                    <TableRow key={mv.id} hover>
+                      <TableCell sx={{ whiteSpace: "nowrap" }}>{fmtDate(mv.fecha)}</TableCell>
+                      <TableCell>{mv.descripcion || "—"}</TableCell>
+                      <TableCell>{mv.categoria ? <Chip size="small" label={mv.categoria} /> : "—"}</TableCell>
+                      <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>{fmtMoney(mv.monto, mv.moneda)}</TableCell>
+                      <TableCell align="right" sx={{ whiteSpace: "nowrap", fontWeight: 600 }}>{fmtMoney(usd, "USD")}</TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow sx={{ "& > td": { borderTop: "2px solid", borderColor: "divider" } }}>
+                    <TableCell colSpan={4}><Typography fontWeight={700}>Total imputado</Typography></TableCell>
+                    <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totalDetalle, "USD")}</Typography></TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDetalle(null)}>Cerrar</Button>
+        </DialogActions>
+      </Dialog>
 
       <Typography variant="caption" color="text.secondary">
         El “real” se imputa siempre en USD: los gastos en USD por su monto, y los gastos en ARS convertidos por el

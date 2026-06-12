@@ -615,7 +615,7 @@ export default function InversoresPage() {
             <Stack direction="row" justifyContent="space-between" alignItems="baseline" sx={{ mb: 1 }}>
               <Typography variant="h6">Composición por ponderación</Typography>
               <Typography variant="caption" color="text.secondary">
-                Corte: {totProy.fechaCorte} · Monto × días en proyecto
+                Corte: {fmtDate(totProy.fechaCorte)} · Monto × días en proyecto
               </Typography>
             </Stack>
             {(() => {
