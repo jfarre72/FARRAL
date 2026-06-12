@@ -84,9 +84,9 @@ function PctField({ value, onCommit }) {
       onChange={(e) => setLocal(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-      inputProps={{ min: 0, max: 100, style: { textAlign: "right", padding: "4px 6px", width: 38 } }}
-      InputProps={{ endAdornment: <Typography variant="caption" color="text.secondary">%</Typography> }}
-      sx={{ width: 78, flexShrink: 0 }}
+      inputProps={{ min: 0, max: 100, style: { textAlign: "right", padding: "4px 4px" } }}
+      InputProps={{ endAdornment: <Typography variant="caption" color="text.secondary" sx={{ ml: 0.25 }}>%</Typography> }}
+      sx={{ width: 92, flexShrink: 0 }}
     />
   );
 }
