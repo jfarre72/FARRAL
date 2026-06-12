@@ -164,10 +164,17 @@ export default function AppShell({ children }) {
 function Logo() {
   return (
     <Tooltip title="FARRALAPP">
-      <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: 0.5 }}>
-        <Box component="span" sx={{ color: "#FFFFFF" }}>FARRAL</Box>
-        <Box component="span" sx={{ color: "secondary.main" }}>APP</Box>
-      </Typography>
+      <Stack direction="row" alignItems="center" spacing={1}>
+        <Box
+          component="img" src="/logo-farral.png" alt=""
+          onError={(e) => { e.currentTarget.style.display = "none"; }}
+          sx={{ height: 32, width: "auto", bgcolor: "#fff", borderRadius: 1, p: 0.3 }}
+        />
+        <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: 0.5 }}>
+          <Box component="span" sx={{ color: "#FFFFFF" }}>FARRAL</Box>
+          <Box component="span" sx={{ color: "secondary.main" }}>APP</Box>
+        </Typography>
+      </Stack>
     </Tooltip>
   );
 }

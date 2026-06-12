@@ -6,7 +6,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
-import { fmtMoney, fmtPct } from "@/components/Money";
+import { fmtMoney, fmtPct, fmtNum } from "@/components/Money";
 import { getCache, setCache } from "@/lib/dataCache";
 
 // USD gastado por un movimiento de caja (misma convención que el dashboard).
@@ -50,7 +50,7 @@ function smoothPath(pts) {
 
 function LineChart({ data, maxY = 200000 }) {
   // data: [{ label, value }]
-  const W = 680, H = 230, pad = { t: 18, r: 14, b: 26, l: 54 };
+  const W = 720, H = 260, pad = { t: 18, r: 16, b: 26, l: 64 };
   if (!data.length) {
     return <Typography color="text.secondary" sx={{ p: 2 }}>Sin movimientos para graficar.</Typography>;
   }
@@ -82,8 +82,8 @@ function LineChart({ data, maxY = 200000 }) {
   const hp = hover != null ? pts[hover] : null;
 
   return (
-    <Box sx={{ width: "100%", maxWidth: 720, mx: "auto", overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 420, display: "block" }}
+    <Box sx={{ width: "100%", maxWidth: 860, mx: "auto", overflowX: "auto" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 440, display: "block" }}
         onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
         {/* Grilla horizontal + labels eje Y */}
         {Array.from({ length: ticks + 1 }).map((_, i) => {
@@ -93,7 +93,7 @@ function LineChart({ data, maxY = 200000 }) {
             <g key={i}>
               <line x1={pad.l} y1={yy} x2={W - pad.r} y2={yy} stroke="#eef1f6" strokeWidth="1" />
               <text x={pad.l - 8} y={yy + 3} textAnchor="end" fontSize="10" fill="#8a97a8">
-                {fmtMoney(Math.round(v), "USD")}
+                {fmtNum(Math.round(v), 0)}
               </text>
             </g>
           );
@@ -294,9 +294,6 @@ export default function IndicadoresPage() {
           <Stack direction="row" alignItems="baseline" spacing={1} sx={{ mb: 1 }}>
             <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
               Gastos acumulados (USD) por mes
-            </Typography>
-            <Typography variant="h6" color="secondary.main">
-              {fmtMoney(Math.round(ind.gastadoUSD), "USD")}
             </Typography>
           </Stack>
           <LineChart data={ind.serie} />

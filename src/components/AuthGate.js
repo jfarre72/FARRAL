@@ -48,6 +48,11 @@ export default function AuthGate({ children }) {
         <Card sx={{ width: "100%", maxWidth: 380 }}>
           <CardContent sx={{ p: 3 }}>
             <Stack spacing={2} component="form" onSubmit={submit}>
+              <Box
+                component="img" src="/logo-farral.png" alt="FARRAL"
+                onError={(e) => { e.currentTarget.style.display = "none"; }}
+                sx={{ width: "100%", maxWidth: 220, height: "auto", mx: "auto", display: "block", mb: 1 }}
+              />
               <Box>
                 <Typography variant="h5" sx={{ fontWeight: 800 }}>
                   <Box component="span" sx={{ color: "primary.main" }}>FARRAL</Box>
