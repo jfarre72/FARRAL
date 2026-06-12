@@ -2,7 +2,7 @@
 import {
   Card, CardContent, Stack, Typography, Alert, Box, TextField,
   Button, IconButton, Tooltip, LinearProgress, Divider, Table, TableHead,
-  TableBody, TableRow, TableCell, TableContainer
+  TableBody, TableRow, TableCell, TableContainer, Switch, FormControlLabel
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
@@ -36,16 +36,22 @@ function CommitField({ value, onCommit, type = "text", sx, align, suffix }) {
 export default function ConfiguracionPage() {
   const { proyecto } = useProjects();
   const [hitos, setHitos] = useState([]);
+  const [conceptos, setConceptos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [nombre, setNombre] = useState("");
   const [pct, setPct] = useState("");
+  const [cNombre, setCNombre] = useState("");
+  const [cValor, setCValor] = useState("");
 
   const reload = async () => {
     if (!proyecto) return;
     setLoading(true);
-    const { data } = await supabase.from("hitos").select("*")
-      .eq("proyecto_id", proyecto.id).order("orden");
-    setHitos(data ?? []);
+    const [{ data: hs }, { data: cs }] = await Promise.all([
+      supabase.from("hitos").select("*").eq("proyecto_id", proyecto.id).order("orden"),
+      supabase.from("conceptos").select("*").eq("proyecto_id", proyecto.id).order("orden"),
+    ]);
+    setHitos(hs ?? []);
+    setConceptos(cs ?? []);
     setLoading(false);
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
@@ -54,6 +60,41 @@ export default function ConfiguracionPage() {
     setHitos(prev => prev.map(h => h.id === id ? { ...h, ...patch } : h));
     const { error } = await supabase.from("hitos").update(patch).eq("id", id);
     if (error) { alert(error.message); reload(); }
+  };
+
+  // ---- Conceptos ----
+  const updateConcepto = async (id, patch) => {
+    setConceptos(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c));
+    const { error } = await supabase.from("conceptos").update(patch).eq("id", id);
+    if (error) { alert(error.message); reload(); }
+  };
+  const addConcepto = async () => {
+    const nom = cNombre.trim();
+    if (!nom || !proyecto) return;
+    const valor_plan = Math.max(0, Number(cValor) || 0);
+    const orden = (conceptos.reduce((m, c) => Math.max(m, c.orden || 0), 0)) + 1;
+    const { error } = await supabase.from("conceptos")
+      .insert({ proyecto_id: proyecto.id, nombre: nom, valor_plan, orden });
+    if (error) { alert(error.message); return; }
+    setCNombre(""); setCValor("");
+    reload();
+  };
+  const delConcepto = async (c) => {
+    if (!confirm(`¿Eliminar el concepto "${c.nombre}"?`)) return;
+    const { error } = await supabase.from("conceptos").delete().eq("id", c.id);
+    if (error) alert(error.message); else reload();
+  };
+  const seedConceptos = async () => {
+    if (!proyecto) return;
+    const seed = [
+      { nombre: "Terreno", valor_plan: 0, usa_etapas: false, orden: 1 },
+      { nombre: "Tasas + Mto + Expensas", valor_plan: 0, usa_etapas: false, orden: 2 },
+      { nombre: "Obra", valor_plan: 0, usa_etapas: true, orden: 3 },
+      { nombre: "Honorarios", valor_plan: 0, usa_etapas: false, orden: 4 },
+    ].map(c => ({ ...c, proyecto_id: proyecto.id }));
+    const { error } = await supabase.from("conceptos").insert(seed);
+    if (error) alert(error.message);
+    reload();
   };
 
   const addEtapa = async () => {
@@ -103,12 +144,97 @@ export default function ConfiguracionPage() {
       <Box>
         <Typography variant="h5">Configuración</Typography>
         <Typography variant="body2" color="text.secondary">
-          Etapas de obra del proyecto. Se usan en Hitos plan y al registrar un egreso.
+          Conceptos y etapas del proyecto, con su valor planificado en USD. Se usan al registrar egresos y en el seguimiento económico.
         </Typography>
       </Box>
 
       {loading && <LinearProgress />}
 
+      {/* Conceptos */}
+      <Card>
+        <CardContent>
+          <Stack direction="row" alignItems="center" sx={{ mb: 1 }}>
+            <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>Conceptos</Typography>
+            {conceptos.length === 0 && (
+              <Button size="small" variant="outlined" onClick={seedConceptos}>Cargar por defecto</Button>
+            )}
+          </Stack>
+          <TableContainer>
+            <Table size="small" sx={{ minWidth: 460 }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Concepto</TableCell>
+                  <TableCell align="right" sx={{ width: 140 }}>Plan (USD)</TableCell>
+                  <TableCell align="center" sx={{ width: 130 }}>Usa etapas</TableCell>
+                  <TableCell align="right" sx={{ width: 60 }}></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {conceptos.map((c) => (
+                  <TableRow key={c.id} hover>
+                    <TableCell>
+                      <CommitField
+                        value={c.nombre} sx={{ width: "100%", maxWidth: 320 }}
+                        onCommit={(v) => { const n = String(v).trim(); if (n) updateConcepto(c.id, { nombre: n }); else reload(); }}
+                      />
+                    </TableCell>
+                    <TableCell align="right">
+                      <CommitField
+                        type="number" value={c.valor_plan ?? 0} align="right" sx={{ width: 130 }}
+                        onCommit={(v) => updateConcepto(c.id, { valor_plan: Math.max(0, Number(v) || 0) })}
+                      />
+                    </TableCell>
+                    <TableCell align="center">
+                      <Tooltip title="Al registrar un egreso con este concepto se habilita la etapa">
+                        <Switch size="small" checked={!!c.usa_etapas}
+                          onChange={(e) => updateConcepto(c.id, { usa_etapas: e.target.checked })} />
+                      </Tooltip>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Tooltip title="Eliminar concepto">
+                        <IconButton size="small" onClick={() => delConcepto(c)}>
+                          <DeleteOutlineIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {conceptos.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={4}>
+                      <Typography variant="body2" color="text.secondary">No hay conceptos cargados.</Typography>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+
+          <Divider sx={{ my: 2 }} />
+
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "flex-end" }}>
+            <TextField
+              label="Nuevo concepto" placeholder="Nombre del concepto" fullWidth size="small"
+              value={cNombre} onChange={(e) => setCNombre(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") addConcepto(); }}
+            />
+            <TextField
+              label="Plan (USD)" type="number" size="small" sx={{ width: { xs: "100%", sm: 160 } }}
+              value={cValor} onChange={(e) => setCValor(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") addConcepto(); }}
+            />
+            <Button variant="contained" color="secondary" startIcon={<AddIcon />}
+              onClick={addConcepto} sx={{ flexShrink: 0, width: { xs: "100%", sm: "auto" } }}>
+              Agregar concepto
+            </Button>
+          </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
+            “Usa etapas” marca el concepto (típicamente Obra) que, al registrar un egreso, habilita además la selección de la etapa.
+          </Typography>
+        </CardContent>
+      </Card>
+
+      {/* Etapas */}
       <Card>
         <CardContent>
           <Typography variant="subtitle1" gutterBottom>Etapas</Typography>
@@ -119,6 +245,7 @@ export default function ConfiguracionPage() {
                   <TableCell sx={{ width: 36 }}></TableCell>
                   <TableCell sx={{ width: 90 }}>% hito</TableCell>
                   <TableCell>Nombre</TableCell>
+                  <TableCell align="right" sx={{ width: 140 }}>Plan (USD)</TableCell>
                   <TableCell align="right" sx={{ width: 60 }}></TableCell>
                 </TableRow>
               </TableHead>
@@ -159,6 +286,13 @@ export default function ConfiguracionPage() {
                       />
                     </TableCell>
                     <TableCell align="right">
+                      <CommitField
+                        type="number" value={h.valor_plan ?? 0} align="right"
+                        sx={{ width: 130 }}
+                        onCommit={(v) => updateHito(h.id, { valor_plan: Math.max(0, Number(v) || 0) })}
+                      />
+                    </TableCell>
+                    <TableCell align="right">
                       <Tooltip title="Eliminar etapa">
                         <IconButton size="small" onClick={() => delEtapa(h)}>
                           <DeleteOutlineIcon fontSize="small" />
@@ -170,7 +304,7 @@ export default function ConfiguracionPage() {
                 })}
                 {hitos.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={4}>
+                    <TableCell colSpan={5}>
                       <Typography variant="body2" color="text.secondary">No hay etapas cargadas.</Typography>
                     </TableCell>
                   </TableRow>

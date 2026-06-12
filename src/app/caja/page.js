@@ -35,6 +35,7 @@ const emptyMov = {
   moneda: "ARS",
   monto: "",
   categoria: "",
+  concepto: "",
   etapa: "",
   descripcion: "",
   // Cambio integrado dentro de egreso:
@@ -67,6 +68,7 @@ export default function CajaPage() {
   const [movs, setMovs] = useState([]);
   const [categorias, setCategorias] = useState([]);
   const [hitos, setHitos] = useState([]);
+  const [conceptos, setConceptos] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Dialog principal (crear / editar mov)
@@ -84,7 +86,7 @@ export default function CajaPage() {
   const reload = async () => {
     if (!proyecto) return;
     setLoading(true);
-    const [r1, r2, r3, r4, r5, r6, r7, r8] = await Promise.all([
+    const [r1, r2, r3, r4, r5, r6, r7, r8, r9] = await Promise.all([
       supabase.from("aportes").select("*").eq("proyecto_id", proyecto.id).order("fecha", { ascending: false }),
       supabase.from("inversores").select("id,nombre").eq("proyecto_id", proyecto.id),
       supabase.from("movimientos_caja").select("*").eq("proyecto_id", proyecto.id).order("fecha", { ascending: false }),
@@ -93,6 +95,7 @@ export default function CajaPage() {
       supabase.from("presupuestos").select("id,nombre,contratista_id,moneda,estado").eq("proyecto_id", proyecto.id).order("fecha", { ascending: false }),
       supabase.from("presupuesto_items").select("id,presupuesto_id,nombre,monto_presupuestado,avance_pct").order("orden"),
       supabase.from("hitos").select("nombre,orden").eq("proyecto_id", proyecto.id).order("orden"),
+      supabase.from("conceptos").select("nombre,usa_etapas,orden").eq("proyecto_id", proyecto.id).order("orden"),
     ]);
     setAportes(r1.data ?? []);
     setInversores(r2.data ?? []);
@@ -101,6 +104,7 @@ export default function CajaPage() {
     setContratistas(r5.data ?? []);
     setPresupuestos(r6.data ?? []);
     setHitos((r8.data ?? []).map(h => h.nombre));
+    setConceptos(r9.data ?? []);
     // index items por presupuesto
     const idx = {};
     for (const it of (r7.data ?? [])) {
@@ -333,6 +337,7 @@ export default function CajaPage() {
       moneda: mv.moneda ?? "ARS",
       monto: mv.monto ?? "",
       categoria: mv.categoria ?? "",
+      concepto: mv.concepto ?? "",
       etapa: mv.etapa ?? "",
       descripcion: mv.descripcion ?? "",
       con_cambio: !!mv.con_cambio,
@@ -426,6 +431,8 @@ export default function CajaPage() {
       comprobante_url = path;
     }
 
+    const conceptoUsaEtapas = !!conceptos.find(c => c.nombre === form.concepto)?.usa_etapas;
+
     let payload;
     if (form.tipo === "cambio") {
       payload = {
@@ -454,7 +461,8 @@ export default function CajaPage() {
         moneda: form.moneda,
         monto: monto,
         categoria: form.tipo === "egreso" ? (categoriaFinal || null) : null,
-        etapa: form.etapa || null,
+        concepto: form.tipo === "egreso" ? (form.concepto || null) : null,
+        etapa: form.tipo === "egreso" && conceptoUsaEtapas ? (form.etapa || null) : null,
         descripcion: form.descripcion || null,
         comprobante_url,
         moneda_destino: null,
@@ -1068,10 +1076,28 @@ export default function CajaPage() {
 
               {form.tipo === "egreso" && (
                 <Grid item xs={12} sm={6}>
+                  <TextField select label="Concepto" fullWidth
+                    value={form.concepto}
+                    onChange={e => {
+                      const usa = !!conceptos.find(c => c.nombre === e.target.value)?.usa_etapas;
+                      setForm({ ...form, concepto: e.target.value, etapa: usa ? form.etapa : "" });
+                    }}
+                    helperText={conceptos.length === 0 ? "Cargá conceptos en Configuración" : "Tipo de gasto"}
+                  >
+                    <MenuItem value="">(Sin concepto)</MenuItem>
+                    {conceptos.map(c => (
+                      <MenuItem key={c.nombre} value={c.nombre}>{c.nombre}</MenuItem>
+                    ))}
+                  </TextField>
+                </Grid>
+              )}
+
+              {form.tipo === "egreso" && !!conceptos.find(c => c.nombre === form.concepto)?.usa_etapas && (
+                <Grid item xs={12} sm={6}>
                   <TextField select label="Etapa" fullWidth
                     value={form.etapa}
                     onChange={e => setForm({ ...form, etapa: e.target.value })}
-                    helperText="Asociar a una etapa de obra"
+                    helperText="Etapa de obra asociada"
                   >
                     <MenuItem value="">(Sin etapa)</MenuItem>
                     {(hitos.length > 0 ? hitos : ETAPAS_DEFAULT).map(et => (
