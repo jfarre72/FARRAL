@@ -200,7 +200,7 @@ export default function CajaPage() {
         moneda: a.moneda, monto: Number(a.monto || 0),
         detalle: `Aporte · ${invName(a.inversor_id)}`,
         observacion: a.observacion ?? null,
-        categoria: null, comprobante_url: null, raw: a,
+        categoria: null, concepto: null, comprobante_url: null, raw: a,
       }));
     const fromMovs = movs.map(mv => ({
       id: "mv_" + mv.id, kind: "mov", fecha: mv.fecha, tipo: mv.tipo,
@@ -209,7 +209,7 @@ export default function CajaPage() {
         ? `Cambio ${mv.moneda} → ${mv.moneda_destino} @ ${fmtNum(mv.tipo_cambio, 2)}`
         : (mv.descripcion || (mv.tipo === "ingreso" ? "Ingreso" : "Egreso")),
       observacion: mv.descripcion ?? null,
-      categoria: mv.categoria, etapa: mv.etapa, comprobante_url: mv.comprobante_url, raw: mv,
+      categoria: mv.categoria, concepto: mv.concepto, etapa: mv.etapa, comprobante_url: mv.comprobante_url, raw: mv,
       moneda_destino: mv.moneda_destino, monto_destino: mv.monto_destino,
       con_cambio: mv.con_cambio,
       cambio_moneda_origen: mv.cambio_moneda_origen,
@@ -275,6 +275,7 @@ export default function CajaPage() {
         <td>${fmtDate(m.fecha)}</td>
         <td>${tipoLabel[m.tipo] || esc(m.tipo)}</td>
         <td>${esc(m.detalle)}</td>
+        <td>${esc(m.concepto) || "—"}</td>
         <td>${esc(m.categoria) || "—"}</td>
         <td>${esc(m.etapa) || "—"}</td>
         <td style="text-align:right">${esc(fmtMoney(m.monto, m.moneda))}</td>
@@ -290,7 +291,7 @@ export default function CajaPage() {
     const tabla = `
       <h2>Movimientos</h2>
       <table><thead><tr>
-        <th>Fecha</th><th>Tipo</th><th>Detalle</th><th>Categoría</th><th>Etapa</th><th>Monto</th>
+        <th>Fecha</th><th>Tipo</th><th>Detalle</th><th>Concepto</th><th>Categoría</th><th>Etapa</th><th>Monto</th>
       </tr></thead><tbody>${filas}</tbody></table>`;
     printDocument({
       title: "Caja",
@@ -687,6 +688,7 @@ export default function CajaPage() {
                       <TableCell sx={{ width: 110 }}>Fecha</TableCell>
                       <TableCell sx={{ width: 130 }}>Tipo</TableCell>
                       <TableCell>Detalle</TableCell>
+                      <TableCell>Concepto</TableCell>
                       <TableCell>Categoría</TableCell>
                       <TableCell>Etapa</TableCell>
                       <TableCell align="right">Monto</TableCell>
@@ -728,6 +730,11 @@ export default function CajaPage() {
                                   : `→ ${fmtMoney(m.monto_destino, m.moneda_destino)} · TC ${fmtNum(m.raw?.tipo_cambio, 2)}`}
                             </Typography>
                           )}
+                        </TableCell>
+                        <TableCell>
+                          {m.concepto
+                            ? <Chip size="small" label={m.concepto} variant="outlined" color="secondary" />
+                            : <Typography variant="body2" color="text.disabled">—</Typography>}
                         </TableCell>
                         <TableCell>
                           {m.categoria
