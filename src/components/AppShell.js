@@ -165,7 +165,7 @@ function Logo() {
         <Box
           component="img" src="/logo-farral.png" alt=""
           onError={(e) => { e.currentTarget.style.display = "none"; }}
-          sx={{ height: 32, width: "auto", bgcolor: "#fff", borderRadius: 1, p: 0.3 }}
+          sx={{ height: 32, width: "auto" }}
         />
         <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: 0.5 }}>
           <Box component="span" sx={{ color: "#FFFFFF" }}>FARRAL</Box>
