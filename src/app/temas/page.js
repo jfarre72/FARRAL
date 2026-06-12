@@ -10,11 +10,16 @@ import AddIcon from "@mui/icons-material/Add";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import NotesIcon from "@mui/icons-material/Notes";
+import SearchIcon from "@mui/icons-material/Search";
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
+import { InputAdornment } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "@mui/material/styles";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtDate } from "@/components/Money";
+import { getCache, setCache } from "@/lib/dataCache";
+import { printDocument, esc } from "@/lib/printPdf";
 
 const empty = { titulo: "", responsable: "", fecha: "", etiqueta: "NORMAL", observacion: "" };
 const ETIQUETAS = ["NORMAL", "URGENTE"];
@@ -44,9 +49,10 @@ export default function TemasPage() {
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
 
-  const [temas, setTemas] = useState([]);
+  const [temas, setTemas] = useState(() => getCache("temas", proyecto?.id) ?? []);
   const [loading, setLoading] = useState(true);
   const [filtro, setFiltro] = useState("todos"); // todos | pendientes | hechos | vencidos
+  const [busqueda, setBusqueda] = useState("");
   const [nuevo, setNuevo] = useState("");
 
   const [open, setOpen] = useState(false);
@@ -57,10 +63,13 @@ export default function TemasPage() {
 
   const reload = async () => {
     if (!proyecto) return;
-    setLoading(true);
+    const cached = getCache("temas", proyecto.id);
+    setTemas(cached ?? []);
+    setLoading(!cached); // si hay caché, mostramos al instante y revalidamos sin bloquear
     const { data } = await supabase
       .from("temas").select("*")
       .eq("proyecto_id", proyecto.id);
+    setCache("temas", proyecto.id, data ?? []);
     setTemas(data ?? []);
     setLoading(false);
   };
@@ -78,11 +87,20 @@ export default function TemasPage() {
   }, [temas]);
 
   const visibles = useMemo(() => {
-    if (filtro === "pendientes") return ordenados.filter(t => estadoDe(t) === "pendiente");
-    if (filtro === "hechos") return ordenados.filter(t => estadoDe(t) === "hecho");
-    if (filtro === "vencidos") return ordenados.filter(t => estadoDe(t) === "vencido");
-    return ordenados;
-  }, [ordenados, filtro]);
+    let r = ordenados;
+    if (filtro === "pendientes") r = r.filter(t => estadoDe(t) === "pendiente");
+    else if (filtro === "hechos") r = r.filter(t => estadoDe(t) === "hecho");
+    else if (filtro === "vencidos") r = r.filter(t => estadoDe(t) === "vencido");
+    const q = busqueda.trim().toLowerCase();
+    if (q) {
+      r = r.filter(t =>
+        (t.titulo ?? "").toLowerCase().includes(q) ||
+        (t.responsable ?? "").toLowerCase().includes(q) ||
+        (t.observacion ?? "").toLowerCase().includes(q)
+      );
+    }
+    return r;
+  }, [ordenados, filtro, busqueda]);
 
   const hechos = temas.filter(t => t.completado).length;
   const vencidos = temas.filter(t => estadoDe(t) === "vencido").length;
@@ -148,6 +166,32 @@ export default function TemasPage() {
     if (error) alert(error.message); else reload();
   };
 
+  const exportarPdf = () => {
+    const filas = visibles.map((t, i) => {
+      const est = estadoDe(t);
+      const meta = ESTADO_META[est];
+      const tituloCls = t.completado ? "done" : "";
+      const fechaCls = est === "vencido" ? "vencido" : (t.fecha ? "" : "muted");
+      const tag = (t.etiqueta || "NORMAL");
+      return `<tr>
+        <td class="muted">${i + 1}</td>
+        <td><span class="${tituloCls}">${esc(t.titulo)}</span>${t.observacion ? `<br><span class="muted">${esc(t.observacion)}</span>` : ""}</td>
+        <td>${esc(t.responsable) || '<span class="muted">—</span>'}</td>
+        <td><span class="tag ${tag === "URGENTE" ? "tag-urgente" : ""}">${esc(tag)}</span></td>
+        <td class="${fechaCls}">${t.fecha ? fmtDate(t.fecha) : "—"}</td>
+        <td>${meta.label}</td>
+      </tr>`;
+    }).join("");
+    const body = `<table><thead><tr>
+        <th>#</th><th>Tema</th><th>Responsable</th><th>Etiqueta</th><th>Fecha</th><th>Estado</th>
+      </tr></thead><tbody>${filas}</tbody></table>`;
+    printDocument({
+      title: "Seguimiento de tareas",
+      subtitle: `${esc(proyecto.nombre)} · ${fmtDate(hoyISO())} · ${hechos}/${temas.length} hechos`,
+      bodyHtml: body,
+    });
+  };
+
   if (!proyecto) return <Alert severity="info">Seleccioná un proyecto.</Alert>;
 
   return (
@@ -155,6 +199,9 @@ export default function TemasPage() {
       <Box>
         <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
           <Typography variant="h5" sx={{ flexGrow: 1 }}>Seguimiento de tareas</Typography>
+          <Button variant="outlined" startIcon={<PictureAsPdfIcon />} onClick={exportarPdf}>
+            PDF
+          </Button>
           <Button variant="contained" color="secondary" startIcon={<AddIcon />} onClick={openNew}>
             Nuevo tema
           </Button>
@@ -194,6 +241,19 @@ export default function TemasPage() {
               <ToggleButton value="hechos">Hechos</ToggleButton>
             </ToggleButtonGroup>
           </Stack>
+
+          {/* Buscador de temas */}
+          <TextField
+            size="small" fullWidth placeholder="Buscar tema, responsable u observación…"
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            sx={{ mb: 1.5 }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>
+              ),
+            }}
+          />
 
           {/* Alta rápida */}
           <Stack direction="row" spacing={1} sx={{ mb: 2 }}>

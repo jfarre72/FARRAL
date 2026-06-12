@@ -12,6 +12,7 @@ import TimelineIcon from "@mui/icons-material/Timeline";
 import PointOfSaleIcon from "@mui/icons-material/PointOfSale";
 import RequestQuoteIcon from "@mui/icons-material/RequestQuote";
 import ChecklistIcon from "@mui/icons-material/Checklist";
+import InsightsIcon from "@mui/icons-material/Insights";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -27,6 +28,7 @@ const NAV = [
   { label: "Presupuestos",    href: "/presupuestos",  icon: <RequestQuoteIcon /> },
   { label: "Hitos plan",      href: "/linea-tiempo",  icon: <TimelineIcon /> },
   { label: "Seguimiento",     href: "/temas",         icon: <ChecklistIcon /> },
+  { label: "Indicadores",     href: "/indicadores",   icon: <InsightsIcon /> },
 ];
 
 const DRAWER_WIDTH = 240;
@@ -45,7 +47,7 @@ export default function AppShell({ children }) {
   };
 
   const drawer = (
-    <Box sx={{ width: DRAWER_WIDTH }} role="presentation">
+    <Box sx={{ width: DRAWER_WIDTH, overflowX: "hidden" }} role="presentation">
       <Toolbar sx={{ px: 2 }}>
         <Logo />
       </Toolbar>
@@ -128,6 +130,7 @@ export default function AppShell({ children }) {
               width: DRAWER_WIDTH,
               boxSizing: "border-box",
               borderRight: "1px solid rgba(15,42,74,0.08)",
+              overflowX: "hidden",
             },
           }}
           open

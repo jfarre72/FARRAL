@@ -11,11 +11,14 @@ import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "@mui/material/styles";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtDate } from "@/components/Money";
+import { getCache, setCache } from "@/lib/dataCache";
+import { printDocument, esc } from "@/lib/printPdf";
 
 // Días hábiles (lunes a viernes) entre dos fechas ISO (YYYY-MM-DD).
 // Cuenta los días posteriores a 'desde' hasta 'hasta' inclusive.
@@ -42,8 +45,8 @@ export default function LineaTiempoPage() {
   const { proyecto } = useProjects();
   const theme = useTheme();
   const isSm = useMediaQuery(theme.breakpoints.down("sm"));
-  const [hitos, setHitos] = useState([]);
-  const [tareas, setTareas] = useState([]);
+  const [hitos, setHitos] = useState(() => getCache("linea-tiempo", proyecto?.id)?.hitos ?? []);
+  const [tareas, setTareas] = useState(() => getCache("linea-tiempo", proyecto?.id)?.tareas ?? []);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
   const [expanded, setExpanded] = useState({});
@@ -51,7 +54,9 @@ export default function LineaTiempoPage() {
 
   const reload = async () => {
     if (!proyecto) return;
-    setLoading(true);
+    const cached = getCache("linea-tiempo", proyecto.id);
+    if (cached) { setHitos(cached.hitos); setTareas(cached.tareas); }
+    setLoading(!cached); // con caché mostramos al instante y revalidamos sin bloquear
     const { data: hs } = await supabase
       .from("hitos").select("*")
       .eq("proyecto_id", proyecto.id).order("orden");
@@ -62,6 +67,7 @@ export default function LineaTiempoPage() {
         .from("hito_tareas").select("*").in("hito_id", ids).order("orden");
       ts = data ?? [];
     }
+    setCache("linea-tiempo", proyecto.id, { hitos: hs ?? [], tareas: ts });
     setHitos(hs ?? []);
     setTareas(ts);
     setLoading(false);
@@ -173,14 +179,42 @@ export default function LineaTiempoPage() {
     ));
   };
 
+  const exportarPdf = () => {
+    const secciones = conPeso.map((h) => {
+      const ts = tareasDe(h.id);
+      const d = diasHabiles(h.fecha_estimada, h.fecha_real);
+      const meta = [
+        h.peso > 0 ? `${h.desde}–${h.hasta}%` : `${h.desde}%`,
+        h.fecha_estimada ? `Inicio: ${fmtDate(h.fecha_estimada)}` : null,
+        h.fecha_real ? `Fin: ${fmtDate(h.fecha_real)}` : null,
+        d != null ? `${d} días háb.` : null,
+      ].filter(Boolean).join(" · ");
+      const filas = ts.length
+        ? ts.map(t => `<tr><td>${t.completado ? "✔" : "○"}</td><td><span class="${t.completado ? "done" : ""}">${esc(t.nombre)}</span></td></tr>`).join("")
+        : `<tr><td></td><td class="muted">Sin tareas</td></tr>`;
+      return `<h2>${esc(h.nombre)} <span class="muted" style="font-weight:400">${esc(meta)}</span></h2>
+        <table><tbody>${filas}</tbody></table>`;
+    }).join("");
+    printDocument({
+      title: "Hitos plan",
+      subtitle: `${esc(proyecto.nombre)} · ${fmtDate(new Date().toISOString())} · Avance estimado ${avance}%`,
+      bodyHtml: secciones,
+    });
+  };
+
   if (!proyecto) return <Alert severity="info">Seleccioná un proyecto.</Alert>;
 
   return (
     <Stack spacing={3}>
-      <Box>
-        <Typography variant="h5">Hitos plan</Typography>
-        <Typography variant="body2">Etapas, tareas y avance del proyecto.</Typography>
-      </Box>
+      <Stack direction="row" alignItems="flex-start" spacing={1}>
+        <Box sx={{ flexGrow: 1 }}>
+          <Typography variant="h5">Hitos plan</Typography>
+          <Typography variant="body2">Etapas, tareas y avance del proyecto.</Typography>
+        </Box>
+        <Button variant="outlined" startIcon={<PictureAsPdfIcon />} onClick={exportarPdf}>
+          PDF
+        </Button>
+      </Stack>
 
       {loading && <LinearProgress />}
 
