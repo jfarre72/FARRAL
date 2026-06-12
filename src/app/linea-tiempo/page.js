@@ -335,6 +335,11 @@ export default function LineaTiempoPage() {
                     </Typography>
                   </Box>
                 )}
+                {proximo && (
+                  <Box sx={{ ml: { sm: "auto" } }}>
+                    <Chip label={`En curso: ${proximo.nombre}`} color="primary" />
+                  </Box>
+                )}
               </Stack>
               <Divider sx={{ mt: 2 }} />
             </Box>
@@ -347,11 +352,6 @@ export default function LineaTiempoPage() {
                 <Box sx={{ height: "100%", width: `${avance}%`, bgcolor: "secondary.main", transition: "width .4s" }} />
               </Box>
             </Box>
-            <Stack spacing={0.5} sx={{ width: { xs: "100%", sm: "auto" } }}>
-              <Chip label={`Inicio estim.: ${fmtDate(proyecto.fecha_inicio)}`} variant="outlined" />
-              <Chip label={`Fin estim.: ${fmtDate(proyecto.fecha_fin)}`} variant="outlined" />
-              {proximo && <Chip label={`En curso: ${proximo.nombre}`} color="primary" />}
-            </Stack>
           </Stack>
         </CardContent>
       </Card>
