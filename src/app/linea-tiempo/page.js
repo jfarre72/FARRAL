@@ -21,24 +21,34 @@ import { getCache, setCache } from "@/lib/dataCache";
 import { printDocument, esc } from "@/lib/printPdf";
 
 // Días hábiles (lunes a viernes) entre dos fechas ISO (YYYY-MM-DD).
-// Cuenta los días posteriores a 'desde' hasta 'hasta' inclusive.
+// Cuenta ambos extremos inclusive: de lunes a viernes son 5 días.
 function diasHabiles(desdeISO, hastaISO) {
   if (!desdeISO || !hastaISO) return null;
   const a = new Date(desdeISO + "T00:00:00");
   const b = new Date(hastaISO + "T00:00:00");
   if (isNaN(a) || isNaN(b)) return null;
   const signo = b >= a ? 1 : -1;
-  let ini = signo > 0 ? a : b;
+  const ini = signo > 0 ? a : b;
   const fin = signo > 0 ? b : a;
   let count = 0;
   const cur = new Date(ini);
-  cur.setDate(cur.getDate() + 1); // excluye el día de inicio
   while (cur <= fin) {
     const d = cur.getDay();
     if (d !== 0 && d !== 6) count++;
     cur.setDate(cur.getDate() + 1);
   }
   return count * signo;
+}
+
+// Cantidad de meses (redondeada) entre dos fechas ISO. Jan→Nov = 10.
+function mesesEntre(iniISO, finISO) {
+  if (!iniISO || !finISO) return null;
+  const a = new Date(iniISO + "T00:00:00");
+  const b = new Date(finISO + "T00:00:00");
+  if (isNaN(a) || isNaN(b)) return null;
+  let meses = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
+  meses += (b.getDate() - a.getDate()) / 30.44;
+  return Math.max(0, Math.round(meses));
 }
 
 // Campo de fecha que guarda recién al salir del campo (blur/Enter), no en cada
@@ -155,6 +165,16 @@ export default function LineaTiempoPage() {
 
   const proximo = conPeso.find(h => fraccion(h) < 1 && h.peso > 0);
 
+  // Fechas reales del proyecto a partir de las cargadas en cada etapa:
+  // inicio real = primera fecha de inicio; fin real = última fecha de fin.
+  const { inicioReal, finReal, mesesReal } = useMemo(() => {
+    const inicios = hitos.map(h => h.fecha_estimada).filter(Boolean);
+    const fines = hitos.map(h => h.fecha_real).filter(Boolean);
+    const inicioReal = inicios.length ? inicios.reduce((m, d) => (d < m ? d : m)) : null;
+    const finReal = fines.length ? fines.reduce((m, d) => (d > m ? d : m)) : null;
+    return { inicioReal, finReal, mesesReal: mesesEntre(inicioReal, finReal) };
+  }, [hitos]);
+
   const seedDefault = async () => {
     if (!proyecto) return;
     const seed = [
@@ -261,9 +281,17 @@ export default function LineaTiempoPage() {
       return `<h2>${esc(h.nombre)} <span class="muted" style="font-weight:400">${esc(meta)}</span></h2>
         <table><tbody>${filas}</tbody></table>`;
     }).join("");
+    const inicios = hitos.map(h => h.fecha_estimada).filter(Boolean);
+    const fines = hitos.map(h => h.fecha_real).filter(Boolean);
+    const iniR = inicios.length ? inicios.reduce((m, d) => (d < m ? d : m)) : null;
+    const finR = fines.length ? fines.reduce((m, d) => (d > m ? d : m)) : null;
+    const ms = mesesEntre(iniR, finR);
+    const realStr = (iniR || finR)
+      ? ` · Inicio real ${fmtDate(iniR)} · Fin real ${fmtDate(finR)}${ms != null ? ` · ${ms} ${ms === 1 ? "mes" : "meses"}` : ""}`
+      : "";
     printDocument({
       title: "Hitos plan",
-      subtitle: `${esc(proyecto.nombre)} · ${fmtDate(new Date().toISOString())} · Avance estimado ${avance}%`,
+      subtitle: `${esc(proyecto.nombre)} · ${fmtDate(new Date().toISOString())} · Avance estimado ${avance}%${realStr}`,
       bodyHtml: secciones,
     });
   };
@@ -287,6 +315,30 @@ export default function LineaTiempoPage() {
       {/* Resumen de avance */}
       <Card>
         <CardContent>
+          {/* Fechas reales del proyecto (según las etapas) */}
+          {(inicioReal || finReal) && (
+            <Box sx={{ mb: 2 }}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={{ xs: 1.5, sm: 4 }} alignItems={{ sm: "flex-end" }} flexWrap="wrap" useFlexGap>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Inicio real</Typography>
+                  <Typography variant="h6" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtDate(inicioReal)}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Fin real</Typography>
+                  <Typography variant="h6" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtDate(finReal)}</Typography>
+                </Box>
+                {mesesReal != null && (
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Duración</Typography>
+                    <Typography variant="h6" color="secondary.main" fontWeight={700}>
+                      {mesesReal} {mesesReal === 1 ? "mes" : "meses"}
+                    </Typography>
+                  </Box>
+                )}
+              </Stack>
+              <Divider sx={{ mt: 2 }} />
+            </Box>
+          )}
           <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ sm: "center" }}>
             <Box sx={{ flexGrow: 1, width: "100%" }}>
               <Typography variant="caption" color="text.secondary">Avance estimado</Typography>
