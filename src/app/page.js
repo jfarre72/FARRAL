@@ -6,6 +6,17 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { fmtMoney, fmtNum, fmtPct, fmtDate } from "@/components/Money";
 
+// Gasto REAL en USD (misma convención que Caja / Seguimiento económico):
+// gasto en USD por su monto; gasto en ARS por monto / tipo de cambio.
+function gastoRealUSD(mv) {
+  if (mv.tipo !== "egreso") return 0;
+  const m = Number(mv.monto || 0);
+  if (m <= 0) return 0;
+  if (mv.moneda === "USD") return m;
+  const tc = Number(mv.cambio_tipo_cambio || mv.tipo_cambio_gasto || 0);
+  return tc > 0 ? m / tc : 0;
+}
+
 export default function Home() {
   const { proyecto, loading, error } = useProjects();
   const [stats, setStats] = useState(null);
@@ -37,22 +48,24 @@ export default function Home() {
           if (mv.con_cambio) {
             const tc = Number(mv.cambio_tipo_cambio || 0);
             const monOrigen = Number(mv.cambio_monto_origen || 0);
-            if (mv.cambio_moneda_origen === "USD") { cajaUSD -= monOrigen; gastadoUSD += monOrigen; }
+            if (mv.cambio_moneda_origen === "USD") { cajaUSD -= monOrigen; }
             else cajaARS -= monOrigen;
             const entrada = mv.cambio_moneda_origen === "USD" ? monOrigen * tc : (tc > 0 ? monOrigen / tc : 0);
             if (mv.moneda === "USD") { cajaUSD += entrada; ingresoUSD += entrada; } else cajaARS += entrada;
             if (m > 0) {
-              if (mv.moneda === "USD") { cajaUSD -= m; gastadoUSD += m; } else cajaARS -= m;
+              if (mv.moneda === "USD") { cajaUSD -= m; } else cajaARS -= m;
             }
           } else {
-            if (mv.moneda === "USD") { cajaUSD -= m; gastadoUSD += m; } else cajaARS -= m;
+            if (mv.moneda === "USD") { cajaUSD -= m; } else cajaARS -= m;
           }
         } else if (mv.tipo === "cambio") {
           const md = Number(mv.monto_destino || 0);
-          if (mv.moneda === "USD") { cajaUSD -= m; gastadoUSD += m; } else cajaARS -= m;
+          if (mv.moneda === "USD") { cajaUSD -= m; } else cajaARS -= m;
           if (mv.moneda_destino === "USD") { cajaUSD += md; ingresoUSD += md; } else cajaARS += md;
         }
       }
+      // Gasto REAL en USD (gasto en USD por su monto; en ARS por monto/TC).
+      gastadoUSD = (movs ?? []).reduce((s, mv) => s + gastoRealUSD(mv), 0);
       const pctGastado = (Number(proyecto.costo_total_estimado || 0) > 0)
         ? (gastadoUSD / Number(proyecto.costo_total_estimado)) * 100 : 0;
       const hitoIds = (hitos ?? []).map(h => h.id);
@@ -157,13 +170,6 @@ export default function Home() {
               variant="outlined"
               label={`Recaudado · ${fmtPct(stats?.pctRecaudado ?? 0, 1)}`}
             />
-            {stats && stats.costo > 0 && (
-              <Chip
-                color="error"
-                variant="outlined"
-                label={`Gastado · ${fmtPct(stats.pctGastado ?? 0, 1)} · ${fmtMoney(stats.gastadoUSD ?? 0, "USD")}`}
-              />
-            )}
           </Stack>
         </Stack>
       </Box>

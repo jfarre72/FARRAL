@@ -290,14 +290,6 @@ export default function InversoresPage() {
           direction="row" spacing={1} useFlexGap flexWrap="wrap"
           sx={{ flexShrink: 0, width: { xs: "100%", sm: "auto" } }}
         >
-          {anualProy != null && (
-            <Chip
-              color="success"
-              variant="filled"
-              label={`Rendimiento anualizado · ${fmtPct(anualProy, 2)}`}
-              sx={{ fontWeight: 700, width: { xs: "100%", sm: "auto" } }}
-            />
-          )}
           <Button
             sx={{ flex: { xs: 1, sm: "initial" } }}
             startIcon={<PictureAsPdfIcon />} variant="outlined" onClick={exportarPdf}>
@@ -332,69 +324,63 @@ export default function InversoresPage() {
       {tab === 0 && (
         <Card>
           <CardContent>
-            {/* Simulador de fecha de entrega */}
+            {/* Simulador de fechas (entrega y venta) en una línea */}
             <Box sx={{
               mb: 2, p: 1.5, borderRadius: 2,
               border: "1px dashed", borderColor: "divider",
               bgcolor: "rgba(15,42,74,0.025)",
             }}>
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }}>
-                <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                  <Typography variant="subtitle2">Simular fecha de entrega</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Reemplaza temporalmente la fecha de fin del proyecto para ver el impacto en ponderación, % participación, ganancia y rendimiento anualizado.
-                  </Typography>
+              <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "flex-start" }} divider={<Divider orientation="vertical" flexItem sx={{ display: { xs: "none", md: "block" } }} />}>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="subtitle2" gutterBottom>Simular fecha de entrega</Typography>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <TextField
+                      type="date" label="Fecha entrega (sim.)" size="small"
+                      InputLabelProps={{ shrink: true }}
+                      sx={{ flexGrow: 1 }}
+                      value={fechaVentaOverride}
+                      onChange={(e) => setFechaVentaOverride(e.target.value)}
+                    />
+                    <Button
+                      size="small" variant="outlined"
+                      disabled={!proyecto.fecha_fin || fechaVentaOverride === proyecto.fecha_fin}
+                      onClick={() => setFechaVentaOverride(proyecto.fecha_fin || "")}
+                    >
+                      Restablecer
+                    </Button>
+                  </Stack>
+                  {proyecto.fecha_fin && fechaVentaOverride && fechaVentaOverride !== proyecto.fecha_fin && (
+                    <Typography variant="caption" color="warning.main" sx={{ mt: 0.5, display: "block" }}>
+                      Simulación activa. Original: {fmtDate(proyecto.fecha_fin)}.
+                    </Typography>
+                  )}
                 </Box>
-                <TextField
-                  type="date" label="Fecha de entrega (simulada)"
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ width: { xs: "100%", sm: 220 } }}
-                  value={fechaVentaOverride}
-                  onChange={(e) => setFechaVentaOverride(e.target.value)}
-                />
-                <Button
-                  size="small" variant="outlined"
-                  disabled={!proyecto.fecha_fin || fechaVentaOverride === proyecto.fecha_fin}
-                  onClick={() => setFechaVentaOverride(proyecto.fecha_fin || "")}
-                >
-                  Restablecer
-                </Button>
-              </Stack>
-              {proyecto.fecha_fin && fechaVentaOverride && fechaVentaOverride !== proyecto.fecha_fin && (
-                <Typography variant="caption" color="warning.main" sx={{ mt: 1, display: "block" }}>
-                  Simulación activa. Fecha original del proyecto: {proyecto.fecha_fin}.
-                </Typography>
-              )}
 
-              <Divider sx={{ my: 1.5 }} />
-
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }}>
-                <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                  <Typography variant="subtitle2">Simular fecha de venta</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Desde cuándo el inversor &quot;Faltante&quot; aporta el capital. Puede ser anterior a la fecha de entrega.
-                  </Typography>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="subtitle2" gutterBottom>Simular fecha de venta</Typography>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <TextField
+                      type="date" label="Fecha venta (sim.)" size="small"
+                      InputLabelProps={{ shrink: true }}
+                      sx={{ flexGrow: 1 }}
+                      value={fechaVentaSim}
+                      onChange={(e) => setFechaVentaSim(e.target.value)}
+                    />
+                    <Button
+                      size="small" variant="outlined"
+                      disabled={fechaVentaSim === (proyecto.fecha_inversor_faltante || "")}
+                      onClick={() => setFechaVentaSim(proyecto.fecha_inversor_faltante || "")}
+                    >
+                      Restablecer
+                    </Button>
+                  </Stack>
+                  {proyecto.fecha_inversor_faltante && fechaVentaSim && fechaVentaSim !== proyecto.fecha_inversor_faltante && (
+                    <Typography variant="caption" color="warning.main" sx={{ mt: 0.5, display: "block" }}>
+                      Simulación activa. Original: {fmtDate(proyecto.fecha_inversor_faltante)}.
+                    </Typography>
+                  )}
                 </Box>
-                <TextField
-                  type="date" label="Fecha de venta (simulada)"
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ width: { xs: "100%", sm: 220 } }}
-                  value={fechaVentaSim}
-                  onChange={(e) => setFechaVentaSim(e.target.value)}
-                />
-                <Button
-                  size="small" variant="outlined"
-                  disabled={fechaVentaSim === (proyecto.fecha_inversor_faltante || "")}
-                  onClick={() => setFechaVentaSim(proyecto.fecha_inversor_faltante || "")}
-                >
-                  Restablecer
-                </Button>
               </Stack>
-              {proyecto.fecha_inversor_faltante && fechaVentaSim && fechaVentaSim !== proyecto.fecha_inversor_faltante && (
-                <Typography variant="caption" color="warning.main" sx={{ mt: 1, display: "block" }}>
-                  Simulación activa. Fecha original del Faltante: {fmtDate(proyecto.fecha_inversor_faltante)}.
-                </Typography>
-              )}
             </Box>
 
             <Grid container spacing={2}>
