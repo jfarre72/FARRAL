@@ -50,7 +50,7 @@ function smoothPath(pts) {
 
 function LineChart({ data, maxY = 200000 }) {
   // data: [{ label, value }]
-  const W = 720, H = 260, pad = { t: 20, r: 16, b: 28, l: 56 };
+  const W = 640, H = 180, pad = { t: 16, r: 14, b: 24, l: 52 };
   if (!data.length) {
     return <Typography color="text.secondary" sx={{ p: 2 }}>Sin movimientos para graficar.</Typography>;
   }
@@ -66,8 +66,8 @@ function LineChart({ data, maxY = 200000 }) {
   const ticks = 4;
 
   return (
-    <Box sx={{ width: "100%", overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 480, display: "block" }}>
+    <Box sx={{ width: "100%", maxWidth: 560, mx: "auto", overflowX: "auto" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 360, display: "block" }}>
         {/* Grilla horizontal + labels eje Y */}
         {Array.from({ length: ticks + 1 }).map((_, i) => {
           const v = (max / ticks) * i;
