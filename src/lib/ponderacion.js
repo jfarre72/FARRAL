@@ -27,7 +27,7 @@ export function daysBetween(fromISO, toISO) {
   return Math.max(0, diff);
 }
 
-export function computePonderacion({ proyecto, aportes = [], inversores = [], fechaCorteOverride } = {}) {
+export function computePonderacion({ proyecto, aportes = [], inversores = [], fechaCorteOverride, fechaFaltanteOverride } = {}) {
   // Permite hacer "what if" con una fecha distinta a la de fin del proyecto.
   const fechaCorte = fechaCorteOverride || proyecto?.fecha_fin || todayISO();
   const venta = Number(proyecto?.precio_venta_estimado || 0);
@@ -51,7 +51,8 @@ export function computePonderacion({ proyecto, aportes = [], inversores = [], fe
 
   // --- Inversor Faltante ---
   const montoFaltante = Math.max(0, costo - totalAportadoUSD);
-  const fechaFaltante = proyecto?.fecha_inversor_faltante || proyecto?.fecha_fin || todayISO();
+  // La "fecha de venta" simulada manda desde cuándo el Faltante aporta capital.
+  const fechaFaltante = fechaFaltanteOverride || proyecto?.fecha_inversor_faltante || proyecto?.fecha_fin || todayISO();
   const diasFaltante = daysBetween(fechaFaltante, fechaCorte);
   const ponderadoFaltante = montoFaltante * diasFaltante;
   const totalPonderado = aportesConPonderado.reduce((s, a) => s + a._ponderado, 0) + ponderadoFaltante;

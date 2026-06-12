@@ -56,6 +56,8 @@ export default function InversoresPage() {
   // What-if: fecha de entrega del proyecto editable desde el Resumen.
   // Reemplaza temporalmente a fecha_fin. Persiste por proyecto en localStorage.
   const [fechaVentaOverride, setFechaVentaOverride] = useState("");
+  // What-if: fecha de venta simulada → desde cuándo el "Faltante" aporta capital.
+  const [fechaVentaSim, setFechaVentaSim] = useState("");
 
   const [orderBy, setOrderBy] = useState("aportesUSD");
   const [orderDir, setOrderDir] = useState("desc");
@@ -78,6 +80,9 @@ export default function InversoresPage() {
     const k = `farral.fechaVentaOverride.${proyecto.id}`;
     const saved = typeof window !== "undefined" ? window.localStorage.getItem(k) : null;
     setFechaVentaOverride(saved || proyecto.fecha_fin || "");
+    const kv = `farral.fechaVentaSim.${proyecto.id}`;
+    const savedV = typeof window !== "undefined" ? window.localStorage.getItem(kv) : null;
+    setFechaVentaSim(savedV || proyecto.fecha_inversor_faltante || "");
     // eslint-disable-next-line
   }, [proyecto?.id]);
   useEffect(() => {
@@ -85,6 +90,11 @@ export default function InversoresPage() {
     const k = `farral.fechaVentaOverride.${proyecto.id}`;
     if (fechaVentaOverride) window.localStorage.setItem(k, fechaVentaOverride);
   }, [fechaVentaOverride, proyecto?.id]);
+  useEffect(() => {
+    if (!proyecto) return;
+    const kv = `farral.fechaVentaSim.${proyecto.id}`;
+    if (fechaVentaSim) window.localStorage.setItem(kv, fechaVentaSim);
+  }, [fechaVentaSim, proyecto?.id]);
 
   const reload = async () => {
     if (!proyecto) return;
@@ -187,8 +197,8 @@ export default function InversoresPage() {
 
   // ---- Cálculo de ponderación (nuevo modelo)
   const calc = useMemo(
-    () => computePonderacion({ proyecto, aportes, inversores, fechaCorteOverride: fechaVentaOverride || undefined }),
-    [proyecto, aportes, inversores, fechaVentaOverride]
+    () => computePonderacion({ proyecto, aportes, inversores, fechaCorteOverride: fechaVentaOverride || undefined, fechaFaltanteOverride: fechaVentaSim || undefined }),
+    [proyecto, aportes, inversores, fechaVentaOverride, fechaVentaSim]
   );
   // Reales + faltante (este último al final). Si no hay faltante, no se incluye.
   const resumen   = calc.faltante.aportesUSD > 0
@@ -353,6 +363,36 @@ export default function InversoresPage() {
               {proyecto.fecha_fin && fechaVentaOverride && fechaVentaOverride !== proyecto.fecha_fin && (
                 <Typography variant="caption" color="warning.main" sx={{ mt: 1, display: "block" }}>
                   Simulación activa. Fecha original del proyecto: {proyecto.fecha_fin}.
+                </Typography>
+              )}
+
+              <Divider sx={{ my: 1.5 }} />
+
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }}>
+                <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                  <Typography variant="subtitle2">Simular fecha de venta</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Desde cuándo el inversor &quot;Faltante&quot; aporta el capital. Puede ser anterior a la fecha de entrega.
+                  </Typography>
+                </Box>
+                <TextField
+                  type="date" label="Fecha de venta (simulada)"
+                  InputLabelProps={{ shrink: true }}
+                  sx={{ width: { xs: "100%", sm: 220 } }}
+                  value={fechaVentaSim}
+                  onChange={(e) => setFechaVentaSim(e.target.value)}
+                />
+                <Button
+                  size="small" variant="outlined"
+                  disabled={fechaVentaSim === (proyecto.fecha_inversor_faltante || "")}
+                  onClick={() => setFechaVentaSim(proyecto.fecha_inversor_faltante || "")}
+                >
+                  Restablecer
+                </Button>
+              </Stack>
+              {proyecto.fecha_inversor_faltante && fechaVentaSim && fechaVentaSim !== proyecto.fecha_inversor_faltante && (
+                <Typography variant="caption" color="warning.main" sx={{ mt: 1, display: "block" }}>
+                  Simulación activa. Fecha original del Faltante: {fmtDate(proyecto.fecha_inversor_faltante)}.
                 </Typography>
               )}
             </Box>
