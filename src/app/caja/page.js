@@ -14,10 +14,12 @@ import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import AttachFileIcon from "@mui/icons-material/AttachFile";
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtMoney, fmtNum, fmtDate, fmtPct } from "@/components/Money";
+import { printDocument, esc } from "@/lib/printPdf";
 
 const BUCKET = "comprobantes";
 
@@ -262,6 +264,36 @@ export default function CajaPage() {
     }
     return filtered.map(r => ({ ...r, _delta: acc[r.id]?.delta ?? 0, _saldo: acc[r.id]?.saldo ?? 0 }));
   }, [unified, filtroMoneda]);
+
+  const tipoLabel = { ingreso: "Ingreso", egreso: "Egreso", cambio: "Cambio" };
+  const exportarPdf = () => {
+    const filas = visible.map((m) => `<tr>
+        <td>${fmtDate(m.fecha)}</td>
+        <td>${tipoLabel[m.tipo] || esc(m.tipo)}</td>
+        <td>${esc(m.detalle)}</td>
+        <td>${esc(m.categoria) || "—"}</td>
+        <td>${esc(m.etapa) || "—"}</td>
+        <td style="text-align:right">${esc(fmtMoney(m.monto, m.moneda))}</td>
+      </tr>`).join("");
+    const resumen = `
+      <h2>Resumen</h2>
+      <table><tbody>
+        <tr><td>Saldo caja USD</td><td style="text-align:right">${esc(fmtMoney(saldos.usd, "USD"))}</td></tr>
+        <tr><td>Saldo caja ARS</td><td style="text-align:right">${esc(fmtMoney(saldos.ars, "ARS"))}</td></tr>
+        <tr><td>Ingresos USD</td><td style="text-align:right">${esc(fmtMoney(saldos.ingUSD, "USD"))}</td></tr>
+        <tr><td>Gastado USD</td><td style="text-align:right">${esc(fmtMoney(saldos.egrUSD, "USD"))}</td></tr>
+      </tbody></table>`;
+    const tabla = `
+      <h2>Movimientos</h2>
+      <table><thead><tr>
+        <th>Fecha</th><th>Tipo</th><th>Detalle</th><th>Categoría</th><th>Etapa</th><th>Monto</th>
+      </tr></thead><tbody>${filas}</tbody></table>`;
+    printDocument({
+      title: "Caja",
+      subtitle: `${esc(proyecto.nombre)} · ${fmtDate(new Date().toISOString())}`,
+      bodyHtml: resumen + tabla,
+    });
+  };
 
   if (!proyecto) return <Alert severity="info">Seleccioná o creá un proyecto para gestionar la caja.</Alert>;
 
@@ -512,6 +544,7 @@ export default function CajaPage() {
           <Typography variant="body2">Saldos, ingresos, egresos y cambios del proyecto.</Typography>
         </Box>
         <Stack direction="row" spacing={1} sx={{ flexShrink: 0, width: { xs: "100%", sm: "auto" }, "& > button": { flex: { xs: 1, sm: "initial" } } }}>
+          <Button startIcon={<PictureAsPdfIcon />} variant="outlined" onClick={exportarPdf}>PDF</Button>
           <Button startIcon={<ArrowUpwardIcon />} variant="outlined" color="success" onClick={() => openNew("ingreso")}>Ingreso</Button>
           <Button startIcon={<SwapHorizIcon />} variant="outlined" color="primary" onClick={() => openNew("cambio")}>Cambio</Button>
           <Button startIcon={<ArrowDownwardIcon />} variant="contained" color="secondary" onClick={() => openNew("egreso")}>Egreso</Button>

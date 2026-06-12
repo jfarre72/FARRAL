@@ -13,10 +13,12 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import PaidIcon from "@mui/icons-material/Paid";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtMoney, fmtNum, fmtPct, fmtDate, anualizada } from "@/components/Money";
+import { printDocument, esc } from "@/lib/printPdf";
 import DonutChart from "@/components/DonutChart";
 import { computePonderacion } from "@/lib/ponderacion";
 
@@ -216,6 +218,52 @@ export default function InversoresPage() {
 
   const invName = (id) => inversores.find(i => i.id === id)?.nombre ?? "—";
 
+  const exportarPdf = () => {
+    const filas = resumen.map((r) => `<tr>
+        <td>${esc(r.nombre)}${r.es_faltante ? ' <span class="tag">virtual</span>' : ""}</td>
+        <td style="text-align:right">${esc(fmtMoney(r.aportesUSD, "USD"))}</td>
+        <td style="text-align:right">${esc(fmtNum(r.ponderado, 0))}</td>
+        <td style="text-align:right">${esc(fmtPct(r.participacion))}</td>
+        <td style="text-align:right">${totProy.ganancia > 0 ? esc(fmtMoney(r.ganancia, "USD")) : "—"}</td>
+        <td style="text-align:right">${totProy.ganancia > 0 && r.aportesUSD > 0 ? esc(fmtPct(r.gananciaPct)) : "—"}</td>
+        <td style="text-align:right">${esc(fmtMoney(totProy.ganancia > 0 ? r.totalDevolver : r.aportesUSD, "USD"))}</td>
+      </tr>`).join("");
+    const t = resumen.reduce((acc, r) => {
+      acc.aportesUSD += Number(r.aportesUSD || 0);
+      acc.ponderado += Number(r.ponderado || 0);
+      acc.participacion += Number(r.participacion || 0);
+      acc.ganancia += Number(r.ganancia || 0);
+      acc.totalDevolver += Number(totProy.ganancia > 0 ? r.totalDevolver : r.aportesUSD) || 0;
+      return acc;
+    }, { aportesUSD: 0, ponderado: 0, participacion: 0, ganancia: 0, totalDevolver: 0 });
+    const totalRow = `<tr style="font-weight:700;border-top:2px solid #cdd5e0">
+        <td>Totales</td>
+        <td style="text-align:right">${esc(fmtMoney(t.aportesUSD, "USD"))}</td>
+        <td style="text-align:right">${esc(fmtNum(t.ponderado, 0))}</td>
+        <td style="text-align:right">${esc(fmtPct(t.participacion))}</td>
+        <td style="text-align:right">${totProy.ganancia > 0 ? esc(fmtMoney(t.ganancia, "USD")) : "—"}</td>
+        <td></td>
+        <td style="text-align:right">${esc(fmtMoney(t.totalDevolver, "USD"))}</td>
+      </tr>`;
+    const resumenKpi = `<h2>Resumen del proyecto</h2>
+      <table><tbody>
+        <tr><td>Venta estimada</td><td style="text-align:right">${esc(fmtMoney(totProy.venta, "USD"))}</td></tr>
+        <tr><td>Costo estimado</td><td style="text-align:right">${esc(fmtMoney(totProy.costo, "USD"))}</td></tr>
+        <tr><td>Ganancia estimada</td><td style="text-align:right">${esc(fmtMoney(totProy.ganancia, "USD"))}</td></tr>
+        <tr><td>Recaudado</td><td style="text-align:right">${esc(fmtPct(totProy.pctRecaudado, 1))}</td></tr>
+      </tbody></table>`;
+    const tabla = `<h2>Inversores</h2>
+      <table><thead><tr>
+        <th>Inversor</th><th>Aporte (USD)</th><th>Ponderado</th><th>% partic.</th>
+        <th>Ganancia estim.</th><th>% ganancia</th><th>Total a devolver</th>
+      </tr></thead><tbody>${filas}${totalRow}</tbody></table>`;
+    printDocument({
+      title: "Inversores",
+      subtitle: `${esc(proyecto.nombre)} · ${fmtDate(new Date().toISOString())}`,
+      bodyHtml: resumenKpi + tabla,
+    });
+  };
+
   return (
     <Stack spacing={3}>
       <Stack
@@ -240,6 +288,11 @@ export default function InversoresPage() {
               sx={{ fontWeight: 700, width: { xs: "100%", sm: "auto" } }}
             />
           )}
+          <Button
+            sx={{ flex: { xs: 1, sm: "initial" } }}
+            startIcon={<PictureAsPdfIcon />} variant="outlined" onClick={exportarPdf}>
+            PDF
+          </Button>
           <Button
             sx={{ flex: { xs: 1, sm: "initial" } }}
             startIcon={<AddIcon />} variant="outlined" onClick={openNewInv}>
@@ -397,6 +450,28 @@ export default function InversoresPage() {
                     </React.Fragment>
                     );
                   })}
+                  {resumen.length > 0 && (() => {
+                    const t = resumen.reduce((acc, r) => {
+                      acc.aportesUSD += Number(r.aportesUSD || 0);
+                      acc.ponderado += Number(r.ponderado || 0);
+                      acc.participacion += Number(r.participacion || 0);
+                      acc.ganancia += Number(r.ganancia || 0);
+                      acc.totalDevolver += Number(totProy.ganancia > 0 ? r.totalDevolver : r.aportesUSD) || 0;
+                      return acc;
+                    }, { aportesUSD: 0, ponderado: 0, participacion: 0, ganancia: 0, totalDevolver: 0 });
+                    return (
+                      <TableRow sx={{ "& > td": { borderTop: "2px solid", borderColor: "divider", fontWeight: 700 } }}>
+                        <TableCell />
+                        <TableCell><Typography fontWeight={700}>Totales</Typography></TableCell>
+                        <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(t.aportesUSD, "USD")}</Typography></TableCell>
+                        <TableCell align="right"><Typography fontWeight={700}>{fmtNum(t.ponderado, 0)}</Typography></TableCell>
+                        <TableCell align="right"><Typography fontWeight={700}>{fmtPct(t.participacion)}</Typography></TableCell>
+                        <TableCell align="right"><Typography fontWeight={700}>{totProy.ganancia > 0 ? fmtMoney(t.ganancia, "USD") : "—"}</Typography></TableCell>
+                        <TableCell align="right" />
+                        <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(t.totalDevolver, "USD")}</Typography></TableCell>
+                      </TableRow>
+                    );
+                  })()}
                 </TableBody>
               </Table>
             </Box>
