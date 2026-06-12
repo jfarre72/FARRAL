@@ -48,17 +48,18 @@ function smoothPath(pts) {
   return d;
 }
 
-function LineChart({ data }) {
+function LineChart({ data, maxY = 200000 }) {
   // data: [{ label, value }]
   const W = 720, H = 260, pad = { t: 20, r: 16, b: 28, l: 56 };
   if (!data.length) {
     return <Typography color="text.secondary" sx={{ p: 2 }}>Sin movimientos para graficar.</Typography>;
   }
-  const max = Math.max(...data.map(d => d.value), 1);
+  // El eje Y llega como máximo a maxY (200.000 por defecto).
+  const max = maxY;
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
   const x = (i) => pad.l + (data.length === 1 ? innerW / 2 : (i / (data.length - 1)) * innerW);
-  const y = (v) => pad.t + innerH - (v / max) * innerH;
+  const y = (v) => pad.t + innerH - (Math.min(v, max) / max) * innerH;
   const pts = data.map((d, i) => ({ x: x(i), y: y(d.value) }));
   const linePath = smoothPath(pts);
   const areaPath = `${linePath} L ${pts[pts.length - 1].x} ${pad.t + innerH} L ${pts[0].x} ${pad.t + innerH} Z`;
@@ -196,21 +197,6 @@ export default function IndicadoresPage() {
 
       {loading && <LinearProgress />}
 
-      {/* Gráfico de gastos acumulados */}
-      <Card>
-        <CardContent>
-          <Stack direction="row" alignItems="baseline" spacing={1} sx={{ mb: 1 }}>
-            <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
-              Gastos acumulados (USD) por mes
-            </Typography>
-            <Typography variant="h6" color="secondary.main">
-              {fmtMoney(Math.round(ind.gastadoUSD), "USD")}
-            </Typography>
-          </Stack>
-          <LineChart data={ind.serie} />
-        </CardContent>
-      </Card>
-
       {/* Indicadores */}
       <Grid container spacing={2}>
         <Grid item xs={12} sm={6} md={4}>
@@ -254,6 +240,21 @@ export default function IndicadoresPage() {
             color={ind.margenEsperado != null && ind.margenEsperado < 0 ? "error.main" : "success.main"} />
         </Grid>
       </Grid>
+
+      {/* Gráfico de gastos acumulados */}
+      <Card>
+        <CardContent>
+          <Stack direction="row" alignItems="baseline" spacing={1} sx={{ mb: 1 }}>
+            <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
+              Gastos acumulados (USD) por mes
+            </Typography>
+            <Typography variant="h6" color="secondary.main">
+              {fmtMoney(Math.round(ind.gastadoUSD), "USD")}
+            </Typography>
+          </Stack>
+          <LineChart data={ind.serie} />
+        </CardContent>
+      </Card>
     </Stack>
   );
 }
