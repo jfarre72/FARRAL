@@ -15,6 +15,7 @@ import ChecklistIcon from "@mui/icons-material/Checklist";
 import InsightsIcon from "@mui/icons-material/Insights";
 import PhotoLibraryIcon from "@mui/icons-material/PhotoLibrary";
 import DescriptionIcon from "@mui/icons-material/Description";
+import SettingsIcon from "@mui/icons-material/Settings";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -33,6 +34,7 @@ const NAV = [
   { label: "Indicadores",     href: "/indicadores",   icon: <InsightsIcon /> },
   { label: "Galería",         href: "/galeria",       icon: <PhotoLibraryIcon /> },
   { label: "Reportería",      href: "/reporteria",    icon: <DescriptionIcon /> },
+  { label: "Configuración",   href: "/configuracion", icon: <SettingsIcon /> },
 ];
 
 const DRAWER_WIDTH = 240;
@@ -147,14 +149,6 @@ export default function AppShell({ children }) {
 
       <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, md: 4 }, pt: { xs: 10, md: 11 }, width: "100%" }}>
         <Container maxWidth="xl" disableGutters>
-          {proyecto && (
-            <Stack direction="row" spacing={1} sx={{ mb: 3 }} alignItems="center" flexWrap="wrap">
-              <Chip label={proyecto.nombre} color="primary" variant="filled" />
-              {proyecto.m2_totales > 0 && (
-                <Chip label={`${proyecto.m2_totales} m² totales`} variant="outlined" />
-              )}
-            </Stack>
-          )}
           {children}
         </Container>
       </Box>

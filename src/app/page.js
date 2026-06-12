@@ -58,7 +58,7 @@ export default function Home() {
       const hitoIds = (hitos ?? []).map(h => h.id);
       let tareas = [];
       if (hitoIds.length) {
-        const { data } = await supabase.from("hito_tareas").select("hito_id,completado").in("hito_id", hitoIds);
+        const { data } = await supabase.from("hito_tareas").select("hito_id,completado,avance").in("hito_id", hitoIds);
         tareas = data ?? [];
       }
       const aportesUSD = (aportes ?? []).filter(a => (a.moneda ?? "USD") === "USD");
@@ -83,9 +83,10 @@ export default function Home() {
       const anualProy = (costo > 0 && diasProy > 0) ? (roiProyPct * 365 / diasProy) : null;
       // Avance ponderado por subtareas (mismo criterio que Línea de tiempo)
       const sorted = [...(hitos ?? [])].sort((a, b) => a.orden - b.orden);
+      const avanceTarea = (t) => (t.avance != null ? Number(t.avance) : (t.completado ? 100 : 0));
       const fraccion = (h) => {
         const ts = tareas.filter(t => t.hito_id === h.id);
-        if (ts.length > 0) return ts.filter(t => t.completado).length / ts.length;
+        if (ts.length > 0) return ts.reduce((s, t) => s + avanceTarea(t), 0) / (ts.length * 100);
         return h.completado ? 1 : 0;
       };
       const avance = Math.round(sorted.reduce((s, h, i) => {
@@ -93,12 +94,13 @@ export default function Home() {
         const peso = next ? Math.max(0, Number(next.porcentaje) - Number(h.porcentaje)) : 0;
         return s + peso * fraccion(h);
       }, 0));
+      const hitosConAvance = (hitos ?? []).map(h => ({ ...h, avancePct: Math.round(fraccion(h) * 100) }));
       setStats({
         totUSD, efectivoUSD, venta, costo, ganancia, costoM2, ventaM2, avance,
         pctRecaudado, anualProy, cajaUSD, cajaARS,
         ingresoUSD, gastadoUSD, pctGastado,
         nInversores: inversores?.length ?? 0,
-        hitos: hitos ?? [],
+        hitos: hitosConAvance,
       });
     })();
   }, [proyecto]);
@@ -228,7 +230,16 @@ export default function Home() {
                 <Typography sx={{ flexGrow: 1, textDecoration: h.completado ? "line-through" : "none" }}>
                   {h.nombre}
                 </Typography>
-                <Typography color="text.secondary" variant="body2">
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ width: { xs: 110, sm: 160 } }}>
+                  <Box sx={{ flexGrow: 1, height: 6, bgcolor: "rgba(15,42,74,0.08)", borderRadius: 3, overflow: "hidden" }}>
+                    <Box sx={{ height: "100%", width: `${h.avancePct ?? 0}%`,
+                      bgcolor: (h.avancePct ?? 0) >= 100 ? "success.main" : "secondary.main" }} />
+                  </Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ minWidth: 34, textAlign: "right" }}>
+                    {h.avancePct ?? 0}%
+                  </Typography>
+                </Stack>
+                <Typography color="text.secondary" variant="body2" sx={{ minWidth: 90, textAlign: "right" }}>
                   {h.fecha_estimada ?? "—"}
                 </Typography>
               </Stack>
