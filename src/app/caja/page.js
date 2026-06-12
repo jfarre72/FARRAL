@@ -23,6 +23,19 @@ import { printDocument, esc } from "@/lib/printPdf";
 
 const BUCKET = "comprobantes";
 
+// Gasto REAL imputable en USD (misma convención que Seguimiento económico):
+// gasto en USD por su monto; gasto en ARS convertido por el tipo de cambio
+// (el del cambio integrado, o el tipo_cambio_gasto cargado al pagar en pesos).
+// Un cambio puro de divisa (sin gasto) no cuenta.
+function gastoRealUSD(mv) {
+  if (mv.tipo !== "egreso") return 0;
+  const m = Number(mv.monto || 0);
+  if (m <= 0) return 0;
+  if (mv.moneda === "USD") return m;
+  const tc = Number(mv.cambio_tipo_cambio || mv.tipo_cambio_gasto || 0);
+  return tc > 0 ? m / tc : 0;
+}
+
 const ETAPAS_DEFAULT = [
   "Inicio", "Cimentación", "Estructura",
   "Obra cerrada", "Instalaciones + revoques", "Terminada",
@@ -160,6 +173,12 @@ export default function CajaPage() {
     return { usd, ars, ingUSD, ingARS, egrUSD, egrARS };
   }, [aportes, movs]);
 
+  // Gasto REAL en USD (lo efectivamente gastado, valuado en USD).
+  const gastoRealTotalUSD = useMemo(
+    () => movs.reduce((s, mv) => s + gastoRealUSD(mv), 0),
+    [movs]
+  );
+
   // ----- Egresos por categoría -----
   const porCategoria = useMemo(() => {
     const map = {};
@@ -290,7 +309,7 @@ export default function CajaPage() {
         <tr><td>Saldo caja USD</td><td style="text-align:right">${esc(fmtMoney(saldos.usd, "USD"))}</td></tr>
         <tr><td>Saldo caja ARS</td><td style="text-align:right">${esc(fmtMoney(saldos.ars, "ARS"))}</td></tr>
         <tr><td>Ingresos USD</td><td style="text-align:right">${esc(fmtMoney(saldos.ingUSD, "USD"))}</td></tr>
-        <tr><td>Gastado USD</td><td style="text-align:right">${esc(fmtMoney(saldos.egrUSD, "USD"))}</td></tr>
+        <tr><td>Gastado USD (real)</td><td style="text-align:right">${esc(fmtMoney(gastoRealTotalUSD, "USD"))}</td></tr>
       </tbody></table>`;
     const tabla = `
       <h2>Movimientos</h2>
@@ -586,7 +605,7 @@ export default function CajaPage() {
       {(() => {
         const costo = Number(proyecto?.costo_total_estimado || 0);
         const ingresos = saldos.ingUSD;
-        const gastado = saldos.egrUSD;
+        const gastado = gastoRealTotalUSD;
         const pctGastado = costo > 0 ? Math.min(100, (gastado / costo) * 100) : 0;
         const pctIngreso = costo > 0 ? Math.min(100, (ingresos / costo) * 100) : 0;
         return (
