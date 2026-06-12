@@ -6,6 +6,7 @@ import {
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
+import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
@@ -67,6 +68,28 @@ export default function ConfiguracionPage() {
     reload();
   };
 
+  // Drag & drop para reordenar etapas
+  const [drag, setDrag] = useState(null); // { fromId, overId }
+  const reordenar = async (fromId, toId) => {
+    if (fromId === toId) return;
+    const lista = [...hitos].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+    const fromIdx = lista.findIndex(h => h.id === fromId);
+    const toIdx = lista.findIndex(h => h.id === toId);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const nueva = [...lista];
+    const [m] = nueva.splice(fromIdx, 1);
+    nueva.splice(toIdx, 0, m);
+    const conOrden = nueva.map((h, i) => ({ ...h, orden: i + 1 }));
+    setHitos(conOrden);
+    const cambios = conOrden.filter(h => {
+      const o = lista.find(x => x.id === h.id);
+      return o && o.orden !== h.orden;
+    });
+    await Promise.all(cambios.map(h =>
+      supabase.from("hitos").update({ orden: h.orden }).eq("id", h.id)
+    ));
+  };
+
   const delEtapa = async (h) => {
     if (!confirm(`¿Eliminar la etapa "${h.nombre}"? Se borran también sus tareas.`)) return;
     const { error } = await supabase.from("hitos").delete().eq("id", h.id);
@@ -93,14 +116,35 @@ export default function ConfiguracionPage() {
             <Table size="small" sx={{ minWidth: 420 }}>
               <TableHead>
                 <TableRow>
+                  <TableCell sx={{ width: 36 }}></TableCell>
                   <TableCell sx={{ width: 90 }}>% hito</TableCell>
                   <TableCell>Nombre</TableCell>
                   <TableCell align="right" sx={{ width: 60 }}></TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {hitos.map((h) => (
-                  <TableRow key={h.id} hover>
+                {hitos.map((h) => {
+                  const isTarget = drag && drag.overId === h.id && drag.fromId !== h.id;
+                  return (
+                  <TableRow
+                    key={h.id} hover
+                    onDragOver={(e) => { e.preventDefault(); if (drag && drag.overId !== h.id) setDrag(d => ({ ...d, overId: h.id })); }}
+                    onDrop={(e) => { e.preventDefault(); if (drag) reordenar(drag.fromId, h.id); setDrag(null); }}
+                    sx={{ opacity: drag?.fromId === h.id ? 0.4 : 1,
+                      "& > td": { borderTop: isTarget ? "2px solid" : undefined, borderTopColor: isTarget ? "secondary.main" : undefined } }}
+                  >
+                    <TableCell sx={{ pr: 0 }}>
+                      <Tooltip title="Arrastrá para reordenar">
+                        <IconButton
+                          size="small" draggable
+                          onDragStart={() => setDrag({ fromId: h.id, overId: h.id })}
+                          onDragEnd={() => setDrag(null)}
+                          sx={{ cursor: "grab", touchAction: "none" }}
+                        >
+                          <DragIndicatorIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
                     <TableCell>
                       <CommitField
                         type="number" value={h.porcentaje} align="right" suffix="%"
@@ -122,10 +166,11 @@ export default function ConfiguracionPage() {
                       </Tooltip>
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
                 {hitos.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={3}>
+                    <TableCell colSpan={4}>
                       <Typography variant="body2" color="text.secondary">No hay etapas cargadas.</Typography>
                     </TableCell>
                   </TableRow>

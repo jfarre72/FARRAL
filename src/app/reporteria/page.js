@@ -13,10 +13,9 @@ import { printDocument, esc } from "@/lib/printPdf";
 const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 const MES_CORTO = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
-const mesActual = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-};
+const isoDe = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const hoyISO = () => isoDe(new Date());
+const inicioMesISO = () => { const d = new Date(); return isoDe(new Date(d.getFullYear(), d.getMonth(), 1)); };
 
 // USD gastado por un movimiento (misma convención que Caja/Indicadores).
 function gastoUSD(mv) {
@@ -65,7 +64,8 @@ function svgChart(serie, hastaKey) {
 
 export default function ReporteriaPage() {
   const { proyecto } = useProjects();
-  const [mes, setMes] = useState(mesActual());
+  const [desde, setDesde] = useState(inicioMesISO());
+  const [hasta, setHasta] = useState(hoyISO());
   const [hitos, setHitos] = useState([]);
   const [tareas, setTareas] = useState([]);
   const [movs, setMovs] = useState([]);
@@ -93,7 +93,7 @@ export default function ReporteriaPage() {
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
 
   const rep = useMemo(() => {
-    const inMes = (iso) => iso && String(iso).slice(0, 7) === mes;
+    const inRango = (iso) => { if (!iso) return false; const d = String(iso).slice(0, 10); return d >= desde && d <= hasta; };
 
     // Avance global ponderado por etapa
     const sorted = [...hitos].sort((a, b) => a.orden - b.orden);
@@ -109,77 +109,78 @@ export default function ReporteriaPage() {
       avance += peso * fracc(h);
     });
 
-    // Tareas completadas en el mes (por completado_at)
+    // Tareas completadas en el rango (por completado_at)
     const hitoNombre = Object.fromEntries(hitos.map(h => [h.id, h.nombre]));
-    const tareasMes = tareas
-      .filter(t => t.completado && inMes(t.completado_at))
+    const tareasRango = tareas
+      .filter(t => t.completado && inRango(t.completado_at))
       .map(t => ({ nombre: t.nombre, hito: hitoNombre[t.hito_id] || "—" }));
     const tareasPorHito = {};
-    for (const t of tareasMes) { (tareasPorHito[t.hito] ||= []).push(t.nombre); }
+    for (const t of tareasRango) { (tareasPorHito[t.hito] ||= []).push(t.nombre); }
 
-    // Gasto del mes y total acumulado + serie por mes
+    // Gasto del rango, total acumulado + serie mensual (historial completo)
     const porMes = new Map();
-    let totalUSD = 0;
+    let totalUSD = 0, gastoRango = 0, acumHasta = 0;
     for (const mv of movs) {
       const g = gastoUSD(mv);
       if (g <= 0 || !mv.fecha) continue;
       totalUSD += g;
-      const k = String(mv.fecha).slice(0, 7);
+      const f = String(mv.fecha).slice(0, 10);
+      if (f >= desde && f <= hasta) gastoRango += g;
+      if (f <= hasta) acumHasta += g;
+      const k = f.slice(0, 7);
       porMes.set(k, (porMes.get(k) || 0) + g);
     }
     const keys = [...porMes.keys()].sort();
     let acum = 0;
+    const hastaKey = String(hasta).slice(0, 7);
     const serie = keys.map(k => {
       acum += porMes.get(k);
       const [yy, mm] = k.split("-");
       return { key: k, label: `${MES_CORTO[Number(mm) - 1]} ${yy.slice(2)}`, value: acum };
     });
-    const gastoMes = porMes.get(mes) || 0;
-    const acumMes = (() => { const f = serie.filter(s => s.key <= mes); return f.length ? f[f.length - 1].value : 0; })();
 
-    // Fotos del mes (por fecha de carga)
-    const fotosMes = fotos.filter(f => inMes(f.fecha));
+    // Fotos del rango (por fecha de carga)
+    const fotosRango = fotos.filter(f => inRango(f.fecha));
 
-    return { avance: Math.round(avance), tareasPorHito, nTareasMes: tareasMes.length, gastoMes, totalUSD, acumMes, serie, fotosMes };
-  }, [hitos, tareas, movs, fotos, mes]);
+    return { avance: Math.round(avance), tareasPorHito, nTareasRango: tareasRango.length, gastoRango, totalUSD, acumHasta, serie, hastaKey, fotosRango };
+  }, [hitos, tareas, movs, fotos, desde, hasta]);
 
-  const [yy, mm] = mes.split("-");
-  const mesLabel = `${MESES[Number(mm) - 1]} ${yy}`;
+  const rangoLabel = `${fmtDate(desde)} a ${fmtDate(hasta)}`;
 
   const generarPdf = () => {
     const tareasHtml = Object.keys(rep.tareasPorHito).length
       ? Object.entries(rep.tareasPorHito).map(([hito, ts]) =>
           `<p style="margin:6px 0 2px"><b>${esc(hito)}</b></p><ul style="margin:0">${ts.map(n => `<li>${esc(n)}</li>`).join("")}</ul>`
         ).join("")
-      : `<p class="muted">No se registraron tareas completadas este mes.</p>`;
+      : `<p class="muted">No se registraron tareas completadas en el período.</p>`;
 
-    const fotosHtml = rep.fotosMes.length
-      ? `<div style="display:flex;flex-wrap:wrap;gap:8px">${rep.fotosMes.map(f =>
+    const fotosHtml = rep.fotosRango.length
+      ? `<div style="display:flex;flex-wrap:wrap;gap:8px">${rep.fotosRango.map(f =>
           `<div style="width:170px"><img src="${esc(f.url)}" style="width:170px;height:120px;object-fit:cover;border-radius:6px"/>
             <div style="font-size:10px;color:#8a97a8">${fmtDate(f.fecha)}${f.descripcion ? " · " + esc(f.descripcion) : ""}</div></div>`
         ).join("")}</div>`
-      : `<p class="muted">Sin fotos cargadas para este mes.</p>`;
+      : `<p class="muted">Sin fotos cargadas para este período.</p>`;
 
     const body = `
-      <h2>Resumen del mes</h2>
+      <h2>Resumen del período</h2>
       <table><tbody>
         <tr><td>Avance estimado del proyecto</td><td style="text-align:right">${rep.avance}%</td></tr>
-        <tr><td>Gastado en el mes</td><td style="text-align:right">${esc(fmtMoney(Math.round(rep.gastoMes), "USD"))}</td></tr>
-        <tr><td>Gastado acumulado</td><td style="text-align:right">${esc(fmtMoney(Math.round(rep.acumMes), "USD"))}</td></tr>
-        <tr><td>Tareas completadas en el mes</td><td style="text-align:right">${rep.nTareasMes}</td></tr>
+        <tr><td>Gastado en el período</td><td style="text-align:right">${esc(fmtMoney(Math.round(rep.gastoRango), "USD"))}</td></tr>
+        <tr><td>Gastado acumulado (hasta ${fmtDate(hasta)})</td><td style="text-align:right">${esc(fmtMoney(Math.round(rep.acumHasta), "USD"))}</td></tr>
+        <tr><td>Tareas completadas en el período</td><td style="text-align:right">${rep.nTareasRango}</td></tr>
       </tbody></table>
 
-      <h2>Tareas realizadas en ${esc(mesLabel)}</h2>
+      <h2>Tareas realizadas (${esc(rangoLabel)})</h2>
       ${tareasHtml}
 
       <h2>Evolución de gastos (USD acumulado)</h2>
-      ${svgChart(rep.serie, mes)}
+      ${svgChart(rep.serie, rep.hastaKey)}
 
-      <h2>Fotos del mes</h2>
+      <h2>Fotos del período</h2>
       ${fotosHtml}
     `;
     printDocument({
-      title: `Reporte de avance — ${mesLabel}`,
+      title: `Reporte de avance — ${rangoLabel}`,
       subtitle: `${esc(proyecto.nombre)} · Generado el ${fmtDate(new Date().toISOString())}`,
       bodyHtml: body,
       logoUrl: `${window.location.origin}/logo-farral.png`,
@@ -194,13 +195,18 @@ export default function ReporteriaPage() {
         <Box sx={{ flexGrow: 1 }}>
           <Typography variant="h5">Reportería</Typography>
           <Typography variant="body2" color="text.secondary">
-            Reporte mensual de avance para inversores: tareas, gastos y fotos del mes.
+            Reporte de avance para inversores: tareas, gastos y fotos del período.
           </Typography>
         </Box>
         <TextField
-          type="month" label="Mes a informar" InputLabelProps={{ shrink: true }}
-          value={mes} onChange={(e) => setMes(e.target.value)}
-          sx={{ width: 180 }}
+          type="date" label="Desde" InputLabelProps={{ shrink: true }}
+          value={desde} onChange={(e) => setDesde(e.target.value)}
+          sx={{ width: 160 }}
+        />
+        <TextField
+          type="date" label="Hasta" InputLabelProps={{ shrink: true }}
+          value={hasta} onChange={(e) => setHasta(e.target.value)}
+          sx={{ width: 160 }}
         />
         <Button variant="contained" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={generarPdf}>
           Generar PDF
@@ -219,29 +225,29 @@ export default function ReporteriaPage() {
         </Grid>
         <Grid item xs={6} sm={3}>
           <Card><CardContent>
-            <Typography variant="caption" color="text.secondary">Gastado en el mes</Typography>
-            <Typography variant="h5">{fmtMoney(Math.round(rep.gastoMes), "USD")}</Typography>
+            <Typography variant="caption" color="text.secondary">Gastado en el período</Typography>
+            <Typography variant="h5">{fmtMoney(Math.round(rep.gastoRango), "USD")}</Typography>
           </CardContent></Card>
         </Grid>
         <Grid item xs={6} sm={3}>
           <Card><CardContent>
             <Typography variant="caption" color="text.secondary">Gastado acumulado</Typography>
-            <Typography variant="h5">{fmtMoney(Math.round(rep.acumMes), "USD")}</Typography>
+            <Typography variant="h5">{fmtMoney(Math.round(rep.acumHasta), "USD")}</Typography>
           </CardContent></Card>
         </Grid>
         <Grid item xs={6} sm={3}>
           <Card><CardContent>
-            <Typography variant="caption" color="text.secondary">Tareas del mes</Typography>
-            <Typography variant="h5">{rep.nTareasMes}</Typography>
+            <Typography variant="caption" color="text.secondary">Tareas del período</Typography>
+            <Typography variant="h5">{rep.nTareasRango}</Typography>
           </CardContent></Card>
         </Grid>
       </Grid>
 
       <Card>
         <CardContent>
-          <Typography variant="subtitle1" gutterBottom>Tareas realizadas en {mesLabel}</Typography>
+          <Typography variant="subtitle1" gutterBottom>Tareas realizadas ({rangoLabel})</Typography>
           {Object.keys(rep.tareasPorHito).length === 0 ? (
-            <Typography variant="body2" color="text.secondary">No se registraron tareas completadas este mes.</Typography>
+            <Typography variant="body2" color="text.secondary">No se registraron tareas completadas en el período.</Typography>
           ) : (
             Object.entries(rep.tareasPorHito).map(([hito, ts]) => (
               <Box key={hito} sx={{ mb: 1 }}>
@@ -254,14 +260,14 @@ export default function ReporteriaPage() {
           )}
 
           <Divider sx={{ my: 2 }} />
-          <Typography variant="subtitle1" gutterBottom>Fotos del mes</Typography>
-          {rep.fotosMes.length === 0 ? (
+          <Typography variant="subtitle1" gutterBottom>Fotos del período</Typography>
+          {rep.fotosRango.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
-              Sin fotos para este mes. Cargá fotos en la sección Galería con fecha de {mesLabel}.
+              Sin fotos en este período. Cargá fotos en la sección Galería con fecha dentro del rango.
             </Typography>
           ) : (
             <Grid container spacing={1}>
-              {rep.fotosMes.map(f => (
+              {rep.fotosRango.map(f => (
                 <Grid item xs={4} sm={3} md={2} key={f.id}>
                   <Box component="img" src={f.url} alt=""
                     sx={{ width: "100%", height: 90, objectFit: "cover", borderRadius: 1 }} />
