@@ -2,7 +2,7 @@
 import {
   Card, CardContent, Stack, Typography, Alert, Box, TextField,
   Button, IconButton, Tooltip, LinearProgress, Divider, Table, TableHead,
-  TableBody, TableRow, TableCell, TableContainer, Switch, FormControlLabel
+  TableBody, TableRow, TableCell, TableContainer, Switch, FormControlLabel, Chip
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
@@ -10,9 +10,12 @@ import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
+import { fmtMoney } from "@/components/Money";
 
 // Campo que guarda al salir (blur/Enter), no en cada tecla.
-function CommitField({ value, onCommit, type = "text", sx, align, suffix }) {
+// money=true: muestra el valor formateado en USD (con separador de miles)
+// cuando no está enfocado, y el número crudo mientras se edita.
+function CommitField({ value, onCommit, type = "text", money = false, sx, align, suffix }) {
   const [local, setLocal] = useState(value ?? "");
   const [focused, setFocused] = useState(false);
   useEffect(() => { if (!focused) setLocal(value ?? ""); }, [value, focused]);
@@ -20,21 +23,50 @@ function CommitField({ value, onCommit, type = "text", sx, align, suffix }) {
     setFocused(false);
     if (String(local) !== String(value ?? "")) onCommit(local);
   };
+  const display = money && !focused ? fmtMoney(value, "USD") : local;
   return (
     <TextField
-      size="small" type={type} value={local} sx={sx}
-      onFocus={() => setFocused(true)}
+      size="small" type={money ? "text" : type} value={display} sx={sx}
+      onFocus={() => { setFocused(true); setLocal(value ?? ""); }}
       onChange={(e) => setLocal(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-      inputProps={align ? { style: { textAlign: align } } : undefined}
+      inputProps={{
+        ...(align ? { style: { textAlign: align } } : {}),
+        ...(money ? { inputMode: "numeric" } : {}),
+      }}
       InputProps={suffix ? { endAdornment: <Typography variant="caption" color="text.secondary">{suffix}</Typography> } : undefined}
     />
   );
 }
 
+// Línea de resumen: compara una suma con un total de referencia editable.
+function ResumenRelacion({ totalLabel, sumaLabel, total, onCommitTotal, suma }) {
+  const diff = Number(suma || 0) - Number(total || 0);
+  const ok = Math.abs(diff) < 0.5;
+  return (
+    <Box sx={{ p: 1.5, mb: 2, borderRadius: 1, bgcolor: "rgba(15,42,74,0.04)" }}>
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }} flexWrap="wrap">
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ flexGrow: 1 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>{totalLabel}</Typography>
+          <CommitField money value={total ?? 0} align="right" sx={{ width: 170 }} onCommit={onCommitTotal} />
+        </Stack>
+        <Typography variant="body2" color="text.secondary">
+          {sumaLabel}: <b>{fmtMoney(suma, "USD")}</b>
+        </Typography>
+        <Chip
+          size="small"
+          color={ok ? "success" : "warning"}
+          variant={ok ? "filled" : "outlined"}
+          label={ok ? "Coincide" : `Dif. ${fmtMoney(Math.abs(diff), "USD")}`}
+        />
+      </Stack>
+    </Box>
+  );
+}
+
 export default function ConfiguracionPage() {
-  const { proyecto } = useProjects();
+  const { proyecto, refresh } = useProjects();
   const [hitos, setHitos] = useState([]);
   const [conceptos, setConceptos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -60,6 +92,13 @@ export default function ConfiguracionPage() {
     setHitos(prev => prev.map(h => h.id === id ? { ...h, ...patch } : h));
     const { error } = await supabase.from("hitos").update(patch).eq("id", id);
     if (error) { alert(error.message); reload(); }
+  };
+
+  const updateProyectoCosto = async (val) => {
+    const v = Math.max(0, Number(val) || 0);
+    const { error } = await supabase.from("proyectos")
+      .update({ costo_total_estimado: v }).eq("id", proyecto.id);
+    if (error) alert(error.message); else refresh();
   };
 
   // ---- Conceptos ----
@@ -139,6 +178,10 @@ export default function ConfiguracionPage() {
 
   if (!proyecto) return <Alert severity="info">Seleccioná un proyecto.</Alert>;
 
+  const sumaConceptos = conceptos.reduce((s, c) => s + Number(c.valor_plan || 0), 0);
+  const sumaEtapas = hitos.reduce((s, h) => s + Number(h.valor_plan || 0), 0);
+  const conceptoObra = conceptos.find(c => c.usa_etapas) || null;
+
   return (
     <Stack spacing={3}>
       <Box>
@@ -159,6 +202,13 @@ export default function ConfiguracionPage() {
               <Button size="small" variant="outlined" onClick={seedConceptos}>Cargar por defecto</Button>
             )}
           </Stack>
+          <ResumenRelacion
+            totalLabel="Costo total estimado del proyecto"
+            sumaLabel="Suma de conceptos"
+            total={proyecto.costo_total_estimado}
+            onCommitTotal={updateProyectoCosto}
+            suma={sumaConceptos}
+          />
           <TableContainer>
             <Table size="small" sx={{ minWidth: 460 }}>
               <TableHead>
@@ -180,7 +230,7 @@ export default function ConfiguracionPage() {
                     </TableCell>
                     <TableCell align="right">
                       <CommitField
-                        type="number" value={c.valor_plan ?? 0} align="right" sx={{ width: 130 }}
+                        money value={c.valor_plan ?? 0} align="right" sx={{ width: 150 }}
                         onCommit={(v) => updateConcepto(c.id, { valor_plan: Math.max(0, Number(v) || 0) })}
                       />
                     </TableCell>
@@ -238,14 +288,27 @@ export default function ConfiguracionPage() {
       <Card>
         <CardContent>
           <Typography variant="subtitle1" gutterBottom>Etapas</Typography>
+          {conceptoObra ? (
+            <ResumenRelacion
+              totalLabel={`Valor de "${conceptoObra.nombre}"`}
+              sumaLabel="Suma de etapas"
+              total={conceptoObra.valor_plan}
+              onCommitTotal={(v) => updateConcepto(conceptoObra.id, { valor_plan: Math.max(0, Number(v) || 0) })}
+              suma={sumaEtapas}
+            />
+          ) : (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Marcá un concepto con “Usa etapas” (típicamente Obra) para relacionar su valor con la suma de las etapas.
+            </Alert>
+          )}
           <TableContainer>
             <Table size="small" sx={{ minWidth: 420 }}>
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ width: 36 }}></TableCell>
-                  <TableCell sx={{ width: 90 }}>% hito</TableCell>
+                  <TableCell sx={{ width: 110 }}>% hito</TableCell>
                   <TableCell>Nombre</TableCell>
-                  <TableCell align="right" sx={{ width: 140 }}>Plan (USD)</TableCell>
+                  <TableCell align="right" sx={{ width: 160 }}>Plan (USD)</TableCell>
                   <TableCell align="right" sx={{ width: 60 }}></TableCell>
                 </TableRow>
               </TableHead>
@@ -275,7 +338,7 @@ export default function ConfiguracionPage() {
                     <TableCell>
                       <CommitField
                         type="number" value={h.porcentaje} align="right" suffix="%"
-                        sx={{ width: 80 }}
+                        sx={{ width: 100 }}
                         onCommit={(v) => updateHito(h.id, { porcentaje: Math.max(0, Math.min(100, Math.round(Number(v) || 0))) })}
                       />
                     </TableCell>
@@ -287,8 +350,8 @@ export default function ConfiguracionPage() {
                     </TableCell>
                     <TableCell align="right">
                       <CommitField
-                        type="number" value={h.valor_plan ?? 0} align="right"
-                        sx={{ width: 130 }}
+                        money value={h.valor_plan ?? 0} align="right"
+                        sx={{ width: 150 }}
                         onCommit={(v) => updateHito(h.id, { valor_plan: Math.max(0, Number(v) || 0) })}
                       />
                     </TableCell>
