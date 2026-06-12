@@ -64,10 +64,27 @@ function LineChart({ data, maxY = 200000 }) {
   const linePath = smoothPath(pts);
   const areaPath = `${linePath} L ${pts[pts.length - 1].x} ${pad.t + innerH} L ${pts[0].x} ${pad.t + innerH} Z`;
   const ticks = 4;
+  const [hover, setHover] = useState(null); // índice del punto bajo el cursor
+
+  const onMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mx = ((e.clientX - rect.left) / rect.width) * W; // a coords del viewBox
+    let best = 0, bestD = Infinity;
+    pts.forEach((p, i) => {
+      const d = Math.abs(p.x - mx);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    setHover(best);
+  };
+
+  const last = pts.length - 1;
+  const lastP = pts[last];
+  const hp = hover != null ? pts[hover] : null;
 
   return (
     <Box sx={{ width: "100%", maxWidth: 560, mx: "auto", overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 360, display: "block" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 360, display: "block" }}
+        onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
         {/* Grilla horizontal + labels eje Y */}
         {Array.from({ length: ticks + 1 }).map((_, i) => {
           const v = (max / ticks) * i;
@@ -94,6 +111,42 @@ function LineChart({ data, maxY = 200000 }) {
             </text>
           </g>
         ))}
+
+        {/* Etiqueta fija del último mes cerca del marcador */}
+        {lastP && (
+          <text
+            x={Math.min(lastP.x + 6, W - pad.r)} y={Math.max(lastP.y - 8, pad.t + 8)}
+            textAnchor={lastP.x > W - 80 ? "end" : "start"}
+            fontSize="11" fontWeight="700" fill="#E07A1F"
+          >
+            {fmtMoney(Math.round(data[last].value), "USD")}
+          </text>
+        )}
+
+        {/* Tooltip de hover */}
+        {hp && (
+          <g>
+            <line x1={hp.x} y1={pad.t} x2={hp.x} y2={pad.t + innerH} stroke="#cdd5e0" strokeDasharray="3 3" />
+            <circle cx={hp.x} cy={hp.y} r="5" fill="#E07A1F" stroke="#fff" strokeWidth="2" />
+            {(() => {
+              const txt = fmtMoney(Math.round(data[hover].value), "USD");
+              const w = Math.max(54, txt.length * 6.5 + 16);
+              const bx = Math.min(Math.max(hp.x - w / 2, pad.l), W - pad.r - w);
+              const by = Math.max(hp.y - 34, pad.t);
+              return (
+                <g>
+                  <rect x={bx} y={by} width={w} height="26" rx="5" fill="#0F2A4A" />
+                  <text x={bx + w / 2} y={by + 11} textAnchor="middle" fontSize="9" fill="#aebccd">
+                    {data[hover].label}
+                  </text>
+                  <text x={bx + w / 2} y={by + 21} textAnchor="middle" fontSize="10" fontWeight="700" fill="#fff">
+                    {txt}
+                  </text>
+                </g>
+              );
+            })()}
+          </g>
+        )}
       </svg>
     </Box>
   );
@@ -226,12 +279,6 @@ export default function IndicadoresPage() {
             valor={ind.avanceEconomico != null ? fmtPct(ind.avanceEconomico, 1) : "—"}
             sub="Gastado / costo total teórico"
             tip="Gastado en USD dividido el costo total estimado del proyecto." />
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <KpiCard titulo="Gastado / Presupuesto"
-            valor={ind.gastadoVsPres != null ? fmtPct(ind.gastadoVsPres, 1) : "—"}
-            sub={`${fmtMoney(Math.round(ind.gastadoUSD), "USD")} / ${fmtMoney(Math.round(presTotal), "USD")}`}
-            tip="Gastado en USD sobre la suma de presupuestos cargados." />
         </Grid>
         <Grid item xs={12} sm={6} md={4}>
           <KpiCard titulo="Margen esperado"
