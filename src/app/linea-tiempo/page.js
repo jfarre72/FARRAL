@@ -41,6 +41,31 @@ function diasHabiles(desdeISO, hastaISO) {
   return count * signo;
 }
 
+// Campo de fecha que guarda recién al salir del campo (blur/Enter), no en cada
+// tecla, para poder tipear el año con el teclado sin que se interrumpa.
+function DateField({ value, onCommit, disabled, label, fullWidth, sx }) {
+  const [local, setLocal] = useState(value ?? "");
+  const [focused, setFocused] = useState(false);
+  // Sincroniza con el valor externo cuando el campo no está en edición.
+  useEffect(() => { if (!focused) setLocal(value ?? ""); }, [value, focused]);
+  const commit = () => {
+    setFocused(false);
+    const v = local || null;
+    if ((value ?? null) !== v) onCommit(v);
+  };
+  return (
+    <TextField
+      label={label} type="date" InputLabelProps={{ shrink: true }}
+      fullWidth={fullWidth} sx={sx} disabled={disabled}
+      value={local}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+    />
+  );
+}
+
 export default function LineaTiempoPage() {
   const { proyecto } = useProjects();
   const theme = useTheme();
@@ -289,19 +314,17 @@ export default function LineaTiempoPage() {
                       {/* Fechas: ocultas en mobile (van en el detalle) */}
                       {!isSm && (
                         <Box onClick={(e) => e.stopPropagation()} sx={{ display: "flex", gap: 1.5, alignItems: "center" }}>
-                          <TextField
-                            label="Inicio" type="date" InputLabelProps={{ shrink: true }}
-                            sx={{ width: 155 }}
+                          <DateField
+                            label="Inicio" sx={{ width: 155 }}
                             value={h.fecha_estimada ?? ""}
                             disabled={savingId === h.id}
-                            onChange={(e) => updateHito(h.id, { fecha_estimada: e.target.value || null })}
+                            onCommit={(v) => updateHito(h.id, { fecha_estimada: v })}
                           />
-                          <TextField
-                            label="Fin" type="date" InputLabelProps={{ shrink: true }}
-                            sx={{ width: 155 }}
+                          <DateField
+                            label="Fin" sx={{ width: 155 }}
                             value={h.fecha_real ?? ""}
                             disabled={savingId === h.id}
-                            onChange={(e) => updateHito(h.id, { fecha_real: e.target.value || null })}
+                            onCommit={(v) => updateHito(h.id, { fecha_real: v })}
                           />
                           {(() => {
                             const d = diasHabiles(h.fecha_estimada, h.fecha_real);
@@ -338,14 +361,14 @@ export default function LineaTiempoPage() {
                         {isSm && (
                           <Grid container spacing={1.5} sx={{ mb: 1.5 }} alignItems="center">
                             <Grid item xs={6}>
-                              <TextField fullWidth label="Inicio" type="date" InputLabelProps={{ shrink: true }}
+                              <DateField fullWidth label="Inicio"
                                 value={h.fecha_estimada ?? ""}
-                                onChange={(e) => updateHito(h.id, { fecha_estimada: e.target.value || null })} />
+                                onCommit={(v) => updateHito(h.id, { fecha_estimada: v })} />
                             </Grid>
                             <Grid item xs={6}>
-                              <TextField fullWidth label="Fin" type="date" InputLabelProps={{ shrink: true }}
+                              <DateField fullWidth label="Fin"
                                 value={h.fecha_real ?? ""}
-                                onChange={(e) => updateHito(h.id, { fecha_real: e.target.value || null })} />
+                                onCommit={(v) => updateHito(h.id, { fecha_real: v })} />
                             </Grid>
                             {(() => {
                               const d = diasHabiles(h.fecha_estimada, h.fecha_real);
