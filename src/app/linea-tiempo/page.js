@@ -17,6 +17,27 @@ import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtDate } from "@/components/Money";
 
+// Días hábiles (lunes a viernes) entre dos fechas ISO (YYYY-MM-DD).
+// Cuenta los días posteriores a 'desde' hasta 'hasta' inclusive.
+function diasHabiles(desdeISO, hastaISO) {
+  if (!desdeISO || !hastaISO) return null;
+  const a = new Date(desdeISO + "T00:00:00");
+  const b = new Date(hastaISO + "T00:00:00");
+  if (isNaN(a) || isNaN(b)) return null;
+  const signo = b >= a ? 1 : -1;
+  let ini = signo > 0 ? a : b;
+  const fin = signo > 0 ? b : a;
+  let count = 0;
+  const cur = new Date(ini);
+  cur.setDate(cur.getDate() + 1); // excluye el día de inicio
+  while (cur <= fin) {
+    const d = cur.getDay();
+    if (d !== 0 && d !== 6) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count * signo;
+}
+
 export default function LineaTiempoPage() {
   const { proyecto } = useProjects();
   const theme = useTheme();
@@ -233,21 +254,29 @@ export default function LineaTiempoPage() {
 
                       {/* Fechas: ocultas en mobile (van en el detalle) */}
                       {!isSm && (
-                        <Box onClick={(e) => e.stopPropagation()} sx={{ display: "flex", gap: 1.5 }}>
+                        <Box onClick={(e) => e.stopPropagation()} sx={{ display: "flex", gap: 1.5, alignItems: "center" }}>
                           <TextField
-                            label="Estimada" type="date" InputLabelProps={{ shrink: true }}
-                            sx={{ width: 165 }}
+                            label="Inicio" type="date" InputLabelProps={{ shrink: true }}
+                            sx={{ width: 155 }}
                             value={h.fecha_estimada ?? ""}
                             disabled={savingId === h.id}
                             onChange={(e) => updateHito(h.id, { fecha_estimada: e.target.value || null })}
                           />
                           <TextField
-                            label="Real" type="date" InputLabelProps={{ shrink: true }}
-                            sx={{ width: 165 }}
+                            label="Fin" type="date" InputLabelProps={{ shrink: true }}
+                            sx={{ width: 155 }}
                             value={h.fecha_real ?? ""}
                             disabled={savingId === h.id}
                             onChange={(e) => updateHito(h.id, { fecha_real: e.target.value || null })}
                           />
+                          {(() => {
+                            const d = diasHabiles(h.fecha_estimada, h.fecha_real);
+                            return d != null ? (
+                              <Chip size="small" variant="outlined"
+                                label={`${d} día${Math.abs(d) === 1 ? "" : "s"} háb.`}
+                                color={d < 0 ? "error" : "default"} />
+                            ) : <Box sx={{ width: 70 }} />;
+                          })()}
                         </Box>
                       )}
 
@@ -273,17 +302,27 @@ export default function LineaTiempoPage() {
                     <Collapse in={isOpen} unmountOnExit>
                       <Box sx={{ pl: { xs: 0, sm: 5 }, pr: 1, pt: 1.5, pb: 0.5 }}>
                         {isSm && (
-                          <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
+                          <Grid container spacing={1.5} sx={{ mb: 1.5 }} alignItems="center">
                             <Grid item xs={6}>
-                              <TextField fullWidth label="Estimada" type="date" InputLabelProps={{ shrink: true }}
+                              <TextField fullWidth label="Inicio" type="date" InputLabelProps={{ shrink: true }}
                                 value={h.fecha_estimada ?? ""}
                                 onChange={(e) => updateHito(h.id, { fecha_estimada: e.target.value || null })} />
                             </Grid>
                             <Grid item xs={6}>
-                              <TextField fullWidth label="Real" type="date" InputLabelProps={{ shrink: true }}
+                              <TextField fullWidth label="Fin" type="date" InputLabelProps={{ shrink: true }}
                                 value={h.fecha_real ?? ""}
                                 onChange={(e) => updateHito(h.id, { fecha_real: e.target.value || null })} />
                             </Grid>
+                            {(() => {
+                              const d = diasHabiles(h.fecha_estimada, h.fecha_real);
+                              return d != null ? (
+                                <Grid item xs={12}>
+                                  <Chip size="small" variant="outlined"
+                                    label={`${d} día${Math.abs(d) === 1 ? "" : "s"} hábiles (lun–vie)`}
+                                    color={d < 0 ? "error" : "default"} />
+                                </Grid>
+                              ) : null;
+                            })()}
                           </Grid>
                         )}
 

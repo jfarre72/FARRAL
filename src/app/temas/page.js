@@ -1,15 +1,14 @@
 "use client";
 import {
   Card, CardContent, Stack, Typography, Alert, Box, Grid, TextField,
-  Checkbox, LinearProgress, Divider, Chip, Button, IconButton, Tooltip,
+  Checkbox, LinearProgress, Chip, Button, IconButton, Tooltip,
   Dialog, DialogTitle, DialogContent, DialogActions, useMediaQuery,
-  ToggleButtonGroup, ToggleButton
+  ToggleButtonGroup, ToggleButton, MenuItem, Table, TableHead, TableBody,
+  TableRow, TableCell, TableContainer
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
-import PersonIcon from "@mui/icons-material/Person";
-import EventIcon from "@mui/icons-material/Event";
 import NotesIcon from "@mui/icons-material/Notes";
 import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "@mui/material/styles";
@@ -17,7 +16,28 @@ import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtDate } from "@/components/Money";
 
-const empty = { titulo: "", responsable: "", fecha: "", observacion: "" };
+const empty = { titulo: "", responsable: "", fecha: "", etiqueta: "NORMAL", observacion: "" };
+const ETIQUETAS = ["NORMAL", "URGENTE"];
+
+// Fecha de hoy en formato ISO (YYYY-MM-DD), zona local
+const hoyISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+// Estado de un tema: hecho | vencido | pendiente
+const estadoDe = (t) => {
+  if (t.completado) return "hecho";
+  if (t.fecha && t.fecha < hoyISO()) return "vencido";
+  return "pendiente";
+};
+
+const ETIQUETA_COLOR = { URGENTE: "error", NORMAL: "default" };
+const ESTADO_META = {
+  hecho:     { label: "Hecho",     color: "success" },
+  vencido:   { label: "Vencido",   color: "error" },
+  pendiente: { label: "Pendiente", color: "default" },
+};
 
 export default function TemasPage() {
   const { proyecto } = useProjects();
@@ -26,7 +46,7 @@ export default function TemasPage() {
 
   const [temas, setTemas] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filtro, setFiltro] = useState("todos"); // todos | pendientes | hechos
+  const [filtro, setFiltro] = useState("todos"); // todos | pendientes | hechos | vencidos
   const [nuevo, setNuevo] = useState("");
 
   const [open, setOpen] = useState(false);
@@ -40,22 +60,32 @@ export default function TemasPage() {
     setLoading(true);
     const { data } = await supabase
       .from("temas").select("*")
-      .eq("proyecto_id", proyecto.id)
-      .order("orden", { ascending: true })
-      .order("created_at", { ascending: true });
+      .eq("proyecto_id", proyecto.id);
     setTemas(data ?? []);
     setLoading(false);
   };
 
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
 
+  // Orden: por fecha ascendente (más cercana primero); sin fecha al final.
+  const ordenados = useMemo(() => {
+    return [...temas].sort((a, b) => {
+      if (a.fecha && b.fecha) return a.fecha.localeCompare(b.fecha);
+      if (a.fecha) return -1;
+      if (b.fecha) return 1;
+      return (a.orden ?? 0) - (b.orden ?? 0);
+    });
+  }, [temas]);
+
   const visibles = useMemo(() => {
-    if (filtro === "pendientes") return temas.filter(t => !t.completado);
-    if (filtro === "hechos") return temas.filter(t => t.completado);
-    return temas;
-  }, [temas, filtro]);
+    if (filtro === "pendientes") return ordenados.filter(t => estadoDe(t) === "pendiente");
+    if (filtro === "hechos") return ordenados.filter(t => estadoDe(t) === "hecho");
+    if (filtro === "vencidos") return ordenados.filter(t => estadoDe(t) === "vencido");
+    return ordenados;
+  }, [ordenados, filtro]);
 
   const hechos = temas.filter(t => t.completado).length;
+  const vencidos = temas.filter(t => estadoDe(t) === "vencido").length;
 
   const toggle = async (t) => {
     setTemas(prev => prev.map(x => x.id === t.id ? { ...x, completado: !x.completado } : x));
@@ -81,6 +111,7 @@ export default function TemasPage() {
       titulo: t.titulo ?? "",
       responsable: t.responsable ?? "",
       fecha: t.fecha ?? "",
+      etiqueta: t.etiqueta ?? "NORMAL",
       observacion: t.observacion ?? "",
     });
     setEditId(t.id); setErr(null); setOpen(true);
@@ -95,6 +126,7 @@ export default function TemasPage() {
       titulo: form.titulo.trim(),
       responsable: form.responsable.trim() || null,
       fecha: form.fecha || null,
+      etiqueta: form.etiqueta || "NORMAL",
       observacion: form.observacion.trim() || null,
     };
     let res;
@@ -141,11 +173,16 @@ export default function TemasPage() {
             direction={{ xs: "column", sm: "row" }} spacing={1.5}
             alignItems={{ sm: "center" }} sx={{ mb: 2 }}
           >
-            <Chip
-              label={`${hechos}/${temas.length} hechos`}
-              color={temas.length > 0 && hechos === temas.length ? "success" : "default"}
-              variant="outlined"
-            />
+            <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ gap: 1 }}>
+              <Chip
+                label={`${hechos}/${temas.length} hechos`}
+                color={temas.length > 0 && hechos === temas.length ? "success" : "default"}
+                variant="outlined"
+              />
+              {vencidos > 0 && (
+                <Chip label={`${vencidos} vencido${vencidos > 1 ? "s" : ""}`} color="error" variant="outlined" />
+              )}
+            </Stack>
             <Box sx={{ flexGrow: 1 }} />
             <ToggleButtonGroup
               size="small" exclusive value={filtro}
@@ -153,6 +190,7 @@ export default function TemasPage() {
             >
               <ToggleButton value="todos">Todos</ToggleButton>
               <ToggleButton value="pendientes">Pendientes</ToggleButton>
+              <ToggleButton value="vencidos">Vencidos</ToggleButton>
               <ToggleButton value="hechos">Hechos</ToggleButton>
             </ToggleButtonGroup>
           </Stack>
@@ -177,64 +215,94 @@ export default function TemasPage() {
                 : "No hay temas con este filtro."}
             </Typography>
           ) : (
-            <Stack divider={<Divider />}>
-              {visibles.map((t, i) => (
-                <Stack
-                  key={t.id}
-                  direction="row" spacing={1} alignItems="flex-start"
-                  sx={{ py: 1.25, "&:hover .acciones": { opacity: 1 } }}
-                >
-                  <Typography variant="body2" color="text.secondary" sx={{ width: 22, pt: 1, textAlign: "right", flexShrink: 0 }}>
-                    {i + 1}.
-                  </Typography>
-                  <Checkbox
-                    size="small" sx={{ mt: 0.25 }}
-                    checked={t.completado}
-                    onChange={() => toggle(t)}
-                  />
-                  <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                    <Typography
-                      variant="body1"
-                      sx={{
-                        textDecoration: t.completado ? "line-through" : "none",
-                        color: t.completado ? "text.secondary" : "text.primary",
-                        fontWeight: 500,
-                      }}
-                    >
-                      {t.titulo}
-                    </Typography>
-                    <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 0.5, gap: 0.5 }}>
-                      {t.responsable && (
-                        <Chip size="small" icon={<PersonIcon />} label={t.responsable} variant="outlined" />
-                      )}
-                      {t.fecha && (
-                        <Chip size="small" icon={<EventIcon />} label={fmtDate(t.fecha)} variant="outlined" />
-                      )}
-                    </Stack>
-                    {t.observacion && (
-                      <Stack direction="row" spacing={0.75} alignItems="flex-start" sx={{ mt: 0.75 }}>
-                        <NotesIcon fontSize="small" sx={{ color: "text.secondary", mt: 0.25 }} />
-                        <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: "pre-wrap" }}>
-                          {t.observacion}
-                        </Typography>
-                      </Stack>
-                    )}
-                  </Box>
-                  <Stack direction="row" className="acciones" sx={{ opacity: { xs: 1, sm: 0 }, transition: "opacity .15s", flexShrink: 0 }}>
-                    <Tooltip title="Editar">
-                      <IconButton size="small" onClick={() => openEdit(t)}>
-                        <EditIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Eliminar">
-                      <IconButton size="small" onClick={() => handleDelete(t)}>
-                        <DeleteOutlineIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  </Stack>
-                </Stack>
-              ))}
-            </Stack>
+            <TableContainer>
+              <Table size="small" sx={{ minWidth: 720 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell padding="checkbox" />
+                    <TableCell sx={{ width: 36 }}>#</TableCell>
+                    <TableCell>Tema</TableCell>
+                    <TableCell>Responsable</TableCell>
+                    <TableCell>Etiqueta</TableCell>
+                    <TableCell>Fecha</TableCell>
+                    <TableCell>Estado</TableCell>
+                    <TableCell align="right">Acciones</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {visibles.map((t, i) => {
+                    const est = estadoDe(t);
+                    const meta = ESTADO_META[est];
+                    return (
+                      <TableRow key={t.id} hover>
+                        <TableCell padding="checkbox">
+                          <Checkbox size="small" checked={t.completado} onChange={() => toggle(t)} />
+                        </TableCell>
+                        <TableCell sx={{ color: "text.secondary" }}>{i + 1}</TableCell>
+                        <TableCell>
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              fontWeight: 500,
+                              textDecoration: t.completado ? "line-through" : "none",
+                              color: t.completado ? "text.secondary" : "text.primary",
+                            }}
+                          >
+                            {t.titulo}
+                          </Typography>
+                          {t.observacion && (
+                            <Stack direction="row" spacing={0.5} alignItems="flex-start" sx={{ mt: 0.25 }}>
+                              <NotesIcon sx={{ fontSize: 14, color: "text.secondary", mt: 0.3 }} />
+                              <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "pre-wrap" }}>
+                                {t.observacion}
+                              </Typography>
+                            </Stack>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" color={t.responsable ? "text.primary" : "text.disabled"}>
+                            {t.responsable || "—"}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            size="small"
+                            label={t.etiqueta || "NORMAL"}
+                            color={ETIQUETA_COLOR[t.etiqueta] ?? "default"}
+                            variant={t.etiqueta === "URGENTE" ? "filled" : "outlined"}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Typography
+                            variant="body2"
+                            color={est === "vencido" ? "error.main" : t.fecha ? "text.primary" : "text.disabled"}
+                            sx={{ fontWeight: est === "vencido" ? 600 : 400, whiteSpace: "nowrap" }}
+                          >
+                            {t.fecha ? fmtDate(t.fecha) : "—"}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip size="small" label={meta.label} color={meta.color}
+                            variant={est === "pendiente" ? "outlined" : "filled"} />
+                        </TableCell>
+                        <TableCell align="right">
+                          <Tooltip title="Editar">
+                            <IconButton size="small" onClick={() => openEdit(t)}>
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Eliminar">
+                            <IconButton size="small" onClick={() => handleDelete(t)}>
+                              <DeleteOutlineIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
           )}
         </CardContent>
       </Card>
@@ -265,6 +333,15 @@ export default function TemasPage() {
                 value={form.fecha}
                 onChange={(e) => setForm(f => ({ ...f, fecha: e.target.value }))}
               />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                select fullWidth label="Etiqueta"
+                value={form.etiqueta}
+                onChange={(e) => setForm(f => ({ ...f, etiqueta: e.target.value }))}
+              >
+                {ETIQUETAS.map(op => <MenuItem key={op} value={op}>{op}</MenuItem>)}
+              </TextField>
             </Grid>
             <Grid item xs={12}>
               <TextField
