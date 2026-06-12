@@ -50,7 +50,7 @@ function smoothPath(pts) {
 
 function LineChart({ data, maxY = 200000 }) {
   // data: [{ label, value }]
-  const W = 640, H = 180, pad = { t: 16, r: 14, b: 24, l: 52 };
+  const W = 680, H = 230, pad = { t: 18, r: 14, b: 26, l: 54 };
   if (!data.length) {
     return <Typography color="text.secondary" sx={{ p: 2 }}>Sin movimientos para graficar.</Typography>;
   }
@@ -82,8 +82,8 @@ function LineChart({ data, maxY = 200000 }) {
   const hp = hover != null ? pts[hover] : null;
 
   return (
-    <Box sx={{ width: "100%", maxWidth: 560, mx: "auto", overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 360, display: "block" }}
+    <Box sx={{ width: "100%", maxWidth: 720, mx: "auto", overflowX: "auto" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 420, display: "block" }}
         onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
         {/* Grilla horizontal + labels eje Y */}
         {Array.from({ length: ticks + 1 }).map((_, i) => {
@@ -233,7 +233,7 @@ export default function IndicadoresPage() {
       ventaM2: Number(proyecto?.precio_venta_m2 || 0) || (m2 > 0 ? ventaEst / m2 : 0),
       avanceEconomico: costoEst > 0 ? (gastadoUSD / costoEst) * 100 : null,
       gastadoVsPres: presTotal > 0 ? (gastadoUSD / presTotal) * 100 : null,
-      margenEsperado: ventaEst > 0 ? ((ventaEst - costoEst) / ventaEst) * 100 : null,
+      margenEsperado: costoEst > 0 ? ((ventaEst - costoEst) / costoEst) * 100 : null,
     };
   }, [movs, aportes, presTotal, proyecto]);
 
@@ -283,7 +283,7 @@ export default function IndicadoresPage() {
         <Grid item xs={12} sm={6} md={4}>
           <KpiCard titulo="Margen esperado"
             valor={ind.margenEsperado != null ? fmtPct(ind.margenEsperado, 1) : "—"}
-            sub="(Venta estim. − Costo estim.) / Venta estim."
+            sub="(Venta estim. − Costo estim.) / Costo estim."
             color={ind.margenEsperado != null && ind.margenEsperado < 0 ? "error.main" : "success.main"} />
         </Grid>
       </Grid>
