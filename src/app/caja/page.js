@@ -38,6 +38,9 @@ const emptyMov = {
   concepto: "",
   etapa: "",
   descripcion: "",
+  // TC para valuar en USD un gasto en pesos (sin cambio integrado),
+  // al imputarlo a un concepto / etapa.
+  tipo_cambio_gasto: "",
   // Cambio integrado dentro de egreso:
   con_cambio: false,
   cambio_moneda_origen: "USD",
@@ -215,6 +218,7 @@ export default function CajaPage() {
       cambio_moneda_origen: mv.cambio_moneda_origen,
       cambio_monto_origen: mv.cambio_monto_origen,
       cambio_tipo_cambio: mv.cambio_tipo_cambio,
+      tipo_cambio_gasto: mv.tipo_cambio_gasto,
     }));
     return [...fromAportes, ...fromMovs].sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
   }, [aportes, movs, inversores]);
@@ -341,6 +345,7 @@ export default function CajaPage() {
       concepto: mv.concepto ?? "",
       etapa: mv.etapa ?? "",
       descripcion: mv.descripcion ?? "",
+      tipo_cambio_gasto: mv.tipo_cambio_gasto ?? "",
       con_cambio: !!mv.con_cambio,
       cambio_moneda_origen: mv.cambio_moneda_origen ?? "USD",
       cambio_monto_origen: mv.cambio_monto_origen ?? "",
@@ -473,6 +478,9 @@ export default function CajaPage() {
         cambio_moneda_origen: form.tipo === "egreso" && form.con_cambio ? form.cambio_moneda_origen : null,
         cambio_monto_origen:  form.tipo === "egreso" && form.con_cambio ? monOrigen : null,
         cambio_tipo_cambio:   form.tipo === "egreso" && form.con_cambio ? tc : null,
+        tipo_cambio_gasto: form.tipo === "egreso" && !form.con_cambio && form.moneda === "ARS"
+          ? (Number(form.tipo_cambio_gasto) > 0 ? Number(form.tipo_cambio_gasto) : null)
+          : null,
       };
     }
 
@@ -912,6 +920,12 @@ export default function CajaPage() {
                   </Typography>
                 }
               />
+              {detail.tipo === "egreso" && !detail.con_cambio && detail.moneda === "ARS" && Number(detail.tipo_cambio_gasto) > 0 && (
+                <DetailRow
+                  label="Imputado (USD)"
+                  value={`${fmtMoney(Number(detail.monto) / Number(detail.tipo_cambio_gasto), "USD")} · TC ${fmtNum(detail.tipo_cambio_gasto, 2)}`}
+                />
+              )}
               {detail.con_cambio && (
                 <>
                   <Divider />
@@ -1111,6 +1125,21 @@ export default function CajaPage() {
                       <MenuItem key={et} value={et}>{et}</MenuItem>
                     ))}
                   </TextField>
+                </Grid>
+              )}
+
+              {form.tipo === "egreso" && form.moneda === "ARS" && !form.con_cambio && (
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    label="Tipo de cambio (ARS por 1 USD)" type="number" fullWidth
+                    value={form.tipo_cambio_gasto}
+                    onChange={e => setForm({ ...form, tipo_cambio_gasto: e.target.value })}
+                    helperText={
+                      Number(form.tipo_cambio_gasto) > 0 && monto > 0
+                        ? `Se imputa ${fmtMoney(monto / Number(form.tipo_cambio_gasto), "USD")} al concepto/etapa`
+                        : "Para valuar en USD este gasto en pesos por concepto/etapa (opcional)"
+                    }
+                  />
                 </Grid>
               )}
 

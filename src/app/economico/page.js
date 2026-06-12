@@ -9,20 +9,18 @@ import { useProjects } from "@/components/ProjectContext";
 import { fmtMoney, fmtPct } from "@/components/Money";
 import { getCache, setCache } from "@/lib/dataCache";
 
-// USD gastado por un movimiento (misma convención que Caja/Indicadores).
+// USD imputable a la etapa/concepto = el gasto REAL valuado en USD.
+// - Gasto en USD: ese monto.
+// - Gasto en ARS: monto / tipo de cambio (el del cambio integrado si lo hubo,
+//   o el tipo_cambio_gasto cargado al registrar el pago en pesos).
+// Un cambio puro de divisa (sin gasto) no imputa nada.
 function gastoUSD(mv) {
+  if (mv.tipo !== "egreso") return 0;
   const m = Number(mv.monto || 0);
-  if (mv.tipo === "egreso") {
-    if (mv.con_cambio) {
-      let g = 0;
-      if (mv.cambio_moneda_origen === "USD") g += Number(mv.cambio_monto_origen || 0);
-      if (m > 0 && mv.moneda === "USD") g += m;
-      return g;
-    }
-    return mv.moneda === "USD" ? m : 0;
-  }
-  if (mv.tipo === "cambio") return mv.moneda === "USD" ? m : 0;
-  return 0;
+  if (m <= 0) return 0;
+  if (mv.moneda === "USD") return m;
+  const tc = Number(mv.cambio_tipo_cambio || mv.tipo_cambio_gasto || 0);
+  return tc > 0 ? m / tc : 0;
 }
 
 function Barra({ pct }) {
@@ -162,8 +160,9 @@ export default function EconomicoPage() {
       <TablaSeguimiento titulo="Por etapa (Obra)" filas={filasEtapa} totalPlan={totPlanE} totalReal={totRealE} />
 
       <Typography variant="caption" color="text.secondary">
-        El “real” se calcula en USD con la misma convención que Caja (egresos en USD y la parte USD de los cambios).
-        Los egresos sólo en ARS no impactan en este total.
+        El “real” se imputa siempre en USD: los gastos en USD por su monto, y los gastos en ARS convertidos por el
+        tipo de cambio (el del cambio integrado, o el tipo de cambio cargado al registrar el pago en pesos).
+        Un gasto en ARS sin tipo de cambio cargado no se puede valuar y no impacta en el total.
       </Typography>
     </Stack>
   );
