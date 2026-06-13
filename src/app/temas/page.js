@@ -281,9 +281,9 @@ export default function TemasPage() {
                     <TableCell sx={{ width: 36 }}>#</TableCell>
                     <TableCell>Tema</TableCell>
                     <TableCell>Responsable</TableCell>
-                    <TableCell>Etiqueta</TableCell>
+                    <TableCell align="center">Etiqueta</TableCell>
                     <TableCell>Fecha</TableCell>
-                    <TableCell>Estado</TableCell>
+                    <TableCell align="center">Estado</TableCell>
                     <TableCell align="right">Acciones</TableCell>
                   </TableRow>
                 </TableHead>
@@ -322,7 +322,7 @@ export default function TemasPage() {
                             {t.responsable || "—"}
                           </Typography>
                         </TableCell>
-                        <TableCell>
+                        <TableCell align="center">
                           <Chip
                             size="small"
                             label={t.etiqueta || "NORMAL"}
@@ -339,7 +339,7 @@ export default function TemasPage() {
                             {t.fecha ? fmtDate(t.fecha) : "—"}
                           </Typography>
                         </TableCell>
-                        <TableCell>
+                        <TableCell align="center">
                           <Chip size="small" label={meta.label} color={meta.color}
                             variant={est === "pendiente" ? "outlined" : "filled"} />
                         </TableCell>

@@ -706,9 +706,9 @@ export default function CajaPage() {
                       <TableCell sx={{ width: 110 }}>Fecha</TableCell>
                       <TableCell sx={{ width: 130 }}>Tipo</TableCell>
                       <TableCell>Detalle</TableCell>
-                      <TableCell>Concepto</TableCell>
-                      <TableCell>Categoría</TableCell>
-                      <TableCell>Etapa</TableCell>
+                      <TableCell align="center">Concepto</TableCell>
+                      <TableCell align="center">Categoría</TableCell>
+                      <TableCell align="center">Etapa</TableCell>
                       <TableCell align="right">Monto</TableCell>
                       {filtroMoneda !== "all" && <TableCell align="right">Saldo</TableCell>}
                       <TableCell sx={{ width: 70 }}>Comprob.</TableCell>
@@ -749,17 +749,17 @@ export default function CajaPage() {
                             </Typography>
                           )}
                         </TableCell>
-                        <TableCell>
+                        <TableCell align="center">
                           {m.concepto
                             ? <Chip size="small" label={m.concepto} variant="outlined" color="secondary" />
                             : <Typography variant="body2" color="text.disabled">—</Typography>}
                         </TableCell>
-                        <TableCell>
+                        <TableCell align="center">
                           {m.categoria
                             ? <Chip size="small" label={m.categoria} />
                             : <Typography variant="body2" color="text.disabled">—</Typography>}
                         </TableCell>
-                        <TableCell>
+                        <TableCell align="center">
                           {m.etapa
                             ? <Chip size="small" label={m.etapa} variant="outlined" color="primary" />
                             : <Typography variant="body2" color="text.disabled">—</Typography>}

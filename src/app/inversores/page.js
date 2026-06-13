@@ -14,6 +14,7 @@ import PaidIcon from "@mui/icons-material/Paid";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
+import TableViewIcon from "@mui/icons-material/TableView";
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
@@ -228,6 +229,37 @@ export default function InversoresPage() {
 
   const invName = (id) => inversores.find(i => i.id === id)?.nombre ?? "—";
 
+  const exportarExcel = () => {
+    const numAR = (v) => Number(v || 0).toLocaleString("es-AR", { useGrouping: false, maximumFractionDigits: 2 });
+    const t = resumen.reduce((acc, r) => {
+      acc.aportesUSD += Number(r.aportesUSD || 0);
+      acc.ponderado += Number(r.ponderado || 0);
+      acc.participacion += Number(r.participacion || 0);
+      acc.ganancia += Number(r.ganancia || 0);
+      acc.totalDevolver += Number(totProy.ganancia > 0 ? r.totalDevolver : r.aportesUSD) || 0;
+      return acc;
+    }, { aportesUSD: 0, ponderado: 0, participacion: 0, ganancia: 0, totalDevolver: 0 });
+    const head = ["Inversor", "Aporte (USD)", "Ponderado", "% Participación", "Ganancia estim. (USD)", "% Ganancia", "Total a devolver (USD)"];
+    const rows = resumen.map((r) => [
+      r.nombre + (r.es_faltante ? " (virtual)" : ""),
+      numAR(r.aportesUSD), numAR(r.ponderado), numAR(r.participacion),
+      totProy.ganancia > 0 ? numAR(r.ganancia) : "",
+      totProy.ganancia > 0 && r.aportesUSD > 0 ? numAR(r.gananciaPct) : "",
+      numAR(totProy.ganancia > 0 ? r.totalDevolver : r.aportesUSD),
+    ]);
+    rows.push(["Totales", numAR(t.aportesUSD), numAR(t.ponderado), numAR(t.participacion),
+      totProy.ganancia > 0 ? numAR(t.ganancia) : "", "", numAR(t.totalDevolver)]);
+    const cell = (s) => `"${String(s).replace(/"/g, '""')}"`;
+    const csv = [head, ...rows].map((r) => r.map(cell).join(";")).join("\r\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Inversores_${(proyecto.nombre || "proyecto").replace(/[^\w.\-]/g, "_")}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const exportarPdf = () => {
     const filas = resumen.map((r) => `<tr>
         <td>${esc(r.nombre)}${r.es_faltante ? ' <span class="tag">virtual</span>' : ""}</td>
@@ -294,6 +326,11 @@ export default function InversoresPage() {
             sx={{ flex: { xs: 1, sm: "initial" } }}
             startIcon={<PictureAsPdfIcon />} variant="outlined" onClick={exportarPdf}>
             PDF
+          </Button>
+          <Button
+            sx={{ flex: { xs: 1, sm: "initial" } }}
+            startIcon={<TableViewIcon />} variant="outlined" color="success" onClick={exportarExcel}>
+            Excel
           </Button>
           <Button
             sx={{ flex: { xs: 1, sm: "initial" } }}
