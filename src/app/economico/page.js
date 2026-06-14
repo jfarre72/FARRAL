@@ -3,7 +3,7 @@ import {
   Card, CardContent, Stack, Typography, Alert, Box, LinearProgress,
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer,
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Chip,
-  Tabs, Tab, Divider, ToggleButton, ToggleButtonGroup
+  Tabs, Tab, Divider, ToggleButton, ToggleButtonGroup, TextField, InputAdornment
 } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
@@ -141,6 +141,8 @@ export default function EconomicoPage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState(0);
   const [dim, setDim] = useState("tipo_costo"); // dimensión del análisis de gastos
+  const [disponible, setDisponible] = useState(""); // USD disponibles hoy
+  const [fechaObjetivo, setFechaObjetivo] = useState(""); // fecha para calcular necesidad
   const [detalle, setDetalle] = useState(null); // { campo, valor, otros }
 
   const reload = async () => {
@@ -211,6 +213,32 @@ export default function EconomicoPage() {
 
   const totalDetalle = detalleGastos.reduce((s, d) => s + d.usd, 0);
 
+  // Flujo de fondos: necesidad acumulada de plata (USD) por etapa, en orden.
+  const filasFlujo = useMemo(() => {
+    const ord = [...hitos].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+    let acc = 0;
+    return ord.map(h => {
+      const plan = Number(h.valor_plan || 0);
+      acc += plan;
+      return { nombre: h.nombre, plan, acumulado: acc, fecha: h.fecha_real || h.fecha_estimada || null };
+    });
+  }, [hitos]);
+  const totalFlujo = filasFlujo.length ? filasFlujo[filasFlujo.length - 1].acumulado : 0;
+  const disp = Number(disponible || 0);
+  // Hasta qué etapa llega la plata disponible (última totalmente cubierta).
+  const alcance = (() => {
+    if (disp <= 0) return null;
+    let ultima = null;
+    for (const f of filasFlujo) {
+      if (f.acumulado <= disp) ultima = f; else break;
+    }
+    return ultima;
+  })();
+  // Necesidad para la fecha objetivo (suma del plan de las etapas con fecha <= objetivo).
+  const necesidadFecha = fechaObjetivo
+    ? filasFlujo.filter(f => f.fecha && f.fecha <= fechaObjetivo).reduce((s, f) => s + f.plan, 0)
+    : null;
+
   // Rubro y Tipo de costo solo aplican a la Obra (conceptos con usa_etapas).
   // Para esas dimensiones, ignoramos los gastos que no son de Obra.
   const movsAnalisis = useMemo(() => {
@@ -264,9 +292,10 @@ export default function EconomicoPage() {
       {loading && <LinearProgress />}
 
       <Box>
-        <Tabs value={tab} onChange={(_, v) => setTab(v)}>
+        <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>
           <Tab label="Plan vs Real" />
           <Tab label="Análisis de gastos" />
+          <Tab label="Flujo de fondos" />
         </Tabs>
         <Divider />
       </Box>
@@ -386,6 +415,101 @@ export default function EconomicoPage() {
                     <TableRow sx={{ "& > td": { borderTop: "2px solid", borderColor: "divider" } }}>
                       <TableCell colSpan={7}><Typography fontWeight={700}>Total</Typography></TableCell>
                       <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totalAnalisis, "USD")}</Typography></TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      {tab === 2 && (
+        <Card>
+          <CardContent>
+            <Typography variant="subtitle1" gutterBottom>Necesidad de fondos por etapa</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: "block" }}>
+              Cuánta plata (USD) se necesita acumulada según el plan de cada etapa y sus fechas. Cargá lo disponible
+              para ver hasta dónde llegás, o una fecha para saber cuánto vas a necesitar.
+            </Typography>
+
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 2 }}>
+              <TextField
+                label="Disponible hoy" type="number" size="small" sx={{ width: { xs: "100%", sm: 200 } }}
+                value={disponible} onChange={(e) => setDisponible(e.target.value)}
+                InputProps={{ startAdornment: <InputAdornment position="start">US$</InputAdornment> }}
+              />
+              <TextField
+                label="¿Para qué fecha?" type="date" size="small" sx={{ width: { xs: "100%", sm: 200 } }}
+                InputLabelProps={{ shrink: true }}
+                value={fechaObjetivo} onChange={(e) => setFechaObjetivo(e.target.value)}
+              />
+            </Stack>
+
+            {disp > 0 && (
+              <Alert severity={alcance && alcance.acumulado >= totalFlujo ? "success" : "info"} sx={{ mb: 1.5 }}>
+                Con <b>{fmtMoney(disp, "USD")}</b>{" "}
+                {alcance
+                  ? <>llegás hasta <b>{alcance.nombre}</b> ({totalFlujo > 0 ? fmtPct(alcance.acumulado / totalFlujo * 100, 0) : "—"} del plan).</>
+                  : <>todavía no cubrís la primera etapa.</>}
+              </Alert>
+            )}
+            {necesidadFecha != null && (
+              <Alert severity="info" sx={{ mb: 1.5 }}>
+                Para el <b>{fmtDate(fechaObjetivo)}</b> vas a necesitar <b>{fmtMoney(necesidadFecha, "USD")}</b>.
+              </Alert>
+            )}
+
+            <TableContainer>
+              <Table size="small" sx={{ minWidth: 560 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Etapa</TableCell>
+                    <TableCell align="center">Fecha</TableCell>
+                    <TableCell align="right">Necesita (USD)</TableCell>
+                    <TableCell align="right">Acumulado (USD)</TableCell>
+                    <TableCell align="center">Estado</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {filasFlujo.length === 0 && (
+                    <TableRow><TableCell colSpan={5}>
+                      <Typography variant="body2" color="text.secondary">No hay etapas con plan cargado. Definí el plan por etapa en Configuración.</Typography>
+                    </TableCell></TableRow>
+                  )}
+                  {filasFlujo.map((f) => {
+                    const cubierta = disp > 0 && f.acumulado <= disp;
+                    const previo = f.acumulado - f.plan;
+                    const parcial = disp > 0 && !cubierta && disp > previo;
+                    const cubreFecha = fechaObjetivo && f.fecha && f.fecha <= fechaObjetivo;
+                    return (
+                      <TableRow key={f.nombre}
+                        sx={{ bgcolor: cubierta ? "rgba(30,142,62,0.10)" : parcial ? "rgba(224,122,31,0.12)" : undefined }}>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight={cubierta || parcial ? 600 : 400}>{f.nombre}</Typography>
+                        </TableCell>
+                        <TableCell align="center">
+                          <Typography variant="body2" color={cubreFecha ? "primary.main" : "text.secondary"}>
+                            {f.fecha ? fmtDate(f.fecha) : "—"}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right">{fmtMoney(f.plan, "USD")}</TableCell>
+                        <TableCell align="right">{fmtMoney(f.acumulado, "USD")}</TableCell>
+                        <TableCell align="center">
+                          {disp <= 0 ? "—"
+                            : cubierta ? <Chip size="small" color="success" label="Cubierta" />
+                            : parcial ? <Chip size="small" color="warning" label={`Parcial ${fmtPct((disp - previo) / f.plan * 100, 0)}`} />
+                            : <Chip size="small" variant="outlined" label="Falta" />}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {filasFlujo.length > 0 && (
+                    <TableRow sx={{ "& > td": { borderTop: "2px solid", borderColor: "divider" } }}>
+                      <TableCell colSpan={2}><Typography fontWeight={700}>Total plan</Typography></TableCell>
+                      <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totalFlujo, "USD")}</Typography></TableCell>
+                      <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totalFlujo, "USD")}</Typography></TableCell>
+                      <TableCell />
                     </TableRow>
                   )}
                 </TableBody>
