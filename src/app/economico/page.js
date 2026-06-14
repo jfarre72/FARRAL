@@ -72,8 +72,9 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick }) {
               <TableRow>
                 <TableCell>{titulo.includes("etapa") ? "Etapa" : "Concepto"}</TableCell>
                 <TableCell align="right">Plan (USD)</TableCell>
+                <TableCell align="right">% del plan</TableCell>
                 <TableCell align="right">Real (USD)</TableCell>
-                <TableCell align="right">% del total</TableCell>
+                <TableCell align="right">% del real</TableCell>
                 <TableCell align="right">%</TableCell>
                 <TableCell sx={{ width: 140 }}>Avance</TableCell>
               </TableRow>
@@ -81,7 +82,8 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick }) {
             <TableBody>
               {filas.map((f) => {
                 const pct = f.plan > 0 ? (f.real / f.plan) * 100 : null;
-                const pctTotal = totalReal > 0 ? (f.real / totalReal) * 100 : null;
+                const pctPlan = totalPlan > 0 ? (f.plan / totalPlan) * 100 : null;
+                const pctReal = totalReal > 0 ? (f.real / totalReal) * 100 : null;
                 const clickable = f.real > 0;
                 return (
                   <TableRow
@@ -96,11 +98,12 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick }) {
                       <Typography variant="body2" sx={{ fontStyle: f.otros ? "italic" : "normal" }}>{f.nombre}</Typography>
                     </TableCell>
                     <TableCell align="right">{fmtMoney(f.plan, "USD")}</TableCell>
+                    <TableCell align="right">
+                      <Typography variant="body2" color="text.secondary">{pctPlan != null ? fmtPct(pctPlan, 0) : "—"}</Typography>
+                    </TableCell>
                     <TableCell align="right">{fmtMoney(f.real, "USD")}</TableCell>
                     <TableCell align="right">
-                      <Typography variant="body2" color="text.secondary">
-                        {pctTotal != null ? fmtPct(pctTotal, 0) : "—"}
-                      </Typography>
+                      <Typography variant="body2" color="text.secondary">{pctReal != null ? fmtPct(pctReal, 0) : "—"}</Typography>
                     </TableCell>
                     <TableCell align="right">
                       <Typography variant="body2" color={pct != null && pct > 100 ? "error.main" : "text.primary"}>
@@ -114,6 +117,7 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick }) {
               <TableRow sx={{ "& > td": { borderTop: "2px solid", borderColor: "divider", fontWeight: 700 } }}>
                 <TableCell><Typography fontWeight={700}>Total</Typography></TableCell>
                 <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totalPlan, "USD")}</Typography></TableCell>
+                <TableCell align="right"><Typography fontWeight={700}>{totalPlan > 0 ? "100%" : "—"}</Typography></TableCell>
                 <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totalReal, "USD")}</Typography></TableCell>
                 <TableCell align="right"><Typography fontWeight={700}>{totalReal > 0 ? "100%" : "—"}</Typography></TableCell>
                 <TableCell align="right"><Typography fontWeight={700}>{pctTot != null ? fmtPct(pctTot, 0) : "—"}</Typography></TableCell>
