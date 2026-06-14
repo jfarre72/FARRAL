@@ -60,6 +60,17 @@ function toISODate(d) {
   const da = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${da}`;
 }
+// Etiqueta de duración en días hábiles; si supera 5, la expresa en semanas (5 días háb. = 1 semana).
+function duracionLabel(sIso, eIso) {
+  const dh = diasHabiles(sIso, eIso);
+  if (dh == null) return "";
+  if (dh > 5) {
+    const sem = dh / 5;
+    const txt = Number.isInteger(sem) ? String(sem) : sem.toFixed(1).replace(".", ",");
+    return `${txt} sem.`;
+  }
+  return `${dh} día${dh === 1 ? "" : "s"} háb.`;
+}
 function GanttEtapas({ etapas, inicioReal, finReal, onUpdate }) {
   const ini = new Date(inicioReal + "T00:00:00");
   const fin = new Date(finReal + "T00:00:00");
@@ -143,7 +154,7 @@ function GanttEtapas({ etapas, inicioReal, finReal, onUpdate }) {
           const has = s && e && !isNaN(s) && !isNaN(e) && e >= s;
           const leftPct = has ? Math.max(0, (s - ini) / 86400000 / span * 100) : 0;
           const widthPct = has ? Math.max(2, (e - s) / 86400000 / span * 100) : 0;
-          const dias = has ? Math.round((e - s) / 86400000) + 1 : 0;
+          const durTxt = has ? duracionLabel(toISODate(s), toISODate(e)) : "";
           const color = GANTT_COLORS[i % GANTT_COLORS.length];
           const isDragging = drag?.hitoId === h.id;
           return (
@@ -156,7 +167,7 @@ function GanttEtapas({ etapas, inicioReal, finReal, onUpdate }) {
                   <Box key={m.key} sx={{ position: "absolute", left: `${m.leftPct}%`, top: 0, bottom: 0, width: "1px", bgcolor: "rgba(15,42,74,0.07)" }} />
                 ))}
                 {has && (
-                  <Tooltip title={`${h.nombre}: ${fmtDate(toISODate(s))} → ${fmtDate(toISODate(e))} · ${dias} días`} open={isDragging || undefined}>
+                  <Tooltip title={`${h.nombre}: ${fmtDate(toISODate(s))} → ${fmtDate(toISODate(e))} · ${durTxt}`} open={isDragging || undefined}>
                     <Box
                       onPointerDown={(ev) => begin(ev, h, "move", s, e)}
                       sx={{
