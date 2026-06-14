@@ -5,6 +5,7 @@ import { useProjects } from "@/components/ProjectContext";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { fmtMoney, fmtNum, fmtPct, fmtDate } from "@/components/Money";
+import IndicadoresPanel from "@/components/IndicadoresPanel";
 
 // Gasto REAL en USD (misma convención que Caja / Seguimiento económico):
 // gasto en USD por su monto; gasto en ARS por monto / tipo de cambio.
@@ -238,6 +239,12 @@ export default function Home() {
           </Stack>
         </CardContent>
       </Card>
+
+      {/* Indicadores económicos (fusionado) */}
+      <Box>
+        <Typography variant="h6" gutterBottom>Indicadores</Typography>
+        <IndicadoresPanel />
+      </Box>
     </Stack>
   );
 }

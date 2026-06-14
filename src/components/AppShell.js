@@ -1,11 +1,10 @@
 "use client";
 import {
   AppBar, Box, Toolbar, Typography, IconButton, Drawer, List, ListItemButton,
-  ListItemIcon, ListItemText, Divider, Select, MenuItem, FormControl,
+  ListItemIcon, ListItemText, ListSubheader, Divider, Select, MenuItem, FormControl,
   InputLabel, Container, Stack, useMediaQuery, Tooltip, Chip
 } from "@mui/material";
 import MenuIcon from "@mui/icons-material/Menu";
-import HomeIcon from "@mui/icons-material/Home";
 import AccountBalanceIcon from "@mui/icons-material/AccountBalance";
 import GroupsIcon from "@mui/icons-material/Groups";
 import TimelineIcon from "@mui/icons-material/Timeline";
@@ -26,19 +25,28 @@ import { logout } from "@/components/AuthGate";
 import { useProjects } from "@/components/ProjectContext";
 
 const NAV = [
-  { label: "Inicio",          href: "/",            icon: <HomeIcon /> },
-  { label: "Proyectos",       href: "/proyectos",   icon: <AccountBalanceIcon /> },
-  { label: "Inversores",      href: "/inversores",  icon: <GroupsIcon /> },
-  { label: "Planificación",   href: "/linea-tiempo",  icon: <TimelineIcon /> },
-  { label: "Tareas",          href: "/temas",         icon: <ChecklistIcon /> },
-  { label: "Presupuestos",    href: "/presupuestos",  icon: <RequestQuoteIcon /> },
-  { label: "Caja",            href: "/caja",          icon: <PointOfSaleIcon /> },
-  { label: "Económico",       href: "/economico",     icon: <AccountTreeIcon /> },
-  { label: "Equipamientos",   href: "/equipamientos", icon: <HandymanIcon /> },
-  { label: "Indicadores",     href: "/indicadores",   icon: <InsightsIcon /> },
-  { label: "Galería",         href: "/galeria",       icon: <PhotoLibraryIcon /> },
-  { label: "Reportería",      href: "/reporteria",    icon: <DescriptionIcon /> },
-  { label: "Configuración",   href: "/configuracion", icon: <SettingsIcon /> },
+  { section: "Resumen", items: [
+    { label: "Indicadores",     href: "/",              icon: <InsightsIcon /> },
+  ]},
+  { section: "Proyecto", items: [
+    { label: "Proyectos",       href: "/proyectos",     icon: <AccountBalanceIcon /> },
+    { label: "Inversores",      href: "/inversores",    icon: <GroupsIcon /> },
+    { label: "Configuración",   href: "/configuracion", icon: <SettingsIcon /> },
+  ]},
+  { section: "Obra", items: [
+    { label: "Planificación",   href: "/linea-tiempo",  icon: <TimelineIcon /> },
+    { label: "Tareas",          href: "/temas",         icon: <ChecklistIcon /> },
+    { label: "Equipamientos",   href: "/equipamientos", icon: <HandymanIcon /> },
+  ]},
+  { section: "Finanzas", items: [
+    { label: "Caja",            href: "/caja",          icon: <PointOfSaleIcon /> },
+    { label: "Presupuestos",    href: "/presupuestos",  icon: <RequestQuoteIcon /> },
+    { label: "Económico",       href: "/economico",     icon: <AccountTreeIcon /> },
+  ]},
+  { section: "Documentación", items: [
+    { label: "Galería",         href: "/galeria",       icon: <PhotoLibraryIcon /> },
+    { label: "Reportería",      href: "/reporteria",    icon: <DescriptionIcon /> },
+  ]},
 ];
 
 const DRAWER_WIDTH = 240;
@@ -59,15 +67,29 @@ export default function AppShell({ children }) {
   const drawer = (
     <Box sx={{ width: DRAWER_WIDTH, overflowX: "hidden" }} role="presentation">
       <List>
-        {NAV.map((item) => (
-          <ListItemButton
-            key={item.href}
-            selected={pathname === item.href}
-            onClick={() => handleNav(item.href)}
-          >
-            <ListItemIcon sx={{ minWidth: 36 }}>{item.icon}</ListItemIcon>
-            <ListItemText primary={item.label} />
-          </ListItemButton>
+        {NAV.map((grupo) => (
+          <Box key={grupo.section}>
+            <ListSubheader
+              disableSticky
+              sx={{
+                bgcolor: "transparent", lineHeight: "32px", mt: 0.5,
+                fontSize: 11, fontWeight: 700, letterSpacing: 0.6,
+                textTransform: "uppercase", color: "text.secondary",
+              }}
+            >
+              {grupo.section}
+            </ListSubheader>
+            {grupo.items.map((item) => (
+              <ListItemButton
+                key={item.href}
+                selected={pathname === item.href}
+                onClick={() => handleNav(item.href)}
+              >
+                <ListItemIcon sx={{ minWidth: 36 }}>{item.icon}</ListItemIcon>
+                <ListItemText primary={item.label} />
+              </ListItemButton>
+            ))}
+          </Box>
         ))}
       </List>
     </Box>
