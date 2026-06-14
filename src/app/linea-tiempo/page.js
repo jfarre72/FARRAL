@@ -51,8 +51,76 @@ function mesesEntre(iniISO, finISO) {
   return Math.max(0, Math.round(meses));
 }
 
+// Línea de tiempo (Gantt) con la duración de cada etapa en colores.
+const GANTT_COLORS = ["#1E8E3E", "#E07A1F", "#0F2A4A", "#C0392B", "#7E57C2", "#0097A7", "#5D8C2F", "#B8860B", "#D81B60", "#3949AB"];
+function GanttEtapas({ etapas, inicioReal, finReal }) {
+  const ini = new Date(inicioReal + "T00:00:00");
+  const fin = new Date(finReal + "T00:00:00");
+  const span = Math.max(1, (fin - ini) / 86400000);
+  const LABEL_W = 150;
+  // Marcas de meses
+  const meses = [];
+  const cur = new Date(ini.getFullYear(), ini.getMonth(), 1);
+  while (cur <= fin) {
+    const leftPct = Math.max(0, ((cur - ini) / 86400000) / span * 100);
+    meses.push({
+      key: `${cur.getFullYear()}-${cur.getMonth()}`,
+      label: cur.toLocaleDateString("es-AR", { month: "short" }).replace(".", "") + " " + String(cur.getFullYear()).slice(2),
+      leftPct,
+    });
+    cur.setMonth(cur.getMonth() + 1);
+  }
+  return (
+    <Box sx={{ overflowX: "auto" }}>
+      <Box sx={{ minWidth: 640 }}>
+        {/* Eje de meses */}
+        <Stack direction="row" sx={{ mb: 0.5 }}>
+          <Box sx={{ width: LABEL_W, flexShrink: 0 }} />
+          <Box sx={{ position: "relative", flexGrow: 1, height: 18, borderBottom: "1px solid", borderColor: "divider" }}>
+            {meses.map((m) => (
+              <Typography key={m.key} variant="caption" color="text.secondary"
+                sx={{ position: "absolute", left: `${m.leftPct}%`, whiteSpace: "nowrap", fontSize: 10, lineHeight: 1 }}>
+                {m.label}
+              </Typography>
+            ))}
+          </Box>
+        </Stack>
+        {/* Una fila por etapa */}
+        {etapas.map((h, i) => {
+          const s = h.fecha_estimada ? new Date(h.fecha_estimada + "T00:00:00") : null;
+          const e = h.fecha_real ? new Date(h.fecha_real + "T00:00:00") : null;
+          const has = s && e && !isNaN(s) && !isNaN(e) && e >= s;
+          const leftPct = has ? Math.max(0, (s - ini) / 86400000 / span * 100) : 0;
+          const widthPct = has ? Math.max(2, (e - s) / 86400000 / span * 100) : 0;
+          const color = GANTT_COLORS[i % GANTT_COLORS.length];
+          return (
+            <Stack key={h.id} direction="row" alignItems="center" sx={{ py: 0.4 }}>
+              <Box sx={{ width: LABEL_W, flexShrink: 0, pr: 1 }}>
+                <Typography variant="body2" noWrap title={h.nombre} sx={{ fontWeight: 500 }}>{h.nombre}</Typography>
+              </Box>
+              <Box sx={{ position: "relative", flexGrow: 1, height: 20, bgcolor: "rgba(15,42,74,0.04)", borderRadius: 1 }}>
+                {meses.map((m) => (
+                  <Box key={m.key} sx={{ position: "absolute", left: `${m.leftPct}%`, top: 0, bottom: 0, width: "1px", bgcolor: "rgba(15,42,74,0.07)" }} />
+                ))}
+                {has && (
+                  <Tooltip title={`${h.nombre}: ${fmtDate(h.fecha_estimada)} → ${fmtDate(h.fecha_real)}`}>
+                    <Box sx={{
+                      position: "absolute", left: `${leftPct}%`, width: `${widthPct}%`, top: 3, bottom: 3,
+                      bgcolor: color, borderRadius: 1, opacity: 0.9,
+                      display: "flex", alignItems: "center", overflow: "hidden",
+                    }} />
+                  </Tooltip>
+                )}
+              </Box>
+            </Stack>
+          );
+        })}
+      </Box>
+    </Box>
+  );
+}
+
 // Campo de fecha que guarda recién al salir del campo (blur/Enter), no en cada
-// tecla, para poder tipear el año con el teclado sin que se interrumpa.
 function DateField({ value, onCommit, disabled, label, fullWidth, sx }) {
   const [local, setLocal] = useState(value ?? "");
   const [focused, setFocused] = useState(false);
@@ -355,6 +423,19 @@ export default function LineaTiempoPage() {
           </Stack>
         </CardContent>
       </Card>
+
+      {/* Línea de tiempo (Gantt) */}
+      {inicioReal && finReal && conPeso.some(h => h.fecha_estimada && h.fecha_real) && (
+        <Card>
+          <CardContent>
+            <Typography variant="subtitle1" gutterBottom>Línea de tiempo de etapas</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ mb: 1.5, display: "block" }}>
+              Duración de cada etapa según sus fechas de inicio y fin.
+            </Typography>
+            <GanttEtapas etapas={conPeso} inicioReal={inicioReal} finReal={finReal} />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Etapas */}
       <Card>
