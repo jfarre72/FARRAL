@@ -358,7 +358,7 @@ export default function LineaTiempoPage() {
       ? ` · Inicio real ${fmtDate(iniR)} · Fin real ${fmtDate(finR)}${ms != null ? ` · ${ms} ${ms === 1 ? "mes" : "meses"}` : ""}`
       : "";
     printDocument({
-      title: "Hitos plan",
+      title: "Planificación",
       subtitle: `${esc(proyecto.nombre)} · ${fmtDate(new Date().toISOString())} · Avance estimado ${avance}%${realStr}`,
       bodyHtml: secciones,
     });
@@ -370,7 +370,7 @@ export default function LineaTiempoPage() {
     <Stack spacing={3}>
       <Stack direction="row" alignItems="flex-start" spacing={1}>
         <Box sx={{ flexGrow: 1 }}>
-          <Typography variant="h5">Hitos plan</Typography>
+          <Typography variant="h5">Planificación</Typography>
           <Typography variant="body2">Etapas, tareas y avance del proyecto.</Typography>
         </Box>
         <Button variant="outlined" startIcon={<PictureAsPdfIcon />} onClick={exportarPdf}>
