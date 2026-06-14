@@ -52,12 +52,62 @@ function mesesEntre(iniISO, finISO) {
 }
 
 // Línea de tiempo (Gantt) con la duración de cada etapa en colores.
+// Las barras se pueden arrastrar (mover) o estirar desde los bordes (duración).
 const GANTT_COLORS = ["#1E8E3E", "#E07A1F", "#0F2A4A", "#C0392B", "#7E57C2", "#0097A7", "#5D8C2F", "#B8860B", "#D81B60", "#3949AB"];
-function GanttEtapas({ etapas, inicioReal, finReal }) {
+function toISODate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${da}`;
+}
+function GanttEtapas({ etapas, inicioReal, finReal, onUpdate }) {
   const ini = new Date(inicioReal + "T00:00:00");
   const fin = new Date(finReal + "T00:00:00");
   const span = Math.max(1, (fin - ini) / 86400000);
   const LABEL_W = 150;
+  const [drag, setDrag] = useState(null);     // { hitoId, mode, startX, s, e, dayPerPx }
+  const [preview, setPreview] = useState({});  // { [hitoId]: { start: Date, end: Date } }
+
+  useEffect(() => {
+    if (!drag) return;
+    const onMove = (ev) => {
+      const clientX = ev.clientX ?? ev.touches?.[0]?.clientX;
+      if (clientX == null) return;
+      const deltaDays = Math.round((clientX - drag.startX) * drag.dayPerPx);
+      let ns = new Date(drag.s), ne = new Date(drag.e);
+      if (drag.mode === "move") { ns.setDate(ns.getDate() + deltaDays); ne.setDate(ne.getDate() + deltaDays); }
+      else if (drag.mode === "left") { ns.setDate(ns.getDate() + deltaDays); if (ns > ne) ns = new Date(ne); }
+      else if (drag.mode === "right") { ne.setDate(ne.getDate() + deltaDays); if (ne < ns) ne = new Date(ns); }
+      setPreview((p) => ({ ...p, [drag.hitoId]: { start: ns, end: ne } }));
+    };
+    const onUp = () => {
+      const pv = preview[drag.hitoId];
+      if (pv) {
+        const sIso = toISODate(pv.start), eIso = toISODate(pv.end);
+        if (sIso !== toISODate(drag.s) || eIso !== toISODate(drag.e)) {
+          onUpdate(drag.hitoId, { fecha_estimada: sIso, fecha_real: eIso });
+        }
+      }
+      setDrag(null);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [drag, preview, onUpdate]);
+
+  const begin = (ev, h, mode, s, e) => {
+    ev.preventDefault(); ev.stopPropagation();
+    const trackEl = ev.currentTarget.closest("[data-gantt-track]");
+    if (!trackEl) return;
+    const rect = trackEl.getBoundingClientRect();
+    const dayPerPx = span / Math.max(1, rect.width);
+    const clientX = ev.clientX ?? ev.touches?.[0]?.clientX;
+    setDrag({ hitoId: h.id, mode, startX: clientX, s, e, dayPerPx });
+  };
+
   // Marcas de meses
   const meses = [];
   const cur = new Date(ini.getFullYear(), ini.getMonth(), 1);
@@ -87,28 +137,49 @@ function GanttEtapas({ etapas, inicioReal, finReal }) {
         </Stack>
         {/* Una fila por etapa */}
         {etapas.map((h, i) => {
-          const s = h.fecha_estimada ? new Date(h.fecha_estimada + "T00:00:00") : null;
-          const e = h.fecha_real ? new Date(h.fecha_real + "T00:00:00") : null;
+          const pv = preview[h.id];
+          const s = pv ? pv.start : (h.fecha_estimada ? new Date(h.fecha_estimada + "T00:00:00") : null);
+          const e = pv ? pv.end : (h.fecha_real ? new Date(h.fecha_real + "T00:00:00") : null);
           const has = s && e && !isNaN(s) && !isNaN(e) && e >= s;
           const leftPct = has ? Math.max(0, (s - ini) / 86400000 / span * 100) : 0;
           const widthPct = has ? Math.max(2, (e - s) / 86400000 / span * 100) : 0;
+          const dias = has ? Math.round((e - s) / 86400000) + 1 : 0;
           const color = GANTT_COLORS[i % GANTT_COLORS.length];
+          const isDragging = drag?.hitoId === h.id;
           return (
             <Stack key={h.id} direction="row" alignItems="center" sx={{ py: 0.4 }}>
               <Box sx={{ width: LABEL_W, flexShrink: 0, pr: 1 }}>
                 <Typography variant="body2" noWrap title={h.nombre} sx={{ fontWeight: 500 }}>{h.nombre}</Typography>
               </Box>
-              <Box sx={{ position: "relative", flexGrow: 1, height: 20, bgcolor: "rgba(15,42,74,0.04)", borderRadius: 1 }}>
+              <Box data-gantt-track sx={{ position: "relative", flexGrow: 1, height: 22, bgcolor: "rgba(15,42,74,0.04)", borderRadius: 1, touchAction: "none" }}>
                 {meses.map((m) => (
                   <Box key={m.key} sx={{ position: "absolute", left: `${m.leftPct}%`, top: 0, bottom: 0, width: "1px", bgcolor: "rgba(15,42,74,0.07)" }} />
                 ))}
                 {has && (
-                  <Tooltip title={`${h.nombre}: ${fmtDate(h.fecha_estimada)} → ${fmtDate(h.fecha_real)}`}>
-                    <Box sx={{
-                      position: "absolute", left: `${leftPct}%`, width: `${widthPct}%`, top: 3, bottom: 3,
-                      bgcolor: color, borderRadius: 1, opacity: 0.9,
-                      display: "flex", alignItems: "center", overflow: "hidden",
-                    }} />
+                  <Tooltip title={`${h.nombre}: ${fmtDate(toISODate(s))} → ${fmtDate(toISODate(e))} · ${dias} días`} open={isDragging || undefined}>
+                    <Box
+                      onPointerDown={(ev) => begin(ev, h, "move", s, e)}
+                      sx={{
+                        position: "absolute", left: `${leftPct}%`, width: `${widthPct}%`, top: 3, bottom: 3,
+                        bgcolor: color, borderRadius: 1, opacity: isDragging ? 1 : 0.9,
+                        cursor: "grab", boxShadow: isDragging ? 3 : 0,
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        "&:active": { cursor: "grabbing" },
+                      }}
+                    >
+                      {/* Manija izquierda */}
+                      <Box
+                        onPointerDown={(ev) => begin(ev, h, "left", s, e)}
+                        sx={{ width: 8, alignSelf: "stretch", cursor: "ew-resize", borderRadius: "4px 0 0 4px",
+                          bgcolor: "rgba(255,255,255,0.35)" }}
+                      />
+                      {/* Manija derecha */}
+                      <Box
+                        onPointerDown={(ev) => begin(ev, h, "right", s, e)}
+                        sx={{ width: 8, alignSelf: "stretch", cursor: "ew-resize", borderRadius: "0 4px 4px 0",
+                          bgcolor: "rgba(255,255,255,0.35)" }}
+                      />
+                    </Box>
                   </Tooltip>
                 )}
               </Box>
@@ -430,9 +501,10 @@ export default function LineaTiempoPage() {
           <CardContent>
             <Typography variant="subtitle1" gutterBottom>Línea de tiempo de etapas</Typography>
             <Typography variant="caption" color="text.secondary" sx={{ mb: 1.5, display: "block" }}>
-              Duración de cada etapa según sus fechas de inicio y fin.
+              Arrastrá una barra para moverla, o sus bordes para cambiar la cantidad de días. Se guarda al soltar.
             </Typography>
-            <GanttEtapas etapas={conPeso} inicioReal={inicioReal} finReal={finReal} />
+            <GanttEtapas etapas={conPeso} inicioReal={inicioReal} finReal={finReal}
+              onUpdate={(id, patch) => updateHito(id, patch)} />
           </CardContent>
         </Card>
       )}
