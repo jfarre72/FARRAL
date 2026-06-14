@@ -73,6 +73,7 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick }) {
                 <TableCell>{titulo.includes("etapa") ? "Etapa" : "Concepto"}</TableCell>
                 <TableCell align="right">Plan (USD)</TableCell>
                 <TableCell align="right">Real (USD)</TableCell>
+                <TableCell align="right">% del total</TableCell>
                 <TableCell align="right">%</TableCell>
                 <TableCell sx={{ width: 140 }}>Avance</TableCell>
               </TableRow>
@@ -80,6 +81,7 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick }) {
             <TableBody>
               {filas.map((f) => {
                 const pct = f.plan > 0 ? (f.real / f.plan) * 100 : null;
+                const pctTotal = totalReal > 0 ? (f.real / totalReal) * 100 : null;
                 const clickable = f.real > 0;
                 return (
                   <TableRow
@@ -96,6 +98,11 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick }) {
                     <TableCell align="right">{fmtMoney(f.plan, "USD")}</TableCell>
                     <TableCell align="right">{fmtMoney(f.real, "USD")}</TableCell>
                     <TableCell align="right">
+                      <Typography variant="body2" color="text.secondary">
+                        {pctTotal != null ? fmtPct(pctTotal, 0) : "—"}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right">
                       <Typography variant="body2" color={pct != null && pct > 100 ? "error.main" : "text.primary"}>
                         {pct != null ? fmtPct(pct, 0) : "—"}
                       </Typography>
@@ -108,6 +115,7 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick }) {
                 <TableCell><Typography fontWeight={700}>Total</Typography></TableCell>
                 <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totalPlan, "USD")}</Typography></TableCell>
                 <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totalReal, "USD")}</Typography></TableCell>
+                <TableCell align="right"><Typography fontWeight={700}>{totalReal > 0 ? "100%" : "—"}</Typography></TableCell>
                 <TableCell align="right"><Typography fontWeight={700}>{pctTot != null ? fmtPct(pctTot, 0) : "—"}</Typography></TableCell>
                 <TableCell><Barra pct={pctTot ?? 0} /></TableCell>
               </TableRow>
