@@ -71,11 +71,19 @@ function duracionLabel(sIso, eIso) {
   }
   return `${dh} día${dh === 1 ? "" : "s"} háb.`;
 }
-function GanttEtapas({ etapas, inicioReal, finReal, onUpdate }) {
+// Convierte un color hex (#RRGGBB) a rgba con la opacidad dada.
+function fade(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+function GanttEtapas({ etapas, inicioReal, finReal, onUpdate, getFraccion }) {
   const ini = new Date(inicioReal + "T00:00:00");
   const fin = new Date(finReal + "T00:00:00");
   const span = Math.max(1, (fin - ini) / 86400000);
   const LABEL_W = 150;
+  // Posición de "hoy" en la línea de tiempo (null si está fuera del rango).
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const hoyPct = (hoy >= ini && hoy <= fin) ? ((hoy - ini) / 86400000 / span * 100) : null;
   const [drag, setDrag] = useState(null);     // { hitoId, mode, startX, s, e, dayPerPx }
   const [preview, setPreview] = useState({});  // { [hitoId]: { start: Date, end: Date } }
 
@@ -132,18 +140,22 @@ function GanttEtapas({ etapas, inicioReal, finReal, onUpdate }) {
     cur.setMonth(cur.getMonth() + 1);
   }
   return (
-    <Box sx={{ overflowX: "auto" }}>
-      <Box sx={{ minWidth: 640 }}>
+    <Box sx={{ overflow: "hidden" }}>
+      <Box sx={{ minWidth: 0 }}>
         {/* Eje de meses */}
         <Stack direction="row" sx={{ mb: 0.5 }}>
           <Box sx={{ width: LABEL_W, flexShrink: 0 }} />
           <Box sx={{ position: "relative", flexGrow: 1, height: 18, borderBottom: "1px solid", borderColor: "divider" }}>
             {meses.map((m) => (
               <Typography key={m.key} variant="caption" color="text.secondary"
-                sx={{ position: "absolute", left: `${m.leftPct}%`, whiteSpace: "nowrap", fontSize: 10, lineHeight: 1 }}>
+                sx={{ position: "absolute", left: `${m.leftPct}%`, whiteSpace: "nowrap", fontSize: 10, lineHeight: 1,
+                  transform: m.leftPct > 92 ? "translateX(-100%)" : "none" }}>
                 {m.label}
               </Typography>
             ))}
+            {hoyPct != null && (
+              <Box sx={{ position: "absolute", left: `${hoyPct}%`, top: 0, bottom: -2, width: "2px", bgcolor: "error.main", zIndex: 3 }} />
+            )}
           </Box>
         </Stack>
         {/* Una fila por etapa */}
@@ -157,6 +169,8 @@ function GanttEtapas({ etapas, inicioReal, finReal, onUpdate }) {
           const durTxt = has ? duracionLabel(toISODate(s), toISODate(e)) : "";
           const color = GANTT_COLORS[i % GANTT_COLORS.length];
           const isDragging = drag?.hitoId === h.id;
+          const frac = Math.max(0, Math.min(1, getFraccion ? getFraccion(h) : 0));
+          const pctAvance = Math.round(frac * 100);
           return (
             <Stack key={h.id} direction="row" alignItems="center" sx={{ py: 0.4 }}>
               <Box sx={{ width: LABEL_W, flexShrink: 0, pr: 1 }}>
@@ -167,31 +181,33 @@ function GanttEtapas({ etapas, inicioReal, finReal, onUpdate }) {
                   <Box key={m.key} sx={{ position: "absolute", left: `${m.leftPct}%`, top: 0, bottom: 0, width: "1px", bgcolor: "rgba(15,42,74,0.07)" }} />
                 ))}
                 {has && (
-                  <Tooltip title={`${h.nombre}: ${fmtDate(toISODate(s))} → ${fmtDate(toISODate(e))} · ${durTxt}`} open={isDragging || undefined}>
+                  <Tooltip title={`${h.nombre}: ${fmtDate(toISODate(s))} → ${fmtDate(toISODate(e))} · ${durTxt} · ${pctAvance}% completado`} open={isDragging || undefined}>
                     <Box
                       onPointerDown={(ev) => begin(ev, h, "move", s, e)}
                       sx={{
                         position: "absolute", left: `${leftPct}%`, width: `${widthPct}%`, top: 3, bottom: 3,
-                        bgcolor: color, borderRadius: 1, opacity: isDragging ? 1 : 0.9,
-                        cursor: "grab", boxShadow: isDragging ? 3 : 0,
-                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        bgcolor: fade(color, 0.28), borderRadius: 1,
+                        cursor: "grab", boxShadow: isDragging ? 3 : 0, overflow: "hidden",
                         "&:active": { cursor: "grabbing" },
                       }}
                     >
+                      {/* Relleno de avance (color pleno) */}
+                      <Box sx={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${pctAvance}%`, bgcolor: color, transition: "width .3s" }} />
                       {/* Manija izquierda */}
                       <Box
                         onPointerDown={(ev) => begin(ev, h, "left", s, e)}
-                        sx={{ width: 8, alignSelf: "stretch", cursor: "ew-resize", borderRadius: "4px 0 0 4px",
-                          bgcolor: "rgba(255,255,255,0.35)" }}
+                        sx={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 8, cursor: "ew-resize", zIndex: 2 }}
                       />
                       {/* Manija derecha */}
                       <Box
                         onPointerDown={(ev) => begin(ev, h, "right", s, e)}
-                        sx={{ width: 8, alignSelf: "stretch", cursor: "ew-resize", borderRadius: "0 4px 4px 0",
-                          bgcolor: "rgba(255,255,255,0.35)" }}
+                        sx={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 8, cursor: "ew-resize", zIndex: 2 }}
                       />
                     </Box>
                   </Tooltip>
+                )}
+                {hoyPct != null && (
+                  <Box sx={{ position: "absolute", left: `${hoyPct}%`, top: 0, bottom: 0, width: "2px", bgcolor: "error.main", zIndex: 4, pointerEvents: "none" }} />
                 )}
               </Box>
             </Stack>
@@ -515,7 +531,7 @@ export default function LineaTiempoPage() {
               Arrastrá una barra para moverla, o sus bordes para cambiar la cantidad de días. Se guarda al soltar.
             </Typography>
             <GanttEtapas etapas={conPeso} inicioReal={inicioReal} finReal={finReal}
-              onUpdate={(id, patch) => updateHito(id, patch)} />
+              onUpdate={(id, patch) => updateHito(id, patch)} getFraccion={fraccion} />
           </CardContent>
         </Card>
       )}
