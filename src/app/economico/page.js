@@ -41,6 +41,17 @@ function agruparPor(movs, campo) {
   return Object.values(map).sort((a, b) => b.real - a.real);
 }
 
+// Cantidad de meses (redondeada) entre dos fechas ISO.
+function mesesEntre(iniISO, finISO) {
+  if (!iniISO || !finISO) return null;
+  const a = new Date(iniISO + "T00:00:00");
+  const b = new Date(finISO + "T00:00:00");
+  if (isNaN(a) || isNaN(b)) return null;
+  let m = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
+  m += (b.getDate() - a.getDate()) / 30.44;
+  return Math.max(0, Math.round(m));
+}
+
 const DIMENSIONES = [
   { campo: "concepto", label: "Concepto" },
   { campo: "etapa", label: "Etapa" },
@@ -220,8 +231,20 @@ export default function EconomicoPage() {
     return ord.map(h => {
       const plan = Number(h.valor_plan || 0);
       acc += plan;
-      return { nombre: h.nombre, plan, acumulado: acc, fecha: h.fecha_real || h.fecha_estimada || null };
+      return {
+        nombre: h.nombre, plan, acumulado: acc,
+        fecha: h.fecha_real || h.fecha_estimada || null,
+        meses: mesesEntre(h.fecha_estimada, h.fecha_real),
+      };
     });
+  }, [hitos]);
+  // Meses totales del proyecto (de la primera a la última fecha cargada).
+  const mesesTotales = useMemo(() => {
+    const inicios = hitos.map(h => h.fecha_estimada).filter(Boolean);
+    const fines = hitos.map(h => h.fecha_real).filter(Boolean);
+    const ini = inicios.length ? inicios.reduce((m, d) => (d < m ? d : m)) : null;
+    const fin = fines.length ? fines.reduce((m, d) => (d > m ? d : m)) : null;
+    return mesesEntre(ini, fin);
   }, [hitos]);
   const totalFlujo = filasFlujo.length ? filasFlujo[filasFlujo.length - 1].acumulado : 0;
   const disp = Number(disponible || 0);
@@ -466,6 +489,7 @@ export default function EconomicoPage() {
                   <TableRow>
                     <TableCell>Etapa</TableCell>
                     <TableCell align="center">Fecha</TableCell>
+                    <TableCell align="center">Meses</TableCell>
                     <TableCell align="right">Necesita (USD)</TableCell>
                     <TableCell align="right">Acumulado (USD)</TableCell>
                     <TableCell align="center">Estado</TableCell>
@@ -473,7 +497,7 @@ export default function EconomicoPage() {
                 </TableHead>
                 <TableBody>
                   {filasFlujo.length === 0 && (
-                    <TableRow><TableCell colSpan={5}>
+                    <TableRow><TableCell colSpan={6}>
                       <Typography variant="body2" color="text.secondary">No hay etapas con plan cargado. Definí el plan por etapa en Configuración.</Typography>
                     </TableCell></TableRow>
                   )}
@@ -493,6 +517,11 @@ export default function EconomicoPage() {
                             {f.fecha ? fmtDate(f.fecha) : "—"}
                           </Typography>
                         </TableCell>
+                        <TableCell align="center">
+                          <Typography variant="body2" color="text.secondary">
+                            {f.meses != null ? `${f.meses} ${f.meses === 1 ? "mes" : "meses"}` : "—"}
+                          </Typography>
+                        </TableCell>
                         <TableCell align="right">{fmtMoney(f.plan, "USD")}</TableCell>
                         <TableCell align="right">{fmtMoney(f.acumulado, "USD")}</TableCell>
                         <TableCell align="center">
@@ -506,7 +535,9 @@ export default function EconomicoPage() {
                   })}
                   {filasFlujo.length > 0 && (
                     <TableRow sx={{ "& > td": { borderTop: "2px solid", borderColor: "divider" } }}>
-                      <TableCell colSpan={2}><Typography fontWeight={700}>Total plan</Typography></TableCell>
+                      <TableCell><Typography fontWeight={700}>Total plan</Typography></TableCell>
+                      <TableCell />
+                      <TableCell align="center"><Typography fontWeight={700}>{mesesTotales != null ? `${mesesTotales} ${mesesTotales === 1 ? "mes" : "meses"}` : "—"}</Typography></TableCell>
                       <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totalFlujo, "USD")}</Typography></TableCell>
                       <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totalFlujo, "USD")}</Typography></TableCell>
                       <TableCell />
