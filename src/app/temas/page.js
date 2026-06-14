@@ -22,6 +22,15 @@ import { getCache, setCache } from "@/lib/dataCache";
 import { printDocument, esc } from "@/lib/printPdf";
 
 const empty = { titulo: "", responsable: "", fecha: "", etiqueta: "NORMAL", observacion: "" };
+
+// Día de la semana (capitalizado) de una fecha ISO (YYYY-MM-DD).
+const DIAS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+function diaSemana(iso) {
+  if (!iso) return "";
+  const d = new Date(iso + "T00:00:00");
+  if (isNaN(d)) return "";
+  return DIAS[d.getDay()];
+}
 const ETIQUETAS = ["NORMAL", "URGENTE"];
 
 // Fecha de hoy en formato ISO (YYYY-MM-DD), zona local
@@ -338,6 +347,11 @@ export default function TemasPage() {
                           >
                             {t.fecha ? fmtDate(t.fecha) : "—"}
                           </Typography>
+                          {t.fecha && (
+                            <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
+                              {diaSemana(t.fecha)}
+                            </Typography>
+                          )}
                         </TableCell>
                         <TableCell align="center">
                           <Chip size="small" label={meta.label} color={meta.color}
@@ -390,6 +404,7 @@ export default function TemasPage() {
                 fullWidth label="Fecha" type="date" InputLabelProps={{ shrink: true }}
                 value={form.fecha}
                 onChange={(e) => setForm(f => ({ ...f, fecha: e.target.value }))}
+                helperText={form.fecha ? diaSemana(form.fecha) : " "}
               />
             </Grid>
             <Grid item xs={12} sm={6}>
