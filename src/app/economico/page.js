@@ -2,7 +2,8 @@
 import {
   Card, CardContent, Stack, Typography, Alert, Box, LinearProgress,
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer,
-  Dialog, DialogTitle, DialogContent, DialogActions, Button, Chip
+  Dialog, DialogTitle, DialogContent, DialogActions, Button, Chip,
+  Tabs, Tab, Divider, ToggleButton, ToggleButtonGroup
 } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
@@ -23,6 +24,28 @@ function gastoUSD(mv) {
   const tc = Number(mv.cambio_tipo_cambio || mv.tipo_cambio_gasto || 0);
   return tc > 0 ? m / tc : 0;
 }
+
+// Agrupa los egresos (USD imputado) por un campo, ordenado de mayor a menor.
+// Los que no tienen valor en ese campo van a "(Sin asignar)".
+function agruparPor(movs, campo) {
+  const map = {};
+  for (const mv of movs) {
+    const g = gastoUSD(mv);
+    if (g <= 0) continue;
+    const key = mv[campo] || "(Sin asignar)";
+    if (!map[key]) map[key] = { nombre: key, real: 0, n: 0 };
+    map[key].real += g;
+    map[key].n += 1;
+  }
+  return Object.values(map).sort((a, b) => b.real - a.real);
+}
+
+const DIMENSIONES = [
+  { campo: "concepto", label: "Concepto" },
+  { campo: "etapa", label: "Etapa" },
+  { campo: "rubro", label: "Rubro" },
+  { campo: "tipo_costo", label: "Tipo de costo" },
+];
 
 function Barra({ pct }) {
   const p = Math.min(100, Math.max(0, pct || 0));
@@ -103,7 +126,9 @@ export default function EconomicoPage() {
   const [hitos, setHitos] = useState(cacheInit?.hitos ?? []);
   const [movs, setMovs] = useState(cacheInit?.movs ?? []);
   const [loading, setLoading] = useState(true);
-  const [detalle, setDetalle] = useState(null); // { tipo: 'concepto'|'etapa', nombre, otros }
+  const [tab, setTab] = useState(0);
+  const [dim, setDim] = useState("rubro"); // dimensión del análisis de gastos
+  const [detalle, setDetalle] = useState(null); // { campo, valor, otros }
 
   const reload = async () => {
     if (!proyecto) return;
@@ -164,15 +189,18 @@ export default function EconomicoPage() {
       .map(mv => ({ mv, usd: gastoUSD(mv) }))
       .filter(({ mv, usd }) => {
         if (usd <= 0) return false;
-        if (detalle.tipo === "etapa") return mv.etapa === detalle.nombre;
-        // concepto
         if (detalle.otros) return !mv.concepto || !nombresC.has(mv.concepto);
-        return mv.concepto === detalle.nombre;
+        if (detalle.valor == null) return !mv[detalle.campo];
+        return mv[detalle.campo] === detalle.valor;
       })
       .sort((a, b) => (a.mv.fecha < b.mv.fecha ? 1 : -1));
   }, [detalle, movs, conceptos]);
 
   const totalDetalle = detalleGastos.reduce((s, d) => s + d.usd, 0);
+
+  // Análisis de gastos por la dimensión elegida.
+  const filasAnalisis = useMemo(() => agruparPor(movs, dim), [movs, dim]);
+  const totalAnalisis = filasAnalisis.reduce((s, f) => s + f.real, 0);
 
   if (!proyecto) return <Alert severity="info">Seleccioná un proyecto.</Alert>;
 
@@ -187,14 +215,89 @@ export default function EconomicoPage() {
 
       {loading && <LinearProgress />}
 
-      <TablaSeguimiento titulo="Por concepto" filas={filasConcepto} totalPlan={totPlanC} totalReal={totRealC}
-        onRowClick={(f) => setDetalle({ tipo: "concepto", nombre: f.nombre, otros: !!f.otros })} />
-      <TablaSeguimiento titulo="Por etapa (Obra)" filas={filasEtapa} totalPlan={totPlanE} totalReal={totRealE}
-        onRowClick={(f) => setDetalle({ tipo: "etapa", nombre: f.nombre })} />
+      <Box>
+        <Tabs value={tab} onChange={(_, v) => setTab(v)}>
+          <Tab label="Plan vs Real" />
+          <Tab label="Análisis de gastos" />
+        </Tabs>
+        <Divider />
+      </Box>
+
+      {tab === 0 && (
+        <Stack spacing={3}>
+          <TablaSeguimiento titulo="Por concepto" filas={filasConcepto} totalPlan={totPlanC} totalReal={totRealC}
+            onRowClick={(f) => setDetalle({ campo: "concepto", valor: f.nombre, otros: !!f.otros })} />
+          <TablaSeguimiento titulo="Por etapa (Obra)" filas={filasEtapa} totalPlan={totPlanE} totalReal={totRealE}
+            onRowClick={(f) => setDetalle({ campo: "etapa", valor: f.nombre })} />
+          <Typography variant="caption" color="text.secondary">
+            El “real” se imputa siempre en USD: los gastos en USD por su monto, y los gastos en ARS convertidos por el
+            tipo de cambio (el del cambio integrado, o el tipo de cambio cargado al registrar el pago en pesos).
+            Un gasto en ARS sin tipo de cambio cargado no se puede valuar y no impacta en el total.
+          </Typography>
+        </Stack>
+      )}
+
+      {tab === 1 && (
+        <Card>
+          <CardContent>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }} sx={{ mb: 2 }}>
+              <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>Gastos por dimensión</Typography>
+              <ToggleButtonGroup exclusive size="small" value={dim} onChange={(_, v) => v && setDim(v)}>
+                {DIMENSIONES.map(d => <ToggleButton key={d.campo} value={d.campo}>{d.label}</ToggleButton>)}
+              </ToggleButtonGroup>
+            </Stack>
+            <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
+              Total gastado (USD) agrupado por {DIMENSIONES.find(d => d.campo === dim)?.label.toLowerCase()}. Tocá una fila para ver el detalle.
+            </Typography>
+            <TableContainer>
+              <Table size="small" sx={{ minWidth: 480 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>{DIMENSIONES.find(d => d.campo === dim)?.label}</TableCell>
+                    <TableCell align="right"># gastos</TableCell>
+                    <TableCell align="right">Total (USD)</TableCell>
+                    <TableCell align="right">%</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {filasAnalisis.length === 0 && (
+                    <TableRow><TableCell colSpan={4}>
+                      <Typography variant="body2" color="text.secondary">No hay gastos cargados.</Typography>
+                    </TableCell></TableRow>
+                  )}
+                  {filasAnalisis.map((f) => {
+                    const sinAsignar = f.nombre === "(Sin asignar)";
+                    const pct = totalAnalisis > 0 ? (f.real / totalAnalisis) * 100 : 0;
+                    return (
+                      <TableRow key={f.nombre} hover sx={{ cursor: "pointer" }}
+                        onClick={() => setDetalle({ campo: dim, valor: sinAsignar ? null : f.nombre })}>
+                        <TableCell>
+                          <Typography variant="body2" sx={{ fontStyle: sinAsignar ? "italic" : "normal" }}>{f.nombre}</Typography>
+                        </TableCell>
+                        <TableCell align="right">{f.n}</TableCell>
+                        <TableCell align="right">{fmtMoney(f.real, "USD")}</TableCell>
+                        <TableCell align="right">{fmtPct(pct, 0)}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {filasAnalisis.length > 0 && (
+                    <TableRow sx={{ "& > td": { borderTop: "2px solid", borderColor: "divider" } }}>
+                      <TableCell><Typography fontWeight={700}>Total</Typography></TableCell>
+                      <TableCell align="right"><Typography fontWeight={700}>{filasAnalisis.reduce((s, f) => s + f.n, 0)}</Typography></TableCell>
+                      <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totalAnalisis, "USD")}</Typography></TableCell>
+                      <TableCell align="right"><Typography fontWeight={700}>100%</Typography></TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </CardContent>
+        </Card>
+      )}
 
       <Dialog open={!!detalle} onClose={() => setDetalle(null)} fullWidth maxWidth="md">
         <DialogTitle>
-          Gastos imputados · {detalle?.nombre}
+          Gastos imputados · {detalle?.valor ?? "Sin asignar"}
         </DialogTitle>
         <DialogContent dividers>
           {detalleGastos.length === 0 ? (
@@ -239,12 +342,6 @@ export default function EconomicoPage() {
           <Button onClick={() => setDetalle(null)}>Cerrar</Button>
         </DialogActions>
       </Dialog>
-
-      <Typography variant="caption" color="text.secondary">
-        El “real” se imputa siempre en USD: los gastos en USD por su monto, y los gastos en ARS convertidos por el
-        tipo de cambio (el del cambio integrado, o el tipo de cambio cargado al registrar el pago en pesos).
-        Un gasto en ARS sin tipo de cambio cargado no se puede valuar y no impacta en el total.
-      </Typography>
     </Stack>
   );
 }

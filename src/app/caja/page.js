@@ -20,6 +20,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtMoney, fmtNum, fmtDate, fmtPct } from "@/components/Money";
 import { printDocument, esc } from "@/lib/printPdf";
+import { TIPOS_COSTO, RUBROS } from "@/lib/gastoTags";
 
 const BUCKET = "comprobantes";
 
@@ -50,6 +51,8 @@ const emptyMov = {
   categoria: "",
   concepto: "",
   etapa: "",
+  tipo_costo: "",
+  rubro: "",
   descripcion: "",
   // TC para valuar en USD un gasto en pesos (sin cambio integrado),
   // al imputarlo a un concepto / etapa.
@@ -231,7 +234,8 @@ export default function CajaPage() {
         ? `Cambio ${mv.moneda} → ${mv.moneda_destino} @ ${fmtNum(mv.tipo_cambio, 2)}`
         : (mv.descripcion || (mv.tipo === "ingreso" ? "Ingreso" : "Egreso")),
       observacion: mv.descripcion ?? null,
-      categoria: mv.categoria, concepto: mv.concepto, etapa: mv.etapa, comprobante_url: mv.comprobante_url, raw: mv,
+      categoria: mv.categoria, concepto: mv.concepto, etapa: mv.etapa,
+      tipo_costo: mv.tipo_costo, rubro: mv.rubro, comprobante_url: mv.comprobante_url, raw: mv,
       moneda_destino: mv.moneda_destino, monto_destino: mv.monto_destino,
       con_cambio: mv.con_cambio,
       cambio_moneda_origen: mv.cambio_moneda_origen,
@@ -363,6 +367,8 @@ export default function CajaPage() {
       categoria: mv.categoria ?? "",
       concepto: mv.concepto ?? "",
       etapa: mv.etapa ?? "",
+      tipo_costo: mv.tipo_costo ?? "",
+      rubro: mv.rubro ?? "",
       descripcion: mv.descripcion ?? "",
       tipo_cambio_gasto: mv.tipo_cambio_gasto ?? "",
       con_cambio: !!mv.con_cambio,
@@ -488,6 +494,8 @@ export default function CajaPage() {
         categoria: form.tipo === "egreso" ? (categoriaFinal || null) : null,
         concepto: form.tipo === "egreso" ? (form.concepto || null) : null,
         etapa: form.tipo === "egreso" && conceptoUsaEtapas ? (form.etapa || null) : null,
+        tipo_costo: form.tipo === "egreso" ? (form.tipo_costo || null) : null,
+        rubro: form.tipo === "egreso" ? (form.rubro || null) : null,
         descripcion: form.descripcion || null,
         comprobante_url,
         moneda_destino: null,
@@ -826,6 +834,8 @@ export default function CajaPage() {
               {detail.observacion && <DetailRow label="Observación" value={detail.observacion} />}
               {detail.categoria && <DetailRow label="Categoría" value={<Chip size="small" label={detail.categoria} />} />}
               {detail.etapa && <DetailRow label="Etapa" value={<Chip size="small" color="primary" variant="outlined" label={detail.etapa} />} />}
+              {detail.tipo_costo && <DetailRow label="Tipo de costo" value={<Chip size="small" label={detail.tipo_costo} />} />}
+              {detail.rubro && <DetailRow label="Rubro" value={<Chip size="small" label={detail.rubro} />} />}
               <DetailRow
                 label="Monto"
                 value={
@@ -1038,6 +1048,32 @@ export default function CajaPage() {
                     {(hitos.length > 0 ? hitos : ETAPAS_DEFAULT).map(et => (
                       <MenuItem key={et} value={et}>{et}</MenuItem>
                     ))}
+                  </TextField>
+                </Grid>
+              )}
+
+              {form.tipo === "egreso" && (
+                <Grid item xs={12} sm={6}>
+                  <TextField select label="Tipo de costo" fullWidth
+                    value={form.tipo_costo}
+                    onChange={e => setForm({ ...form, tipo_costo: e.target.value })}
+                    helperText="Mano de obra, materiales, etc."
+                  >
+                    <MenuItem value="">(Sin tipo)</MenuItem>
+                    {TIPOS_COSTO.map(t => <MenuItem key={t} value={t}>{t}</MenuItem>)}
+                  </TextField>
+                </Grid>
+              )}
+
+              {form.tipo === "egreso" && (
+                <Grid item xs={12} sm={6}>
+                  <TextField select label="Rubro" fullWidth
+                    value={form.rubro}
+                    onChange={e => setForm({ ...form, rubro: e.target.value })}
+                    helperText="Rubro de obra"
+                  >
+                    <MenuItem value="">(Sin rubro)</MenuItem>
+                    {RUBROS.map(r => <MenuItem key={r} value={r}>{r}</MenuItem>)}
                   </TextField>
                 </Grid>
               )}
