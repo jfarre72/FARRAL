@@ -494,8 +494,8 @@ export default function CajaPage() {
         categoria: form.tipo === "egreso" ? (categoriaFinal || null) : null,
         concepto: form.tipo === "egreso" ? (form.concepto || null) : null,
         etapa: form.tipo === "egreso" && conceptoUsaEtapas ? (form.etapa || null) : null,
-        tipo_costo: form.tipo === "egreso" ? (form.tipo_costo || null) : null,
-        rubro: form.tipo === "egreso" ? (form.rubro || null) : null,
+        tipo_costo: form.tipo === "egreso" && conceptoUsaEtapas ? (form.tipo_costo || null) : null,
+        rubro: form.tipo === "egreso" && conceptoUsaEtapas ? (form.rubro || null) : null,
         descripcion: form.descripcion || null,
         comprobante_url,
         moneda_destino: null,
@@ -1025,7 +1025,10 @@ export default function CajaPage() {
                     value={form.concepto}
                     onChange={e => {
                       const usa = !!conceptos.find(c => c.nombre === e.target.value)?.usa_etapas;
-                      setForm({ ...form, concepto: e.target.value, etapa: usa ? form.etapa : "" });
+                      setForm({ ...form, concepto: e.target.value,
+                        etapa: usa ? form.etapa : "",
+                        tipo_costo: usa ? form.tipo_costo : "",
+                        rubro: usa ? form.rubro : "" });
                     }}
                     helperText={conceptos.length === 0 ? "Cargá conceptos en Configuración" : "Tipo de gasto"}
                   >
@@ -1052,7 +1055,7 @@ export default function CajaPage() {
                 </Grid>
               )}
 
-              {form.tipo === "egreso" && (
+              {form.tipo === "egreso" && !!conceptos.find(c => c.nombre === form.concepto)?.usa_etapas && (
                 <Grid item xs={12} sm={6}>
                   <TextField select label="Tipo de costo" fullWidth
                     value={form.tipo_costo}
@@ -1065,7 +1068,7 @@ export default function CajaPage() {
                 </Grid>
               )}
 
-              {form.tipo === "egreso" && (
+              {form.tipo === "egreso" && !!conceptos.find(c => c.nombre === form.concepto)?.usa_etapas && (
                 <Grid item xs={12} sm={6}>
                   <TextField select label="Rubro" fullWidth
                     value={form.rubro}

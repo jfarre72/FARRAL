@@ -8,6 +8,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
+import TableViewIcon from "@mui/icons-material/TableView";
 import { fmtMoney, fmtPct, fmtDate, fmtNum } from "@/components/Money";
 import { getCache, setCache } from "@/lib/dataCache";
 
@@ -139,7 +140,7 @@ export default function EconomicoPage() {
   const [movs, setMovs] = useState(cacheInit?.movs ?? []);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState(0);
-  const [dim, setDim] = useState("rubro"); // dimensión del análisis de gastos
+  const [dim, setDim] = useState("tipo_costo"); // dimensión del análisis de gastos
   const [detalle, setDetalle] = useState(null); // { campo, valor, otros }
 
   const reload = async () => {
@@ -210,9 +211,44 @@ export default function EconomicoPage() {
 
   const totalDetalle = detalleGastos.reduce((s, d) => s + d.usd, 0);
 
+  // Rubro y Tipo de costo solo aplican a la Obra (conceptos con usa_etapas).
+  // Para esas dimensiones, ignoramos los gastos que no son de Obra.
+  const movsAnalisis = useMemo(() => {
+    if (dim !== "rubro" && dim !== "tipo_costo") return movs;
+    const obra = new Set(conceptos.filter(c => c.usa_etapas).map(c => c.nombre));
+    return movs.filter(mv => mv.concepto && obra.has(mv.concepto));
+  }, [movs, conceptos, dim]);
+
   // Análisis de gastos por la dimensión elegida.
-  const filasAnalisis = useMemo(() => agruparPor(movs, dim), [movs, dim]);
+  const filasAnalisis = useMemo(() => agruparPor(movsAnalisis, dim), [movsAnalisis, dim]);
   const totalAnalisis = filasAnalisis.reduce((s, f) => s + f.real, 0);
+
+  // Detalle completo (un gasto por fila) dentro del alcance de la dimensión.
+  const detalleAnalisis = useMemo(() =>
+    movsAnalisis
+      .map(mv => ({ mv, usd: gastoUSD(mv) }))
+      .filter(({ usd }) => usd > 0)
+      .sort((a, b) => (a.mv.fecha < b.mv.fecha ? 1 : -1)),
+    [movsAnalisis]);
+
+  const exportarExcel = () => {
+    const numAR = (v) => Number(v || 0).toLocaleString("es-AR", { useGrouping: false, maximumFractionDigits: 2 });
+    const head = ["Fecha", "Detalle", "Concepto", "Etapa", "Rubro", "Tipo de costo", "Categoría", "Moneda", "Monto", "TC", "Imputado (USD)"];
+    const rows = detalleAnalisis.map(({ mv, usd }) => {
+      const tc = Number(mv.cambio_tipo_cambio || mv.tipo_cambio_gasto || 0);
+      return [mv.fecha, mv.descripcion || "", mv.concepto || "", mv.etapa || "", mv.rubro || "",
+        mv.tipo_costo || "", mv.categoria || "", mv.moneda || "", numAR(mv.monto), tc > 0 ? numAR(tc) : "", numAR(usd)];
+    });
+    const cell = (s) => `"${String(s).replace(/"/g, '""')}"`;
+    const csv = [head, ...rows].map(r => r.map(cell).join(";")).join("\r\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Gastos_${(proyecto.nombre || "proyecto").replace(/[^\w.\-]/g, "_")}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   if (!proyecto) return <Alert severity="info">Seleccioná un proyecto.</Alert>;
 
@@ -257,7 +293,16 @@ export default function EconomicoPage() {
               <ToggleButtonGroup exclusive size="small" value={dim} onChange={(_, v) => v && setDim(v)}>
                 {DIMENSIONES.map(d => <ToggleButton key={d.campo} value={d.campo}>{d.label}</ToggleButton>)}
               </ToggleButtonGroup>
+              <Button size="small" variant="outlined" color="success" startIcon={<TableViewIcon />}
+                onClick={exportarExcel} disabled={detalleAnalisis.length === 0}>
+                Excel
+              </Button>
             </Stack>
+            {(dim === "rubro" || dim === "tipo_costo") && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                Rubro y tipo de costo aplican solo a los gastos de Obra. Se excluyen los demás conceptos.
+              </Alert>
+            )}
             <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
               Total gastado (USD) agrupado por {DIMENSIONES.find(d => d.campo === dim)?.label.toLowerCase()}. Tocá una fila para ver el detalle.
             </Typography>
@@ -298,6 +343,49 @@ export default function EconomicoPage() {
                       <TableCell align="right"><Typography fontWeight={700}>{filasAnalisis.reduce((s, f) => s + f.n, 0)}</Typography></TableCell>
                       <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totalAnalisis, "USD")}</Typography></TableCell>
                       <TableCell align="right"><Typography fontWeight={700}>100%</Typography></TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+
+            <Typography variant="subtitle2" sx={{ mt: 3, mb: 1 }}>Detalle de gastos</Typography>
+            <TableContainer>
+              <Table size="small" sx={{ minWidth: 760 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Fecha</TableCell>
+                    <TableCell>Detalle</TableCell>
+                    <TableCell align="center">Concepto</TableCell>
+                    <TableCell align="center">Etapa</TableCell>
+                    <TableCell align="center">Rubro</TableCell>
+                    <TableCell align="center">Tipo de costo</TableCell>
+                    <TableCell align="right">Monto</TableCell>
+                    <TableCell align="right">USD</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {detalleAnalisis.length === 0 && (
+                    <TableRow><TableCell colSpan={8}>
+                      <Typography variant="body2" color="text.secondary">No hay gastos cargados.</Typography>
+                    </TableCell></TableRow>
+                  )}
+                  {detalleAnalisis.map(({ mv, usd }) => (
+                    <TableRow key={mv.id} hover>
+                      <TableCell sx={{ whiteSpace: "nowrap" }}>{fmtDate(mv.fecha)}</TableCell>
+                      <TableCell>{mv.descripcion || "—"}</TableCell>
+                      <TableCell align="center">{mv.concepto || "—"}</TableCell>
+                      <TableCell align="center">{mv.etapa || "—"}</TableCell>
+                      <TableCell align="center">{mv.rubro || "—"}</TableCell>
+                      <TableCell align="center">{mv.tipo_costo || "—"}</TableCell>
+                      <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>{fmtMoney(mv.monto, mv.moneda)}</TableCell>
+                      <TableCell align="right" sx={{ whiteSpace: "nowrap", fontWeight: 600 }}>{fmtMoney(usd, "USD")}</TableCell>
+                    </TableRow>
+                  ))}
+                  {detalleAnalisis.length > 0 && (
+                    <TableRow sx={{ "& > td": { borderTop: "2px solid", borderColor: "divider" } }}>
+                      <TableCell colSpan={7}><Typography fontWeight={700}>Total</Typography></TableCell>
+                      <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totalAnalisis, "USD")}</Typography></TableCell>
                     </TableRow>
                   )}
                 </TableBody>

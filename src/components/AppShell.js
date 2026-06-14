@@ -14,6 +14,7 @@ import RequestQuoteIcon from "@mui/icons-material/RequestQuote";
 import ChecklistIcon from "@mui/icons-material/Checklist";
 import InsightsIcon from "@mui/icons-material/Insights";
 import AccountTreeIcon from "@mui/icons-material/AccountTree";
+import HandymanIcon from "@mui/icons-material/Handyman";
 import PhotoLibraryIcon from "@mui/icons-material/PhotoLibrary";
 import DescriptionIcon from "@mui/icons-material/Description";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -33,6 +34,7 @@ const NAV = [
   { label: "Presupuestos",    href: "/presupuestos",  icon: <RequestQuoteIcon /> },
   { label: "Caja",            href: "/caja",          icon: <PointOfSaleIcon /> },
   { label: "Económico",       href: "/economico",     icon: <AccountTreeIcon /> },
+  { label: "Equipamientos",   href: "/equipamientos", icon: <HandymanIcon /> },
   { label: "Indicadores",     href: "/indicadores",   icon: <InsightsIcon /> },
   { label: "Galería",         href: "/galeria",       icon: <PhotoLibraryIcon /> },
   { label: "Reportería",      href: "/reporteria",    icon: <DescriptionIcon /> },
