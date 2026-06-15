@@ -169,51 +169,50 @@ export default function Home() {
         <KPI title="Caja ARS"        value={fmtMoney(stats?.cajaARS ?? 0, "ARS")} hint="saldo actual" accent="#0F2A4A" />
       </Grid>
 
-      {/* Indicadores económicos: KPIs unificados arriba + gráfico */}
-      <IndicadoresPanel />
-
-      {/* Resumen gasto vs presupuesto */}
-      {stats && stats.costo > 0 && (
-        <Card>
-          <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={{ xs: 1.5, sm: 3 }} alignItems={{ sm: "center" }}>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.5, fontSize: 11 }}>
-                  Avance financiero
-                </Typography>
-                <Typography variant="body1" sx={{ mt: 0.5, fontWeight: 500 }}>
-                  Llevamos gastado <Box component="span" sx={{ color: "error.main", fontWeight: 700 }}>
-                    {fmtPct(stats.pctGastado ?? 0, 1)}
-                  </Box> del presupuesto · equivale a <Box component="span" sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-                    {fmtMoney(stats.gastadoUSD ?? 0, "USD")}
+      {/* Indicadores económicos: KPIs unificados arriba, avance financiero y gráfico */}
+      <IndicadoresPanel beforeChart={
+        stats && stats.costo > 0 ? (
+          <Card>
+            <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={{ xs: 1.5, sm: 3 }} alignItems={{ sm: "center" }}>
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.5, fontSize: 11 }}>
+                    Avance financiero
+                  </Typography>
+                  <Typography variant="body1" sx={{ mt: 0.5, fontWeight: 500 }}>
+                    Llevamos gastado <Box component="span" sx={{ color: "error.main", fontWeight: 700 }}>
+                      {fmtPct(stats.pctGastado ?? 0, 1)}
+                    </Box> del presupuesto · equivale a <Box component="span" sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                      {fmtMoney(stats.gastadoUSD ?? 0, "USD")}
+                    </Box>
+                  </Typography>
+                  <Box sx={{ mt: 1.5, position: "relative", height: 12, bgcolor: "rgba(15,42,74,0.06)", borderRadius: 6, overflow: "hidden" }}>
+                    <Box sx={{
+                      position: "absolute", top: 0, left: 0, height: "100%",
+                      width: `${Math.min(100, (stats.ingresoUSD / stats.costo) * 100)}%`,
+                      bgcolor: "rgba(30,142,62,0.35)", transition: "width .4s",
+                    }} />
+                    <Box sx={{
+                      position: "absolute", top: 0, left: 0, height: "100%",
+                      width: `${Math.min(100, stats.pctGastado ?? 0)}%`,
+                      backgroundImage: "linear-gradient(90deg, #C0392B 0%, #E07A1F 100%)",
+                      transition: "width .4s",
+                    }} />
                   </Box>
-                </Typography>
-                <Box sx={{ mt: 1.5, position: "relative", height: 12, bgcolor: "rgba(15,42,74,0.06)", borderRadius: 6, overflow: "hidden" }}>
-                  <Box sx={{
-                    position: "absolute", top: 0, left: 0, height: "100%",
-                    width: `${Math.min(100, (stats.ingresoUSD / stats.costo) * 100)}%`,
-                    bgcolor: "rgba(30,142,62,0.35)", transition: "width .4s",
-                  }} />
-                  <Box sx={{
-                    position: "absolute", top: 0, left: 0, height: "100%",
-                    width: `${Math.min(100, stats.pctGastado ?? 0)}%`,
-                    backgroundImage: "linear-gradient(90deg, #C0392B 0%, #E07A1F 100%)",
-                    transition: "width .4s",
-                  }} />
+                  <Stack direction="row" justifyContent="space-between" sx={{ mt: 0.75 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      Ingresado · {fmtMoney(stats.ingresoUSD ?? 0, "USD")}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Presupuesto · {fmtMoney(stats.costo, "USD")}
+                    </Typography>
+                  </Stack>
                 </Box>
-                <Stack direction="row" justifyContent="space-between" sx={{ mt: 0.75 }}>
-                  <Typography variant="caption" color="text.secondary">
-                    Ingresado · {fmtMoney(stats.ingresoUSD ?? 0, "USD")}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Presupuesto · {fmtMoney(stats.costo, "USD")}
-                  </Typography>
-                </Stack>
-              </Box>
-            </Stack>
-          </CardContent>
-        </Card>
-      )}
+              </Stack>
+            </CardContent>
+          </Card>
+        ) : null
+      } />
     </Stack>
   );
 }

@@ -530,7 +530,7 @@ export default function PresupuestosPage() {
           ) : presFiltrados.map(p => {
             const k = calcPresupuesto(p);
             return (
-              <Accordion key={p.id} disableGutters defaultExpanded={presFiltrados.length === 1}>
+              <Accordion key={p.id} disableGutters defaultExpanded={false}>
                 <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                   <Grid container spacing={1} alignItems="center">
                     <Grid item xs={12} sm={4}>

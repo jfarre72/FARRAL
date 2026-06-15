@@ -120,18 +120,31 @@ function LineChart({ data, maxY = 200000 }) {
 
 function KpiCard({ titulo, valor, sub, color = "text.primary", tip }) {
   const card = (
-    <Card sx={{ height: "100%" }}>
-      <CardContent>
-        <Typography variant="caption" color="text.secondary">{titulo}</Typography>
-        <Typography variant="h5" sx={{ mt: 0.5, color }}>{valor}</Typography>
-        {sub && <Typography variant="caption" color="text.secondary">{sub}</Typography>}
+    <Card sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <CardContent sx={{
+        flexGrow: 1, display: "flex", flexDirection: "column",
+        p: { xs: 1.2, sm: 1.5 }, "&:last-child": { pb: { xs: 1.2, sm: 1.5 } },
+      }}>
+        <Typography variant="caption" color="text.secondary"
+          sx={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: { xs: 10, sm: 11 }, lineHeight: 1.25 }}>
+          {titulo}
+        </Typography>
+        <Typography sx={{
+          mt: 0.5, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+          fontSize: { xs: 15, sm: 18, md: 19, lg: 21 }, lineHeight: 1.2, color, wordBreak: "break-word",
+        }}>
+          {valor}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ mt: "auto", minHeight: 14, fontSize: { xs: 10, sm: 11 } }}>
+          {sub || " "}
+        </Typography>
       </CardContent>
     </Card>
   );
   return tip ? <Tooltip title={tip} arrow>{card}</Tooltip> : card;
 }
 
-export default function IndicadoresPanel() {
+export default function IndicadoresPanel({ beforeChart }) {
   const { proyecto } = useProjects();
   const [movs, setMovs] = useState(() => getCache("indic", proyecto?.id)?.movs ?? []);
   const [aportes, setAportes] = useState(() => getCache("indic", proyecto?.id)?.aportes ?? []);
@@ -190,33 +203,35 @@ export default function IndicadoresPanel() {
 
   return (
     <Stack spacing={3}>
-      <Grid container spacing={2}>
-        <Grid item xs={12} sm={6} md={4}>
+      <Grid container spacing={1.5} justifyContent="center">
+        <Grid item xs={6} sm={4} md={2} sx={{ display: "flex" }}>
           <KpiCard titulo="Costo teórico del m²" valor={fmtMoney(Math.round(ind.costoTeoricoM2), "USD")}
-            sub="Costo total estimado / m² totales" />
+            sub="Costo estim. / m² totales" />
         </Grid>
-        <Grid item xs={12} sm={6} md={4}>
+        <Grid item xs={6} sm={4} md={2} sx={{ display: "flex" }}>
           <KpiCard titulo="Costo real del m²" valor={fmtMoney(Math.round(ind.costoRealM2), "USD")}
-            sub="Gastado a la fecha / m² totales"
+            sub="Gastado / m² totales"
             color={ind.costoRealM2 > ind.costoTeoricoM2 && ind.costoTeoricoM2 > 0 ? "error.main" : "text.primary"} />
         </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <KpiCard titulo="Precio de venta del m²" valor={fmtMoney(Math.round(ind.ventaM2), "USD")} sub="Según proyecto" />
+        <Grid item xs={6} sm={4} md={2} sx={{ display: "flex" }}>
+          <KpiCard titulo="Precio venta del m²" valor={fmtMoney(Math.round(ind.ventaM2), "USD")} sub="Según proyecto" />
         </Grid>
-        <Grid item xs={12} sm={6} md={4}>
+        <Grid item xs={6} sm={4} md={2} sx={{ display: "flex" }}>
           <KpiCard titulo="Inversión ejecutada" valor={fmtMoney(Math.round(ind.invEjecutada), "USD")}
-            sub="Aportes USD ingresados a caja" />
+            sub="Aportes USD en caja" />
         </Grid>
-        <Grid item xs={12} sm={6} md={4}>
+        <Grid item xs={6} sm={4} md={2} sx={{ display: "flex" }}>
           <KpiCard titulo="Avance económico" valor={ind.avanceEconomico != null ? fmtPct(ind.avanceEconomico, 1) : "—"}
-            sub="Gastado / costo total teórico" tip="Gastado en USD dividido el costo total estimado del proyecto." />
+            sub="Gastado / costo teórico" tip="Gastado en USD dividido el costo total estimado del proyecto." />
         </Grid>
-        <Grid item xs={12} sm={6} md={4}>
+        <Grid item xs={6} sm={4} md={2} sx={{ display: "flex" }}>
           <KpiCard titulo="Margen esperado" valor={ind.margenEsperado != null ? fmtPct(ind.margenEsperado, 1) : "—"}
-            sub="(Venta estim. − Costo estim.) / Costo estim."
+            sub="(Venta − Costo) / Costo"
             color={ind.margenEsperado != null && ind.margenEsperado < 0 ? "error.main" : "success.main"} />
         </Grid>
       </Grid>
+
+      {beforeChart}
 
       <Card>
         <CardContent>
