@@ -39,7 +39,7 @@ function smoothPath(pts) {
 }
 
 function LineChart({ data, maxY = 200000 }) {
-  const W = 720, H = 260, pad = { t: 18, r: 16, b: 26, l: 64 };
+  const W = 920, H = 360, pad = { t: 20, r: 18, b: 30, l: 70 };
   const [hover, setHover] = useState(null);
   if (!data.length) {
     return <Typography color="text.secondary" sx={{ p: 2 }}>Sin movimientos para graficar.</Typography>;
@@ -67,7 +67,7 @@ function LineChart({ data, maxY = 200000 }) {
   const hp = hover != null ? pts[hover] : null;
 
   return (
-    <Box sx={{ width: "100%", maxWidth: 860, mx: "auto", overflowX: "auto" }}>
+    <Box sx={{ width: "100%", mx: "auto", overflowX: "auto" }}>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 440, display: "block" }}
         onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
         {Array.from({ length: ticks + 1 }).map((_, i) => {

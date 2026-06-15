@@ -185,7 +185,7 @@ export default function ConfiguracionPage() {
   return (
     <Stack spacing={3}>
       <Box>
-        <Typography variant="h5">Configuración</Typography>
+        <Typography variant="h5">Ajustes</Typography>
         <Typography variant="body2" color="text.secondary">
           Conceptos y etapas del proyecto, con su valor planificado en USD. Se usan al registrar egresos y en el seguimiento económico.
         </Typography>

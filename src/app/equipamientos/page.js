@@ -23,7 +23,7 @@ const SEED = [
 ];
 
 // Campo que guarda al salir (blur/Enter), no en cada tecla.
-function CommitField({ value, onCommit, placeholder, sx, strike }) {
+function CommitField({ value, onCommit, placeholder, sx, strike, bold, small, align }) {
   const [local, setLocal] = useState(value ?? "");
   const [focused, setFocused] = useState(false);
   useEffect(() => { if (!focused) setLocal(value ?? ""); }, [value, focused]);
@@ -33,12 +33,24 @@ function CommitField({ value, onCommit, placeholder, sx, strike }) {
   };
   return (
     <TextField
-      size="small" variant="standard" value={local} sx={sx} placeholder={placeholder}
+      size="small" variant="standard" value={local} sx={{
+        ...sx,
+        "& .MuiInput-root::before": { borderBottomColor: "transparent" },
+        "& .MuiInput-root:hover:not(.Mui-focused)::before": { borderBottomColor: "rgba(15,42,74,0.15) !important" },
+      }}
+      placeholder={placeholder}
       onFocus={() => setFocused(true)}
       onChange={(e) => setLocal(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-      inputProps={strike ? { style: { textDecoration: "line-through", color: "rgba(0,0,0,0.5)" } } : undefined}
+      inputProps={{
+        style: {
+          ...(strike ? { textDecoration: "line-through", color: "rgba(0,0,0,0.45)" } : {}),
+          ...(bold ? { fontWeight: 600 } : {}),
+          ...(small ? { fontSize: 13 } : {}),
+          ...(align ? { textAlign: align } : {}),
+        },
+      }}
     />
   );
 }
@@ -199,48 +211,56 @@ export default function EquipamientosPage() {
           return (
             <Card key={g}>
               <CardContent>
-                <Stack direction="row" alignItems="center" sx={{ mb: 1 }} spacing={1}>
+                <Stack direction="row" alignItems="center" sx={{ mb: 1.5 }} spacing={1}>
                   <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>{g}</Typography>
-                  <Typography variant="caption" color="text.secondary">{compradosG}/{lista.length}</Typography>
+                  <Chip size="small" variant="outlined"
+                    color={lista.length > 0 && compradosG === lista.length ? "success" : "default"}
+                    label={`${compradosG}/${lista.length}`} />
                 </Stack>
-                <Divider sx={{ mb: 1 }} />
-                <Stack divider={<Divider />}>
+                <Stack spacing={0.5}>
                   {lista.map((it) => {
                     const isTarget = drag && drag.grupo === g && drag.overId === it.id && drag.fromId !== it.id;
                     return (
-                      <Stack
-                        key={it.id} direction="row" alignItems="center" spacing={1}
+                      <Box
+                        key={it.id}
                         onDragOver={(e) => { if (drag?.grupo === g) { e.preventDefault(); if (drag.overId !== it.id) setDrag(d => ({ ...d, overId: it.id })); } }}
                         onDrop={(e) => { e.preventDefault(); if (drag?.grupo === g) reordenar(g, drag.fromId, it.id); setDrag(null); }}
-                        sx={{ py: 0.5, opacity: drag?.fromId === it.id ? 0.4 : 1,
-                          borderTop: isTarget ? "2px solid" : "2px solid transparent", borderTopColor: isTarget ? "secondary.main" : "transparent" }}
+                        sx={{
+                          display: "flex", alignItems: "center", gap: 1,
+                          px: 1, py: 0.75, borderRadius: 2,
+                          opacity: drag?.fromId === it.id ? 0.4 : 1,
+                          bgcolor: it.comprado ? "rgba(30,142,62,0.06)" : "transparent",
+                          outline: isTarget ? "2px solid" : "none", outlineColor: "secondary.main",
+                          "&:hover": { bgcolor: it.comprado ? "rgba(30,142,62,0.1)" : "rgba(15,42,74,0.035)" },
+                          "&:hover .drag, &:hover .del": { opacity: 1 },
+                        }}
                       >
                         <Tooltip title="Arrastrá para reordenar">
-                          <IconButton size="small" draggable
+                          <IconButton className="drag" size="small" draggable
                             onDragStart={() => setDrag({ grupo: g, fromId: it.id, overId: it.id })}
                             onDragEnd={() => setDrag(null)}
-                            sx={{ cursor: "grab", touchAction: "none" }}>
+                            sx={{ cursor: "grab", touchAction: "none", opacity: { xs: 1, sm: 0.25 }, transition: "opacity .15s" }}>
                             <DragIndicatorIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
                         <Checkbox size="small" checked={!!it.comprado}
-                          onChange={(e) => update(it.id, { comprado: e.target.checked })} />
+                          onChange={(e) => update(it.id, { comprado: e.target.checked })} sx={{ p: 0.5 }} />
                         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                          <CommitField value={it.nombre} sx={{ width: "100%" }} strike={it.comprado}
+                          <CommitField value={it.nombre} sx={{ width: "100%" }} strike={it.comprado} bold
                             onCommit={(v) => { const n = String(v).trim(); if (n) update(it.id, { nombre: n }); else reload(); }} />
-                          <CommitField value={it.observacion} placeholder="Observación…" sx={{ width: "100%", mt: 0.25 }}
+                          <CommitField value={it.observacion} placeholder="Agregar nota…" small sx={{ width: "100%" }}
                             onCommit={(v) => update(it.id, { observacion: v || null })} />
                         </Box>
-                        <Box sx={{ width: 90, flexShrink: 0 }}>
-                          <CommitField value={it.cantidad} placeholder="Cant." sx={{ width: "100%" }}
-                            onCommit={(v) => update(it.id, { cantidad: v || null })} />
-                        </Box>
+                        <CommitField value={it.cantidad} placeholder="Cant." small align="right"
+                          sx={{ width: 64, flexShrink: 0 }}
+                          onCommit={(v) => update(it.id, { cantidad: v || null })} />
                         <Tooltip title="Eliminar">
-                          <IconButton size="small" onClick={() => del(it)}>
+                          <IconButton className="del" size="small" onClick={() => del(it)}
+                            sx={{ opacity: { xs: 1, sm: 0.25 }, transition: "opacity .15s" }}>
                             <DeleteOutlineIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
-                      </Stack>
+                      </Box>
                     );
                   })}
                 </Stack>

@@ -31,7 +31,7 @@ const NAV = [
   { section: "Proyecto", items: [
     { label: "Proyectos",       href: "/proyectos",     icon: <AccountBalanceIcon /> },
     { label: "Inversores",      href: "/inversores",    icon: <GroupsIcon /> },
-    { label: "Configuración",   href: "/configuracion", icon: <SettingsIcon /> },
+    { label: "Ajustes",         href: "/configuracion", icon: <SettingsIcon /> },
   ]},
   { section: "Obra", items: [
     { label: "Planificación",   href: "/linea-tiempo",  icon: <TimelineIcon /> },

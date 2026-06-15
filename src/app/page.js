@@ -169,6 +169,9 @@ export default function Home() {
         <KPI title="Caja ARS"        value={fmtMoney(stats?.cajaARS ?? 0, "ARS")} hint="saldo actual" accent="#0F2A4A" />
       </Grid>
 
+      {/* Indicadores económicos: KPIs unificados arriba + gráfico */}
+      <IndicadoresPanel />
+
       {/* Resumen gasto vs presupuesto */}
       {stats && stats.costo > 0 && (
         <Card>
@@ -211,40 +214,6 @@ export default function Home() {
           </CardContent>
         </Card>
       )}
-
-      <Card>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>Próximos hitos</Typography>
-          <Stack spacing={1.2}>
-            {(stats?.hitos ?? []).map(h => (
-              <Stack key={h.id} direction="row" alignItems="center" spacing={2}>
-                <Typography sx={{ minWidth: 56 }} color="text.secondary">{h.porcentaje}%</Typography>
-                <Typography sx={{ flexGrow: 1, textDecoration: h.completado ? "line-through" : "none" }}>
-                  {h.nombre}
-                </Typography>
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ width: { xs: 110, sm: 160 } }}>
-                  <Box sx={{ flexGrow: 1, height: 6, bgcolor: "rgba(15,42,74,0.08)", borderRadius: 3, overflow: "hidden" }}>
-                    <Box sx={{ height: "100%", width: `${h.avancePct ?? 0}%`,
-                      bgcolor: (h.avancePct ?? 0) >= 100 ? "success.main" : "secondary.main" }} />
-                  </Box>
-                  <Typography variant="caption" color="text.secondary" sx={{ minWidth: 34, textAlign: "right" }}>
-                    {h.avancePct ?? 0}%
-                  </Typography>
-                </Stack>
-                <Typography color="text.secondary" variant="body2" sx={{ minWidth: 90, textAlign: "right" }}>
-                  {fmtDate(h.fecha_estimada)}
-                </Typography>
-              </Stack>
-            ))}
-          </Stack>
-        </CardContent>
-      </Card>
-
-      {/* Indicadores económicos (fusionado) */}
-      <Box>
-        <Typography variant="h6" gutterBottom>Indicadores</Typography>
-        <IndicadoresPanel />
-      </Box>
     </Stack>
   );
 }
