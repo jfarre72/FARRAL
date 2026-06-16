@@ -10,6 +10,7 @@ import GroupsIcon from "@mui/icons-material/Groups";
 import TimelineIcon from "@mui/icons-material/Timeline";
 import PointOfSaleIcon from "@mui/icons-material/PointOfSale";
 import RequestQuoteIcon from "@mui/icons-material/RequestQuote";
+import Inventory2Icon from "@mui/icons-material/Inventory2";
 import ChecklistIcon from "@mui/icons-material/Checklist";
 import InsightsIcon from "@mui/icons-material/Insights";
 import AccountTreeIcon from "@mui/icons-material/AccountTree";
@@ -41,6 +42,7 @@ const NAV = [
   { section: "Finanzas", items: [
     { label: "Caja",            href: "/caja",          icon: <PointOfSaleIcon /> },
     { label: "Presupuestos",    href: "/presupuestos",  icon: <RequestQuoteIcon /> },
+    { label: "Materiales",      href: "/materiales",    icon: <Inventory2Icon /> },
     { label: "Económico",       href: "/economico",     icon: <AccountTreeIcon /> },
   ]},
   { section: "Documentación", items: [
