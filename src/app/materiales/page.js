@@ -28,6 +28,26 @@ const hoyISO = () => {
 
 const emptyCuenta = { proveedor: "", descripcion: "", moneda: "ARS", monto_inicial: "", fecha: hoyISO() };
 
+// Formatea un string numérico con separadores de miles (formato AR: punto miles, coma decimal).
+const fmtMiles = (val) => {
+  if (val === "" || val === null || val === undefined) return "";
+  const s = String(val).replace(/\./g, "").replace(",", ".");
+  if (s === "" || s === "-") return s;
+  const neg = s.startsWith("-");
+  const [intPart, decPart] = s.replace("-", "").split(".");
+  const intFmt = (intPart || "").replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  let out = (neg ? "-" : "") + (intFmt || "0");
+  if (decPart !== undefined) out += "," + decPart;
+  return out;
+};
+// Quita los separadores y devuelve un string apto para Number().
+const parseMiles = (val) => {
+  if (val === "" || val === null || val === undefined) return "";
+  // Conserva solo dígitos, coma decimal y signo; coma -> punto.
+  const cleaned = String(val).replace(/[^\d,-]/g, "").replace(",", ".");
+  return cleaned;
+};
+
 export default function MaterialesPage() {
   const { proyecto } = useProjects();
   const theme = useTheme();
@@ -287,8 +307,10 @@ export default function MaterialesPage() {
                         value={nr.fecha ?? hoyISO()} onChange={(e) => setRet(c.id, { fecha: e.target.value })} />
                     </Grid>
                     <Grid item xs={6} sm={2.5}>
-                      <TextField type="number" label={`Monto (${c.moneda})`} fullWidth size="small"
-                        value={nr.monto ?? ""} onChange={(e) => setRet(c.id, { monto: e.target.value })} />
+                      <TextField label={`Monto (${c.moneda})`} fullWidth size="small"
+                        inputProps={{ inputMode: "decimal" }}
+                        value={fmtMiles(nr.monto ?? "")}
+                        onChange={(e) => setRet(c.id, { monto: parseMiles(e.target.value) })} />
                     </Grid>
                     <Grid item xs={12} sm={3}>
                       <TextField label="Detalle" fullWidth size="small"
@@ -347,9 +369,11 @@ export default function MaterialesPage() {
               </ToggleButtonGroup>
             </Grid>
             <Grid item xs={12} sm={6}>
-              <TextField type="number" label={`Anticipo (${formCuenta.moneda})`} fullWidth value={formCuenta.monto_inicial}
+              <TextField label={`Anticipo (${formCuenta.moneda})`} fullWidth
+                inputProps={{ inputMode: "decimal" }}
+                value={fmtMiles(formCuenta.monto_inicial)}
                 helperText="Monto congelado pagado al proveedor"
-                onChange={(e) => setFormCuenta({ ...formCuenta, monto_inicial: e.target.value })} />
+                onChange={(e) => setFormCuenta({ ...formCuenta, monto_inicial: parseMiles(e.target.value) })} />
             </Grid>
           </Grid>
         </DialogContent>
