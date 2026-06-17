@@ -1302,15 +1302,15 @@ function SaldoCard({ label, saldo, currency, ingresos, egresos, accent }) {
   return (
     <Card sx={{ position: "relative", overflow: "hidden" }}>
       <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, bgcolor: accent }} />
-      <CardContent>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+      <CardContent sx={{ textAlign: "center" }}>
+        <Stack direction="row" alignItems="center" justifyContent="center" spacing={1} sx={{ mb: 0.5 }}>
           <Typography variant="caption" color="text.secondary">{label}</Typography>
           <Chip size="small" label={currency} sx={{ bgcolor: "rgba(15,42,74,0.06)" }} />
         </Stack>
         <Typography variant="h4" sx={{ fontVariantNumeric: "tabular-nums" }}>
           {fmtMoney(saldo, currency)}
         </Typography>
-        <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
+        <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 1 }}>
           <Stack direction="row" spacing={0.5} alignItems="center">
             <ArrowUpwardIcon sx={{ fontSize: 14, color: "success.main" }} />
             <Typography variant="caption" color="text.secondary">Ingresos {fmtMoney(ingresos, currency)}</Typography>
