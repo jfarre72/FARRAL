@@ -82,6 +82,7 @@ export default function CajaPage() {
   const [impContratistaId, setImpContratistaId] = useState("");
   const [impPresupuestoId, setImpPresupuestoId] = useState("");
   const [impMontos, setImpMontos] = useState({}); // { item_id: monto }
+  const [impAvances, setImpAvances] = useState({}); // { item_id: avance_pct editado }
   const [aportes, setAportes] = useState([]);
   const [inversores, setInversores] = useState([]);
   const [movs, setMovs] = useState([]);
@@ -353,7 +354,7 @@ export default function CajaPage() {
       moneda_destino: tipo === "cambio" ? "ARS" : "ARS",
     });
     setEditId(null); setKeepCompPath(null); setFile(null); setErr(null);
-    setImputarA(false); setImpContratistaId(""); setImpPresupuestoId(""); setImpMontos({});
+    setImputarA(false); setImpContratistaId(""); setImpPresupuestoId(""); setImpMontos({}); setImpAvances({});
     setOpen(true);
   };
 
@@ -382,7 +383,7 @@ export default function CajaPage() {
     setFile(null); setErr(null);
     setDetail(null);
     // Cargo las imputaciones existentes del movimiento
-    setImputarA(false); setImpContratistaId(""); setImpPresupuestoId(""); setImpMontos({});
+    setImputarA(false); setImpContratistaId(""); setImpPresupuestoId(""); setImpMontos({}); setImpAvances({});
     if (mv.tipo === "egreso") {
       supabase.from("imputaciones_pago")
         .select("item_id, monto, presupuesto_items(presupuesto_id, presupuestos(contratista_id))")
@@ -534,6 +535,18 @@ export default function CajaPage() {
           const ins = await supabase.from("imputaciones_pago").insert(rows);
           if (ins.error) { setSaving(false); setErr("Error guardando imputaciones: " + ins.error.message); return; }
         }
+        // Actualizo el avance % de los ítems que se hayan editado
+        const avanceUpdates = Object.entries(impAvances)
+          .filter(([, v]) => v !== "" && v !== null && v !== undefined)
+          .map(([item_id, pct]) => {
+            const p = Math.max(0, Math.min(100, Number(pct) || 0));
+            return supabase.from("presupuesto_items").update({ avance_pct: p }).eq("id", item_id);
+          });
+        if (avanceUpdates.length > 0) {
+          const ress = await Promise.all(avanceUpdates);
+          const e = ress.find(r => r.error);
+          if (e) { setSaving(false); setErr("Error actualizando avances: " + e.error.message); return; }
+        }
       }
     }
 
@@ -609,80 +622,7 @@ export default function CajaPage() {
         </Grid>
       </Grid>
 
-      {/* Resumen en USD vs costo total estimado */}
-      {(() => {
-        const costo = Number(proyecto?.costo_total_estimado || 0);
-        const ingresos = saldos.ingUSD;
-        const gastado = gastoRealTotalUSD;
-        const pctGastado = costo > 0 ? Math.min(100, (gastado / costo) * 100) : 0;
-        const pctIngreso = costo > 0 ? Math.min(100, (ingresos / costo) * 100) : 0;
-        return (
-          <Card>
-            <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ sm: "stretch" }} justifyContent="space-between">
-                <Box sx={{ flex: 1 }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.5, fontSize: 11 }}>
-                    Resumen en USD
-                  </Typography>
-                  <Stack direction="row" spacing={3} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">Total ingresos USD</Typography>
-                      <Typography variant="h6" sx={{ fontVariantNumeric: "tabular-nums", color: "success.main" }}>
-                        {fmtMoney(ingresos, "USD")}
-                      </Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">Total gastado USD</Typography>
-                      <Typography variant="h6" sx={{ fontVariantNumeric: "tabular-nums", color: "error.main" }}>
-                        {fmtMoney(gastado, "USD")}
-                      </Typography>
-                    </Box>
-                    {costo > 0 && (
-                      <Box>
-                        <Typography variant="caption" color="text.secondary">Costo total estim.</Typography>
-                        <Typography variant="h6" sx={{ fontVariantNumeric: "tabular-nums" }}>
-                          {fmtMoney(costo, "USD")}
-                        </Typography>
-                      </Box>
-                    )}
-                  </Stack>
-                </Box>
-              </Stack>
-
-              {costo > 0 && (
-                <Box sx={{ mt: 2 }}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="baseline" sx={{ mb: 0.5 }}>
-                    <Typography variant="body2" fontWeight={600}>
-                      Llevamos gastado <Box component="span" sx={{ color: "error.main" }}>{fmtPct(pctGastado, 1)}</Box> del presupuesto · equivale a {fmtMoney(gastado, "USD")}
-                    </Typography>
-                  </Stack>
-                  <Box sx={{ position: "relative", height: 12, bgcolor: "rgba(15,42,74,0.06)", borderRadius: 6, overflow: "hidden" }}>
-                    <Box sx={{
-                      position: "absolute", top: 0, left: 0, height: "100%",
-                      width: `${pctIngreso}%`, bgcolor: "rgba(30,142,62,0.35)", transition: "width .4s",
-                    }} />
-                    <Box sx={{
-                      position: "absolute", top: 0, left: 0, height: "100%",
-                      width: `${pctGastado}%`,
-                      backgroundImage: "linear-gradient(90deg, #C0392B 0%, #E07A1F 100%)",
-                      transition: "width .4s",
-                    }} />
-                  </Box>
-                  <Stack direction="row" justifyContent="space-between" sx={{ mt: 0.75 }}>
-                    <Typography variant="caption" color="text.secondary">
-                      Ingresado USD · {fmtPct(pctIngreso, 1)} ({fmtMoney(ingresos, "USD")})
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Gastado USD · {fmtPct(pctGastado, 1)} ({fmtMoney(gastado, "USD")})
-                    </Typography>
-                  </Stack>
-                </Box>
-              )}
-            </CardContent>
-          </Card>
-        );
-      })()}
-
+      {/* Tabla de movimientos */}
       {(
         <Card>
           <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
@@ -1005,22 +945,6 @@ export default function CajaPage() {
 
               {form.tipo === "egreso" && (
                 <Grid item xs={12} sm={6}>
-                  <Autocomplete
-                    freeSolo
-                    options={categorias}
-                    value={form.categoria}
-                    onChange={(_, v) => setForm({ ...form, categoria: v ?? "" })}
-                    onInputChange={(_, v) => setForm({ ...form, categoria: v ?? "" })}
-                    renderInput={(params) => (
-                      <TextField {...params} label="Categoría"
-                        helperText="Escribí una nueva para crearla" />
-                    )}
-                  />
-                </Grid>
-              )}
-
-              {form.tipo === "egreso" && (
-                <Grid item xs={12} sm={6}>
                   <TextField select label="Concepto" fullWidth
                     value={form.concepto}
                     onChange={e => {
@@ -1078,6 +1002,22 @@ export default function CajaPage() {
                     <MenuItem value="">(Sin rubro)</MenuItem>
                     {RUBROS.map(r => <MenuItem key={r} value={r}>{r}</MenuItem>)}
                   </TextField>
+                </Grid>
+              )}
+
+              {form.tipo === "egreso" && (
+                <Grid item xs={12} sm={6}>
+                  <Autocomplete
+                    freeSolo
+                    options={categorias}
+                    value={form.categoria}
+                    onChange={(_, v) => setForm({ ...form, categoria: v ?? "" })}
+                    onInputChange={(_, v) => setForm({ ...form, categoria: v ?? "" })}
+                    renderInput={(params) => (
+                      <TextField {...params} label="Categoría"
+                        helperText="Escribí una nueva para crearla" />
+                    )}
+                  />
                 </Grid>
               )}
 
@@ -1268,14 +1208,22 @@ export default function CajaPage() {
                                 <TableBody>
                                   {items.map(it => {
                                     const presup = Number(it.monto_presupuestado || 0);
-                                    const valorAv = presup * Number(it.avance_pct || 0) / 100;
+                                    const avanceActual = impAvances[it.id] !== undefined ? impAvances[it.id] : it.avance_pct;
+                                    const valorAv = presup * Number(avanceActual || 0) / 100;
                                     const imputadoEsteItem = Number(impMontos[it.id] || 0);
                                     const excedeAvance = imputadoEsteItem > valorAv + 0.01;
                                     return (
                                       <TableRow key={it.id}>
                                         <TableCell>{it.nombre}</TableCell>
                                         <TableCell align="right">{fmtMoney(presup, form.moneda)}</TableCell>
-                                        <TableCell align="right">{fmtNum(it.avance_pct, 2)}%</TableCell>
+                                        <TableCell align="right">
+                                          <TextField
+                                            size="small" type="number" sx={{ width: 90 }}
+                                            value={avanceActual ?? ""}
+                                            inputProps={{ min: 0, max: 100, style: { textAlign: "right" } }}
+                                            onChange={(e) => setImpAvances(prev => ({ ...prev, [it.id]: e.target.value }))}
+                                          />
+                                        </TableCell>
                                         <TableCell align="right">{fmtMoney(valorAv, form.moneda)}</TableCell>
                                         <TableCell align="right">
                                           <Stack direction="column" alignItems="flex-end" spacing={0.25}>
