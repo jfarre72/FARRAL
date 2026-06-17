@@ -220,7 +220,7 @@ export default function Home() {
 function KPI({ title, value, hint, accent }) {
   return (
     <Grid item xs={6} sm={4} md={2} sx={{ display: "flex" }}>
-      <Card sx={{ width: "100%", display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" }}>
+      <Card sx={{ width: "100%", height: "100%", minHeight: { xs: 96, sm: 108 }, display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" }}>
         {accent && <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, bgcolor: accent }} />}
         <CardContent sx={{
           flexGrow: 1, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center",
