@@ -81,6 +81,7 @@ export default function CajaPage() {
   const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
   const [tab, setTab] = useState(0);
   const [filtroMoneda, setFiltroMoneda] = useState("all");
+  const [filtroTitular, setFiltroTitular] = useState("all");
   // Presupuestos para imputación
   const [contratistas, setContratistas] = useState([]);
   const [presupuestos, setPresupuestos] = useState([]);
@@ -306,8 +307,18 @@ export default function CajaPage() {
     };
 
     const filtered = unified.filter(row => {
-      if (caja === "all") return true;
-      return deltaPara(row, caja) !== 0;
+      // Filtro de moneda
+      if (caja !== "all" && deltaPara(row, caja) === 0) return false;
+      // Filtro de titular
+      if (filtroTitular !== "all") {
+        // Para traspasos, mostrar si titular es origen o destino
+        if (row.tipo === "traspaso") {
+          return row.titular === filtroTitular || row.titular_destino === filtroTitular;
+        }
+        // Para otros, mostrar si titular coincide
+        return row.titular === filtroTitular;
+      }
+      return true;
     });
     if (caja === "all") {
       return filtered.map(r => ({ ...r, _delta: null, _saldo: null }));
@@ -321,7 +332,7 @@ export default function CajaPage() {
       acc[r.id] = { delta: d, saldo };
     }
     return filtered.map(r => ({ ...r, _delta: acc[r.id]?.delta ?? 0, _saldo: acc[r.id]?.saldo ?? 0 }));
-  }, [unified, filtroMoneda]);
+  }, [unified, filtroMoneda, filtroTitular]);
 
   const tipoLabel = { ingreso: "Ingreso", egreso: "Egreso", cambio: "Cambio", traspaso: "Traspaso" };
   const exportarPdf = () => {
@@ -695,15 +706,26 @@ export default function CajaPage() {
               <Typography variant="caption" color="text.secondary">
                 {visible.length} movimiento{visible.length === 1 ? "" : "s"}
               </Typography>
-              <ToggleButtonGroup
-                exclusive size="small" value={filtroMoneda}
-                onChange={(_, v) => v && setFiltroMoneda(v)}
-                sx={{ width: { xs: "100%", sm: "auto" }, "& > button": { flex: { xs: 1, sm: "initial" } } }}
-              >
-                <ToggleButton value="all">Todas</ToggleButton>
-                <ToggleButton value="USD">USD</ToggleButton>
-                <ToggleButton value="ARS">ARS</ToggleButton>
-              </ToggleButtonGroup>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ width: { xs: "100%", sm: "auto" } }}>
+                <ToggleButtonGroup
+                  exclusive size="small" value={filtroMoneda}
+                  onChange={(_, v) => v && setFiltroMoneda(v)}
+                  sx={{ width: { xs: "100%", sm: "auto" }, "& > button": { flex: { xs: 1, sm: "initial" } } }}
+                >
+                  <ToggleButton value="all">Todas</ToggleButton>
+                  <ToggleButton value="USD">USD</ToggleButton>
+                  <ToggleButton value="ARS">ARS</ToggleButton>
+                </ToggleButtonGroup>
+                <ToggleButtonGroup
+                  exclusive size="small" value={filtroTitular}
+                  onChange={(_, v) => v && setFiltroTitular(v)}
+                  sx={{ width: { xs: "100%", sm: "auto" }, "& > button": { flex: { xs: 1, sm: "initial" } } }}
+                >
+                  <ToggleButton value="all">Todas las cajas</ToggleButton>
+                  <ToggleButton value="Rodrigo">Rodrigo</ToggleButton>
+                  <ToggleButton value="Juan">Juan</ToggleButton>
+                </ToggleButtonGroup>
+              </Stack>
             </Stack>
             {visible.length === 0 ? (
               <EmptyState text="No hay movimientos en esta vista." />
