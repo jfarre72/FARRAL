@@ -661,7 +661,6 @@ export default function CajaPage() {
         </Box>
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexShrink: 0, flexWrap: { xs: "wrap", sm: "nowrap" }, width: { xs: "100%", sm: "auto" }, "& > button": { flex: { xs: "1 1 calc(50% - 8px)", sm: "initial" }, minWidth: 0, whiteSpace: "nowrap" } }}>
           <Button startIcon={<PictureAsPdfIcon />} variant="outlined" onClick={exportarPdf}>PDF</Button>
-          <Button startIcon={<ArrowUpwardIcon />} variant="outlined" color="success" onClick={() => openNew("ingreso")}>Ingreso</Button>
           <Button startIcon={<SwapHorizIcon />} variant="outlined" color="primary" onClick={() => openNew("cambio")}>Cambio</Button>
           <Button startIcon={<SyncAltIcon />} variant="outlined" color="primary" onClick={() => openNew("traspaso")}>Traspaso</Button>
           <Button startIcon={<ArrowDownwardIcon />} variant="contained" color="secondary" onClick={() => openNew("egreso")}>Egreso</Button>
@@ -918,11 +917,9 @@ export default function CajaPage() {
       {/* CREATE / EDIT DIALOG */}
       <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="md" fullScreen={fullScreen}>
         <DialogTitle>
-          {editId ? (
-            form.tipo === "ingreso" ? "Editar ingreso" : form.tipo === "cambio" ? "Editar cambio" : form.tipo === "traspaso" ? "Editar traspaso" : "Editar egreso"
-          ) : (
-            form.tipo === "ingreso" ? "Registrar ingreso" : form.tipo === "cambio" ? "Cambio entre cajas" : form.tipo === "traspaso" ? "Traspaso entre cajas personales" : "Registrar egreso"
-          )}
+          {editId
+            ? form.tipo === "cambio" ? "Editar cambio" : form.tipo === "traspaso" ? "Editar traspaso" : "Editar egreso"
+            : form.tipo === "cambio" ? "Cambio entre cajas" : form.tipo === "traspaso" ? "Traspaso entre cajas personales" : "Registrar egreso"}
         </DialogTitle>
         <DialogContent dividers>
           {err && <Alert severity="error" sx={{ mb: 2 }}>{err}</Alert>}
@@ -1069,7 +1066,7 @@ export default function CajaPage() {
               </Grid>
               <Grid item xs={12} sm={6}>
                 <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
-                  {form.tipo === "ingreso" ? "Caja de destino" : "Caja del gasto"}
+                  Caja del gasto
                 </Typography>
                 <ToggleButtonGroup
                   exclusive size="small" color="primary" fullWidth
@@ -1096,10 +1093,10 @@ export default function CajaPage() {
 
               <Grid item xs={12} sm={6}>
                 <TextField
-                  label={form.tipo === "ingreso" ? "Monto" : "Monto del gasto"}
+                  label="Monto del gasto"
                   type="number" fullWidth
                   value={form.monto}
-                  helperText={form.tipo === "egreso" && form.con_cambio ? "0 si es solo cambio de divisa" : " "}
+                  helperText={form.con_cambio ? "0 si es solo cambio de divisa" : " "}
                   onChange={e => setForm({ ...form, monto: e.target.value })}
                 />
               </Grid>
