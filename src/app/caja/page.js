@@ -659,7 +659,7 @@ export default function CajaPage() {
           <Typography variant="h5">Caja</Typography>
           <Typography variant="body2">Saldos, ingresos, egresos y cambios del proyecto.</Typography>
         </Box>
-        <Stack direction="row" spacing={1} sx={{ flexShrink: 0, width: { xs: "100%", sm: "auto" }, "& > button": { flex: { xs: 1, sm: "initial" } } }}>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexShrink: 0, flexWrap: { xs: "wrap", sm: "nowrap" }, width: { xs: "100%", sm: "auto" }, "& > button": { flex: { xs: "1 1 calc(50% - 8px)", sm: "initial" }, minWidth: 0, whiteSpace: "nowrap" } }}>
           <Button startIcon={<PictureAsPdfIcon />} variant="outlined" onClick={exportarPdf}>PDF</Button>
           <Button startIcon={<ArrowUpwardIcon />} variant="outlined" color="success" onClick={() => openNew("ingreso")}>Ingreso</Button>
           <Button startIcon={<SwapHorizIcon />} variant="outlined" color="primary" onClick={() => openNew("cambio")}>Cambio</Button>
@@ -1484,7 +1484,7 @@ function SaldoCard({ label, saldo, currency, ingresos, egresos, accent, porTitul
             sx={{ mt: 0.75, px: 0.5 }}>
             {subs.map(([who, val]) => (
               <Chip key={who} size="small" variant="outlined"
-                sx={{ height: 22, flex: 1, "& .MuiChip-label": { px: 0.75, fontSize: 11, justifyContent: "center" } }}
+                sx={{ height: { xs: 22, md: 28 }, flex: 1, "& .MuiChip-label": { px: { xs: 0.75, md: 1.25 }, fontSize: { xs: 11, md: 13.5 }, justifyContent: "center" } }}
                 label={
                   <>
                     <Box component="span" sx={{ color: "text.secondary" }}>{who}: </Box>
