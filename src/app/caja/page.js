@@ -1480,11 +1480,11 @@ function SaldoCard({ label, saldo, currency, ingresos, egresos, accent, porTitul
           {fmtMoney(saldo, currency)}
         </Typography>
         {subs.length > 0 && (
-          <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap"
-            sx={{ mt: 0.75, rowGap: 0.5 }}>
+          <Stack direction="row" spacing={1} justifyContent="space-between"
+            sx={{ mt: 0.75, px: 0.5 }}>
             {subs.map(([who, val]) => (
               <Chip key={who} size="small" variant="outlined"
-                sx={{ height: 22, "& .MuiChip-label": { px: 1, fontSize: 11 } }}
+                sx={{ height: 22, flex: 1, "& .MuiChip-label": { px: 0.75, fontSize: 11, justifyContent: "center" } }}
                 label={
                   <>
                     <Box component="span" sx={{ color: "text.secondary" }}>{who}: </Box>
