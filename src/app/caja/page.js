@@ -42,9 +42,14 @@ const ETAPAS_DEFAULT = [
   "Obra cerrada", "Instalaciones + revoques", "Terminada",
 ];
 
+// Titulares de caja (cajas personales dentro de cada moneda).
+const TITULARES = ["Rodrigo", "Juan"];
+
 const emptyMov = {
   tipo: "egreso",
   fecha: new Date().toISOString().slice(0, 10),
+  // Titular de la caja (Rodrigo / Juan)
+  titular: "",
   // Para ingreso/egreso: moneda + monto del movimiento real
   moneda: "ARS",
   monto: "",
@@ -140,41 +145,49 @@ export default function CajaPage() {
   const saldos = useMemo(() => {
     let usd = 0, ars = 0;
     let ingUSD = 0, ingARS = 0, egrUSD = 0, egrARS = 0;
+    // Desglose por titular (caja personal) de cada moneda.
+    const usdTit = {}, arsTit = {};
+    const addTit = (map, who, delta) => {
+      const k = who || "Sin asignar";
+      map[k] = (map[k] || 0) + delta;
+    };
     for (const a of aportes) {
       if (a.entra_a_caja === false) continue;
       const m = Number(a.monto || 0);
-      if (a.moneda === "USD") { usd += m; ingUSD += m; }
-      else { ars += m; ingARS += m; }
+      if (a.moneda === "USD") { usd += m; ingUSD += m; addTit(usdTit, a.titular, m); }
+      else { ars += m; ingARS += m; addTit(arsTit, a.titular, m); }
     }
     for (const mv of movs) {
       const m = Number(mv.monto || 0);
+      const t = mv.titular;
       if (mv.tipo === "ingreso") {
-        if (mv.moneda === "USD") { usd += m; ingUSD += m; } else { ars += m; ingARS += m; }
+        if (mv.moneda === "USD") { usd += m; ingUSD += m; addTit(usdTit, t, m); }
+        else { ars += m; ingARS += m; addTit(arsTit, t, m); }
       } else if (mv.tipo === "egreso") {
         if (mv.con_cambio) {
           const origen = mv.cambio_moneda_origen;
           const tc = Number(mv.cambio_tipo_cambio || 0);
           const monOrigen = Number(mv.cambio_monto_origen || 0);
-          if (origen === "USD") { usd -= monOrigen; egrUSD += monOrigen; }
-          else { ars -= monOrigen; egrARS += monOrigen; }
+          if (origen === "USD") { usd -= monOrigen; egrUSD += monOrigen; addTit(usdTit, t, -monOrigen); }
+          else { ars -= monOrigen; egrARS += monOrigen; addTit(arsTit, t, -monOrigen); }
           const entrada = origen === "USD" ? monOrigen * tc : (tc > 0 ? monOrigen / tc : 0);
-          if (mv.moneda === "USD") { usd += entrada; ingUSD += entrada; }
-          else { ars += entrada; ingARS += entrada; }
+          if (mv.moneda === "USD") { usd += entrada; ingUSD += entrada; addTit(usdTit, t, entrada); }
+          else { ars += entrada; ingARS += entrada; addTit(arsTit, t, entrada); }
           if (m > 0) {
-            if (mv.moneda === "USD") { usd -= m; egrUSD += m; }
-            else { ars -= m; egrARS += m; }
+            if (mv.moneda === "USD") { usd -= m; egrUSD += m; addTit(usdTit, t, -m); }
+            else { ars -= m; egrARS += m; addTit(arsTit, t, -m); }
           }
         } else {
-          if (mv.moneda === "USD") { usd -= m; egrUSD += m; }
-          else { ars -= m; egrARS += m; }
+          if (mv.moneda === "USD") { usd -= m; egrUSD += m; addTit(usdTit, t, -m); }
+          else { ars -= m; egrARS += m; addTit(arsTit, t, -m); }
         }
       } else if (mv.tipo === "cambio") {
         const md = Number(mv.monto_destino || 0);
-        if (mv.moneda === "USD") { usd -= m; egrUSD += m; } else { ars -= m; egrARS += m; }
-        if (mv.moneda_destino === "USD") { usd += md; ingUSD += md; } else { ars += md; ingARS += md; }
+        if (mv.moneda === "USD") { usd -= m; egrUSD += m; addTit(usdTit, t, -m); } else { ars -= m; egrARS += m; addTit(arsTit, t, -m); }
+        if (mv.moneda_destino === "USD") { usd += md; ingUSD += md; addTit(usdTit, t, md); } else { ars += md; ingARS += md; addTit(arsTit, t, md); }
       }
     }
-    return { usd, ars, ingUSD, ingARS, egrUSD, egrARS };
+    return { usd, ars, ingUSD, ingARS, egrUSD, egrARS, usdTit, arsTit };
   }, [aportes, movs]);
 
   // Gasto REAL en USD (lo efectivamente gastado, valuado en USD).
@@ -235,6 +248,7 @@ export default function CajaPage() {
         ? `Cambio ${mv.moneda} → ${mv.moneda_destino} @ ${fmtNum(mv.tipo_cambio, 2)}`
         : (mv.descripcion || (mv.tipo === "ingreso" ? "Ingreso" : "Egreso")),
       observacion: mv.descripcion ?? null,
+      titular: mv.titular ?? null,
       categoria: mv.categoria, concepto: mv.concepto, etapa: mv.etapa,
       tipo_costo: mv.tipo_costo, rubro: mv.rubro, comprobante_url: mv.comprobante_url, raw: mv,
       moneda_destino: mv.moneda_destino, monto_destino: mv.monto_destino,
@@ -363,6 +377,7 @@ export default function CajaPage() {
     setForm({
       tipo: mv.tipo,
       fecha: mv.fecha,
+      titular: mv.titular ?? "",
       moneda: mv.moneda ?? "ARS",
       monto: mv.monto ?? "",
       categoria: mv.categoria ?? "",
@@ -471,6 +486,7 @@ export default function CajaPage() {
         proyecto_id: proyecto.id,
         fecha: form.fecha,
         tipo: "cambio",
+        titular: form.titular || null,
         moneda: form.moneda,
         monto: monto,
         categoria: null,
@@ -490,6 +506,7 @@ export default function CajaPage() {
         proyecto_id: proyecto.id,
         fecha: form.fecha,
         tipo: form.tipo,
+        titular: form.titular || null,
         moneda: form.moneda,
         monto: monto,
         categoria: form.tipo === "egreso" ? (categoriaFinal || null) : null,
@@ -614,11 +631,13 @@ export default function CajaPage() {
       <Grid container spacing={2} justifyContent="center">
         <Grid item xs={12} sm={6}>
           <SaldoCard label="Saldo caja USD" saldo={saldos.usd} currency="USD"
-            ingresos={saldos.ingUSD} egresos={saldos.egrUSD} accent="#1E8E3E" />
+            ingresos={saldos.ingUSD} egresos={saldos.egrUSD} accent="#1E8E3E"
+            porTitular={saldos.usdTit} />
         </Grid>
         <Grid item xs={12} sm={6}>
           <SaldoCard label="Saldo caja ARS" saldo={saldos.ars} currency="ARS"
-            ingresos={saldos.ingARS} egresos={saldos.egrARS} accent="#0F2A4A" />
+            ingresos={saldos.ingARS} egresos={saldos.egrARS} accent="#0F2A4A"
+            porTitular={saldos.arsTit} />
         </Grid>
       </Grid>
 
@@ -770,6 +789,7 @@ export default function CajaPage() {
             <Stack spacing={1.2}>
               <DetailRow label="Fecha" value={fmtDate(detail.fecha)} />
               <DetailRow label="Tipo" value={tipoChip(detail)} />
+              {detail.titular && <DetailRow label="Titular" value={<Chip size="small" label={detail.titular} />} />}
               <DetailRow label="Detalle" value={detail.detalle} />
               {detail.observacion && <DetailRow label="Observación" value={detail.observacion} />}
               {detail.categoria && <DetailRow label="Categoría" value={<Chip size="small" label={detail.categoria} />} />}
@@ -864,6 +884,18 @@ export default function CajaPage() {
               </Grid>
               <Grid item xs={12} sm={6}>
                 <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
+                  Titular de la caja
+                </Typography>
+                <ToggleButtonGroup
+                  exclusive size="small" color="primary" fullWidth
+                  value={form.titular}
+                  onChange={(_, v) => setForm({ ...form, titular: v ?? "" })}
+                >
+                  {TITULARES.map(t => <ToggleButton key={t} value={t}>{t}</ToggleButton>)}
+                </ToggleButtonGroup>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
                   Caja origen → Caja destino
                 </Typography>
                 <Stack direction="row" spacing={1} alignItems="center">
@@ -930,6 +962,19 @@ export default function CajaPage() {
                 >
                   <ToggleButton value="ARS">Caja ARS ($)</ToggleButton>
                   <ToggleButton value="USD">Caja USD</ToggleButton>
+                </ToggleButtonGroup>
+              </Grid>
+
+              <Grid item xs={12} sm={6}>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
+                  Titular de la caja
+                </Typography>
+                <ToggleButtonGroup
+                  exclusive size="small" color="primary" fullWidth
+                  value={form.titular}
+                  onChange={(_, v) => setForm({ ...form, titular: v ?? "" })}
+                >
+                  {TITULARES.map(t => <ToggleButton key={t} value={t}>{t}</ToggleButton>)}
                 </ToggleButtonGroup>
               </Grid>
 
@@ -1298,7 +1343,15 @@ export default function CajaPage() {
   );
 }
 
-function SaldoCard({ label, saldo, currency, ingresos, egresos, accent }) {
+function SaldoCard({ label, saldo, currency, ingresos, egresos, accent, porTitular }) {
+  // Orden: Rodrigo, Juan y por último cualquier otro (ej. "Sin asignar").
+  const ordenTit = ["Rodrigo", "Juan"];
+  const subs = Object.entries(porTitular || {})
+    .filter(([, v]) => Math.abs(v) > 0.005)
+    .sort(([a], [b]) => {
+      const ia = ordenTit.indexOf(a), ib = ordenTit.indexOf(b);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
   return (
     <Card sx={{ position: "relative", overflow: "hidden" }}>
       <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, bgcolor: accent }} />
@@ -1310,6 +1363,24 @@ function SaldoCard({ label, saldo, currency, ingresos, egresos, accent }) {
         <Typography variant="h4" sx={{ fontVariantNumeric: "tabular-nums" }}>
           {fmtMoney(saldo, currency)}
         </Typography>
+        {subs.length > 0 && (
+          <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap"
+            sx={{ mt: 0.75, rowGap: 0.5 }}>
+            {subs.map(([who, val]) => (
+              <Chip key={who} size="small" variant="outlined"
+                sx={{ height: 22, "& .MuiChip-label": { px: 1, fontSize: 11 } }}
+                label={
+                  <>
+                    <Box component="span" sx={{ color: "text.secondary" }}>{who}: </Box>
+                    <Box component="span" sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                      {fmtMoney(val, currency)}
+                    </Box>
+                  </>
+                }
+              />
+            ))}
+          </Stack>
+        )}
         <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 1 }}>
           <Stack direction="row" spacing={0.5} alignItems="center">
             <ArrowUpwardIcon sx={{ fontSize: 14, color: "success.main" }} />
