@@ -249,6 +249,7 @@ export default function CajaPage() {
         moneda: a.moneda, monto: Number(a.monto || 0),
         detalle: `Aporte · ${invName(a.inversor_id)}`,
         observacion: a.observacion ?? null,
+        titular: a.titular ?? null,
         categoria: null, concepto: null, comprobante_url: null, raw: a,
       }));
     const fromMovs = movs.map(mv => ({
