@@ -4,7 +4,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableRow, IconButton, Dialog,
   DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Box,
   Chip, Tooltip, Divider, LinearProgress, FormControlLabel, Switch,
-  TableSortLabel, useMediaQuery
+  TableSortLabel, useMediaQuery, ToggleButton, ToggleButtonGroup,
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
@@ -27,12 +27,15 @@ import { computePonderacion } from "@/lib/ponderacion";
 const PALETTE = ["#0F2A4A", "#E07A1F", "#1E8E3E", "#7B61FF", "#0EA5A4", "#C0392B", "#E0A21F", "#5C6470"];
 
 const emptyInv  = { nombre: "", contacto: "", moneda_habitual: "USD" };
+const TITULARES = ["Rodrigo", "Juan"];
+
 const emptyAp   = {
   inversor_id: "", fecha: new Date().toISOString().slice(0,10),
   fecha_inicio_calculo: "",
   monto: "",
   moneda: "USD", observacion: "",
   entra_a_caja: true,
+  titular: "",
 };
 
 export default function InversoresPage() {
@@ -163,6 +166,7 @@ export default function InversoresPage() {
       moneda: a.moneda,
       observacion: a.observacion ?? "",
       entra_a_caja: a.entra_a_caja ?? true,
+      titular: a.titular ?? "",
     });
     setEditApId(a.id); setErrAp(null); setOpenAp(true);
   };
@@ -183,6 +187,7 @@ export default function InversoresPage() {
       moneda: formAp.moneda,
       observacion: formAp.observacion || null,
       entra_a_caja: formAp.entra_a_caja !== false,
+      titular: formAp.titular || null,
     };
     const res = editApId
       ? await supabase.from("aportes").update(payload).eq("id", editApId)
@@ -840,6 +845,21 @@ export default function InversoresPage() {
                 />
               </Box>
             </Grid>
+
+            {formAp.entra_a_caja !== false && (
+              <Grid item xs={12}>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
+                  Titular de la caja donde ingresa
+                </Typography>
+                <ToggleButtonGroup
+                  exclusive size="small" color="primary"
+                  value={formAp.titular}
+                  onChange={(_, v) => setFormAp({ ...formAp, titular: v ?? "" })}
+                >
+                  {TITULARES.map(t => <ToggleButton key={t} value={t} sx={{ px: 2.5 }}>{t}</ToggleButton>)}
+                </ToggleButtonGroup>
+              </Grid>
+            )}
           </Grid>
         </DialogContent>
         <DialogActions>

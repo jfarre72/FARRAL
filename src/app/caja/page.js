@@ -11,6 +11,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
 import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
+import SyncAltIcon from "@mui/icons-material/SyncAlt";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import AttachFileIcon from "@mui/icons-material/AttachFile";
@@ -50,6 +51,8 @@ const emptyMov = {
   fecha: new Date().toISOString().slice(0, 10),
   // Titular de la caja (Rodrigo / Juan)
   titular: "",
+  // Titular destino (para traspaso entre cajas personales de la misma moneda)
+  titular_destino: "",
   // Para ingreso/egreso: moneda + monto del movimiento real
   moneda: "ARS",
   monto: "",
@@ -185,6 +188,12 @@ export default function CajaPage() {
         const md = Number(mv.monto_destino || 0);
         if (mv.moneda === "USD") { usd -= m; egrUSD += m; addTit(usdTit, t, -m); } else { ars -= m; egrARS += m; addTit(arsTit, t, -m); }
         if (mv.moneda_destino === "USD") { usd += md; ingUSD += md; addTit(usdTit, t, md); } else { ars += md; ingARS += md; addTit(arsTit, t, md); }
+      } else if (mv.tipo === "traspaso") {
+        // Movimiento interno entre cajas personales: no cambia el total de la
+        // moneda ni ingresos/egresos, sólo reasigna entre titulares.
+        const map = mv.moneda === "USD" ? usdTit : arsTit;
+        addTit(map, mv.titular, -m);
+        addTit(map, mv.titular_destino, m);
       }
     }
     return { usd, ars, ingUSD, ingARS, egrUSD, egrARS, usdTit, arsTit };
@@ -246,9 +255,12 @@ export default function CajaPage() {
       moneda: mv.moneda, monto: Number(mv.monto || 0),
       detalle: mv.tipo === "cambio"
         ? `Cambio ${mv.moneda} → ${mv.moneda_destino} @ ${fmtNum(mv.tipo_cambio, 2)}`
-        : (mv.descripcion || (mv.tipo === "ingreso" ? "Ingreso" : "Egreso")),
+        : mv.tipo === "traspaso"
+          ? `Traspaso ${mv.titular || "?"} → ${mv.titular_destino || "?"}`
+          : (mv.descripcion || (mv.tipo === "ingreso" ? "Ingreso" : "Egreso")),
       observacion: mv.descripcion ?? null,
       titular: mv.titular ?? null,
+      titular_destino: mv.titular_destino ?? null,
       categoria: mv.categoria, concepto: mv.concepto, etapa: mv.etapa,
       tipo_costo: mv.tipo_costo, rubro: mv.rubro, comprobante_url: mv.comprobante_url, raw: mv,
       moneda_destino: mv.moneda_destino, monto_destino: mv.monto_destino,
@@ -311,7 +323,7 @@ export default function CajaPage() {
     return filtered.map(r => ({ ...r, _delta: acc[r.id]?.delta ?? 0, _saldo: acc[r.id]?.saldo ?? 0 }));
   }, [unified, filtroMoneda]);
 
-  const tipoLabel = { ingreso: "Ingreso", egreso: "Egreso", cambio: "Cambio" };
+  const tipoLabel = { ingreso: "Ingreso", egreso: "Egreso", cambio: "Cambio", traspaso: "Traspaso" };
   const exportarPdf = () => {
     const filas = visible.map((m) => `<tr>
         <td>${fmtDate(m.fecha)}</td>
@@ -366,6 +378,8 @@ export default function CajaPage() {
       ...emptyMov, tipo,
       moneda: tipo === "cambio" ? "USD" : "ARS",
       moneda_destino: tipo === "cambio" ? "ARS" : "ARS",
+      titular: tipo === "traspaso" ? "Rodrigo" : "",
+      titular_destino: tipo === "traspaso" ? "Juan" : "",
     });
     setEditId(null); setKeepCompPath(null); setFile(null); setErr(null);
     setImputarA(false); setImpContratistaId(""); setImpPresupuestoId(""); setImpMontos({}); setImpAvances({});
@@ -378,6 +392,7 @@ export default function CajaPage() {
       tipo: mv.tipo,
       fecha: mv.fecha,
       titular: mv.titular ?? "",
+      titular_destino: mv.titular_destino ?? "",
       moneda: mv.moneda ?? "ARS",
       monto: mv.monto ?? "",
       categoria: mv.categoria ?? "",
@@ -441,7 +456,11 @@ export default function CajaPage() {
 
   const save = async () => {
     setErr(null);
-    if (form.tipo === "cambio") {
+    if (form.tipo === "traspaso") {
+      if (!form.titular || !form.titular_destino) { setErr("Elegí la caja origen y destino."); return; }
+      if (form.titular === form.titular_destino) { setErr("La caja origen y destino deben ser distintas."); return; }
+      if (!monto || monto <= 0) { setErr("Ingresá un monto válido."); return; }
+    } else if (form.tipo === "cambio") {
       if (form.moneda === form.moneda_destino) { setErr("La caja origen y destino deben ser distintas."); return; }
       if (!monto || monto <= 0) { setErr("Ingresá un monto válido."); return; }
       if (!tcPuro || tcPuro <= 0) { setErr("Ingresá el tipo de cambio."); return; }
@@ -481,7 +500,29 @@ export default function CajaPage() {
     const conceptoUsaEtapas = !!conceptos.find(c => c.nombre === form.concepto)?.usa_etapas;
 
     let payload;
-    if (form.tipo === "cambio") {
+    if (form.tipo === "traspaso") {
+      payload = {
+        proyecto_id: proyecto.id,
+        fecha: form.fecha,
+        tipo: "traspaso",
+        titular: form.titular,
+        titular_destino: form.titular_destino,
+        moneda: form.moneda,
+        monto: monto,
+        categoria: null,
+        concepto: null,
+        etapa: null,
+        descripcion: form.descripcion || null,
+        comprobante_url,
+        moneda_destino: null,
+        tipo_cambio: null,
+        monto_destino: null,
+        con_cambio: false,
+        cambio_moneda_origen: null,
+        cambio_monto_origen: null,
+        cambio_tipo_cambio: null,
+      };
+    } else if (form.tipo === "cambio") {
       payload = {
         proyecto_id: proyecto.id,
         fecha: form.fecha,
@@ -601,6 +642,7 @@ export default function CajaPage() {
         </Stack>
       );
     }
+    if (m.tipo === "traspaso") return <Chip size="small" color="primary" variant="outlined" icon={<SyncAltIcon />} label="Traspaso" />;
     return <Chip size="small" color="primary" variant="outlined" icon={<SwapHorizIcon />} label="Cambio" />;
   };
 
@@ -621,6 +663,7 @@ export default function CajaPage() {
           <Button startIcon={<PictureAsPdfIcon />} variant="outlined" onClick={exportarPdf}>PDF</Button>
           <Button startIcon={<ArrowUpwardIcon />} variant="outlined" color="success" onClick={() => openNew("ingreso")}>Ingreso</Button>
           <Button startIcon={<SwapHorizIcon />} variant="outlined" color="primary" onClick={() => openNew("cambio")}>Cambio</Button>
+          <Button startIcon={<SyncAltIcon />} variant="outlined" color="primary" onClick={() => openNew("traspaso")}>Traspaso</Button>
           <Button startIcon={<ArrowDownwardIcon />} variant="contained" color="secondary" onClick={() => openNew("egreso")}>Egreso</Button>
         </Stack>
       </Stack>
@@ -824,6 +867,15 @@ export default function CajaPage() {
                   )} />
                 </>
               )}
+              {detail.tipo === "traspaso" && (
+                <>
+                  <Divider />
+                  <Typography variant="caption" color="text.secondary">TRASPASO ENTRE CAJAS PERSONALES</Typography>
+                  <DetailRow label="Caja origen" value={detail.titular} />
+                  <DetailRow label="Caja destino" value={detail.titular_destino} />
+                  <DetailRow label="Monto" value={fmtMoney(detail.monto, detail.moneda)} />
+                </>
+              )}
               {detail.tipo === "cambio" && (
                 <>
                   <Divider />
@@ -867,15 +919,79 @@ export default function CajaPage() {
       <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="md" fullScreen={fullScreen}>
         <DialogTitle>
           {editId ? (
-            form.tipo === "ingreso" ? "Editar ingreso" : form.tipo === "cambio" ? "Editar cambio" : "Editar egreso"
+            form.tipo === "ingreso" ? "Editar ingreso" : form.tipo === "cambio" ? "Editar cambio" : form.tipo === "traspaso" ? "Editar traspaso" : "Editar egreso"
           ) : (
-            form.tipo === "ingreso" ? "Registrar ingreso" : form.tipo === "cambio" ? "Cambio entre cajas" : "Registrar egreso"
+            form.tipo === "ingreso" ? "Registrar ingreso" : form.tipo === "cambio" ? "Cambio entre cajas" : form.tipo === "traspaso" ? "Traspaso entre cajas personales" : "Registrar egreso"
           )}
         </DialogTitle>
         <DialogContent dividers>
           {err && <Alert severity="error" sx={{ mb: 2 }}>{err}</Alert>}
 
-          {form.tipo === "cambio" ? (
+          {form.tipo === "traspaso" ? (
+            // -------- DIALOG: traspaso entre cajas personales (misma moneda) --------
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6}>
+                <TextField label="Fecha" type="date" fullWidth InputLabelProps={{ shrink: true }}
+                  value={form.fecha} onChange={e => setForm({ ...form, fecha: e.target.value })} />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
+                  Moneda
+                </Typography>
+                <ToggleButtonGroup
+                  exclusive size="small" color="primary" fullWidth
+                  value={form.moneda}
+                  onChange={(_, v) => v && setForm({ ...form, moneda: v })}
+                >
+                  <ToggleButton value="ARS">Caja ARS ($)</ToggleButton>
+                  <ToggleButton value="USD">Caja USD</ToggleButton>
+                </ToggleButtonGroup>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
+                  Caja origen → Caja destino
+                </Typography>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <TextField select size="small" sx={{ flex: 1 }} value={form.titular}
+                    onChange={e => setForm({ ...form, titular: e.target.value,
+                      titular_destino: e.target.value === form.titular_destino ? "" : form.titular_destino })}>
+                    {TITULARES.map(t => <MenuItem key={t} value={t}>{t}</MenuItem>)}
+                  </TextField>
+                  <SyncAltIcon color="primary" />
+                  <TextField select size="small" sx={{ flex: 1 }} value={form.titular_destino}
+                    onChange={e => setForm({ ...form, titular_destino: e.target.value })}>
+                    {TITULARES.map(t => <MenuItem key={t} value={t} disabled={t === form.titular}>{t}</MenuItem>)}
+                  </TextField>
+                </Stack>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField label={`Monto (${form.moneda})`} type="number" fullWidth
+                  value={form.monto} onChange={e => setForm({ ...form, monto: e.target.value })} />
+              </Grid>
+              <Grid item xs={12}>
+                <Alert severity="info" icon={<SyncAltIcon />} sx={{ alignItems: "flex-start" }}>
+                  <Typography variant="body2" sx={{ mb: 0.5 }}>
+                    Movimiento interno · no cambia el total de la caja {form.moneda}:
+                  </Typography>
+                  <Stack component="ol" sx={{ pl: 2.5, m: 0 }} spacing={0.25}>
+                    <li>Caja {form.titular || "?"}: <b style={{ color: "#C0392B" }}>−{fmtMoney(monto, form.moneda)}</b></li>
+                    <li>Caja {form.titular_destino || "?"}: <b style={{ color: "#1E8E3E" }}>+{fmtMoney(monto, form.moneda)}</b></li>
+                  </Stack>
+                </Alert>
+              </Grid>
+              <Grid item xs={12}>
+                <TextField label="Descripción / observación" fullWidth multiline minRows={2}
+                  value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} />
+              </Grid>
+              <Grid item xs={12}>
+                <Button variant="outlined" component="label" startIcon={<AttachFileIcon />} fullWidth>
+                  {file ? file.name : (keepCompPath ? "Reemplazar comprobante" : "Adjuntar comprobante (opcional)")}
+                  <input hidden type="file" accept="image/*,application/pdf"
+                    onChange={e => setFile(e.target.files?.[0] ?? null)} />
+                </Button>
+              </Grid>
+            </Grid>
+          ) : form.tipo === "cambio" ? (
             // -------- DIALOG: cambio puro entre cajas --------
             <Grid container spacing={2}>
               <Grid item xs={12} sm={6}>
