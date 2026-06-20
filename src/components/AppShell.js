@@ -37,7 +37,7 @@ const NAV = [
   ]},
   { section: "Obra", items: [
     { label: "Planificación",   href: "/linea-tiempo",  icon: <TimelineIcon /> },
-    { label: "Seguimiento Diario", href: "/seguimiento-diario", icon: <CalendarMonthIcon /> },
+    { label: "Diario",          href: "/seguimiento-diario", icon: <CalendarMonthIcon /> },
     { label: "Tareas",          href: "/temas",         icon: <ChecklistIcon /> },
     { label: "Equipamientos",   href: "/equipamientos", icon: <HandymanIcon /> },
   ]},

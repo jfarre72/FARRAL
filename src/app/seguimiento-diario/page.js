@@ -2,13 +2,14 @@
 import {
   Card, CardContent, Stack, Typography, Alert, Box, Chip, Button, IconButton,
   Dialog, DialogTitle, DialogContent, DialogActions, useMediaQuery,
-  ToggleButtonGroup, ToggleButton, TextField, MenuItem, LinearProgress, Tooltip
+  ToggleButtonGroup, ToggleButton, TextField, MenuItem, LinearProgress, Tooltip,
+  Checkbox, ListItemText, OutlinedInput, Select, InputLabel, FormControl
 } from "@mui/material";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import { useEffect, useMemo, useState } from "react";
-import { useTheme } from "@mui/material/styles";
+import { useTheme, alpha } from "@mui/material/styles";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtDate } from "@/components/Money";
@@ -35,6 +36,9 @@ function diaSemana(isoStr) {
   const d = new Date(isoStr + "T00:00:00");
   return isNaN(d) ? "" : DIAS[d.getDay()];
 }
+// Las etapas se guardan como texto separado por comas. Helpers de ida y vuelta.
+const parseEtapas = (s) => (s ? s.split(",").map(x => x.trim()).filter(Boolean) : []);
+const joinEtapas = (arr) => (arr && arr.length ? arr.join(", ") : null);
 
 export default function SeguimientoDiarioPage() {
   const { proyecto } = useProjects();
@@ -51,7 +55,7 @@ export default function SeguimientoDiarioPage() {
 
   const [open, setOpen] = useState(false);
   const [fechaSel, setFechaSel] = useState(null);
-  const [form, setForm] = useState({ trabajado: true, causa: "", etapa: "", observacion: "" });
+  const [form, setForm] = useState({ trabajado: true, causa: "", etapas: [], observacion: "" });
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
@@ -80,13 +84,21 @@ export default function SeguimientoDiarioPage() {
     return m;
   }, [registros]);
 
-  // Estadísticas del mes visible
+  // Estadísticas del mes visible (totales + desglose por etapa de días trabajados)
   const stats = useMemo(() => {
     const prefijo = `${year}-${String(month + 1).padStart(2, "0")}`;
     const delMes = registros.filter(r => r.fecha.startsWith(prefijo));
+    const porEtapa = {};
+    for (const r of delMes) {
+      if (!r.trabajado) continue;
+      const ets = parseEtapas(r.etapa);
+      if (ets.length === 0) { porEtapa["Sin etapa"] = (porEtapa["Sin etapa"] ?? 0) + 1; continue; }
+      for (const e of ets) porEtapa[e] = (porEtapa[e] ?? 0) + 1;
+    }
     return {
       trabajados: delMes.filter(r => r.trabajado).length,
       noTrabajados: delMes.filter(r => !r.trabajado).length,
+      porEtapa,
     };
   }, [registros, year, month]);
 
@@ -97,8 +109,10 @@ export default function SeguimientoDiarioPage() {
     const arr = [];
     for (let i = 0; i < primero; i++) arr.push(null);
     for (let d = 1; d <= diasMes; d++) arr.push(d);
+    while (arr.length % 7 !== 0) arr.push(null);
     return arr;
   }, [year, month]);
+  const filas = celdas.length / 7;
 
   const cambiarMes = (delta) => {
     let m = month + delta, y = year;
@@ -117,7 +131,7 @@ export default function SeguimientoDiarioPage() {
     setForm({
       trabajado: r ? r.trabajado : true,
       causa: r?.causa ?? "",
-      etapa: r?.etapa ?? "",
+      etapas: parseEtapas(r?.etapa),
       observacion: r?.observacion ?? "",
     });
     setErr(null);
@@ -137,7 +151,7 @@ export default function SeguimientoDiarioPage() {
       fecha: fechaSel,
       trabajado: form.trabajado,
       causa: form.trabajado ? null : (form.causa.trim() || null),
-      etapa: form.etapa.trim() || null,
+      etapa: joinEtapas(form.etapas),
       observacion: form.observacion.trim() || null,
     };
     // upsert por (proyecto_id, fecha)
@@ -162,33 +176,37 @@ export default function SeguimientoDiarioPage() {
   if (!proyecto) return <Alert severity="info">Seleccioná un proyecto.</Alert>;
 
   return (
-    <Stack spacing={3}>
+    <Stack spacing={1.5} sx={{ height: "calc(100vh - 96px)" }}>
       <Box>
-        <Typography variant="h5">Seguimiento Diario</Typography>
+        <Typography variant="h5">Diario</Typography>
         <Typography variant="body2" color="text.secondary">
-          Tocá un día para registrar si se trabajó o no. Si no se trabajó, indicá la causa
-          (lluvia, falta de personal, materiales…). La etapa es opcional.
+          Tocá un día para registrar si se trabajó o no. Si no se trabajó, indicá la causa. Podés cargar una o varias etapas.
         </Typography>
       </Box>
 
       {loading && <LinearProgress />}
 
-      <Card>
-        <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
+      <Card sx={{ display: "flex", flexDirection: "column", flexGrow: 1, minHeight: 0 }}>
+        <CardContent sx={{ p: { xs: 1, sm: 1.5 }, display: "flex", flexDirection: "column", flexGrow: 1, minHeight: 0, "&:last-child": { pb: 1.5 } }}>
           {/* Navegación de mes */}
-          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-            <IconButton onClick={() => cambiarMes(-1)}><ChevronLeftIcon /></IconButton>
-            <Typography variant="h6" sx={{ flexGrow: 1, textAlign: "center" }}>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+            <IconButton size="small" onClick={() => cambiarMes(-1)}><ChevronLeftIcon /></IconButton>
+            <Typography variant="subtitle1" sx={{ flexGrow: 1, textAlign: "center", fontWeight: 700 }}>
               {MESES[month]} {year}
             </Typography>
             <Button size="small" onClick={irHoy}>Hoy</Button>
-            <IconButton onClick={() => cambiarMes(1)}><ChevronRightIcon /></IconButton>
+            <IconButton size="small" onClick={() => cambiarMes(1)}><ChevronRightIcon /></IconButton>
           </Stack>
 
-          {/* Resumen + leyenda */}
-          <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ gap: 1, mb: 2 }}>
+          {/* Resumen: totales + por etapa */}
+          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
             <Chip size="small" color="success" variant="outlined" label={`${stats.trabajados} trabajados`} />
             <Chip size="small" color="error" variant="outlined" label={`${stats.noTrabajados} sin trabajar`} />
+            {Object.entries(stats.porEtapa).map(([et, n]) => (
+              <Chip key={et} size="small" variant="filled"
+                sx={{ bgcolor: "action.selected" }}
+                label={`${et}: ${n}`} />
+            ))}
           </Stack>
 
           {/* Encabezado días de la semana */}
@@ -200,22 +218,28 @@ export default function SeguimientoDiarioPage() {
             ))}
           </Box>
 
-          {/* Grilla del calendario */}
-          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 0.5 }}>
+          {/* Grilla del calendario: ocupa el alto restante sin scroll */}
+          <Box sx={{
+            display: "grid",
+            gridTemplateColumns: "repeat(7, 1fr)",
+            gridTemplateRows: `repeat(${filas}, 1fr)`,
+            gap: 0.5, flexGrow: 1, minHeight: 0,
+          }}>
             {celdas.map((d, i) => {
               if (!d) return <Box key={`e${i}`} />;
               const fecha = iso(year, month, d);
               const r = porFecha[fecha];
               const esHoy = fecha === hoyISO();
-              let bg = "transparent", border = "divider", color = "text.primary";
+              const ets = r ? parseEtapas(r.etapa) : [];
+              let bg = "transparent", border = theme.palette.divider;
               if (r) {
-                if (r.trabajado) { bg = "success.main"; color = "success.contrastText"; border = "success.main"; }
-                else { bg = "error.main"; color = "error.contrastText"; border = "error.main"; }
+                if (r.trabajado) { bg = alpha(theme.palette.success.main, 0.16); border = alpha(theme.palette.success.main, 0.5); }
+                else { bg = alpha(theme.palette.error.main, 0.16); border = alpha(theme.palette.error.main, 0.5); }
               }
               return (
                 <Tooltip
                   key={fecha}
-                  title={r ? (r.trabajado ? `Trabajado${r.etapa ? " · " + r.etapa : ""}` : `No: ${r.causa || "—"}`) : ""}
+                  title={r ? (r.trabajado ? `Trabajado${ets.length ? " · " + ets.join(", ") : ""}` : `No: ${r.causa || "—"}`) : ""}
                   arrow disableInteractive
                 >
                   <Box
@@ -223,22 +247,25 @@ export default function SeguimientoDiarioPage() {
                     sx={{
                       cursor: "pointer", borderRadius: 1.5,
                       border: "1px solid", borderColor: border,
-                      bgcolor: bg, color,
-                      aspectRatio: "1 / 1", minHeight: 40,
+                      bgcolor: bg,
+                      minHeight: 0, p: 0.5, overflow: "hidden",
                       display: "flex", flexDirection: "column",
-                      alignItems: "center", justifyContent: "center",
                       outline: esHoy ? `2px solid ${theme.palette.primary.main}` : "none",
                       outlineOffset: -2,
-                      transition: "transform .08s",
-                      "&:hover": { transform: "scale(1.05)" },
+                      transition: "background-color .1s",
+                      "&:hover": { borderColor: "primary.main" },
                     }}
                   >
-                    <Typography variant="body2" sx={{ fontWeight: esHoy ? 800 : 500, lineHeight: 1 }}>
+                    <Typography variant="caption" sx={{ fontWeight: esHoy ? 800 : 600, lineHeight: 1, color: "text.primary" }}>
                       {d}
                     </Typography>
-                    {r && r.etapa && (
-                      <Typography variant="caption" sx={{ fontSize: 9, lineHeight: 1, mt: 0.25, px: 0.25, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
-                        {r.etapa}
+                    {ets.length > 0 && (
+                      <Typography variant="caption" sx={{
+                        fontSize: 9.5, lineHeight: 1.1, mt: 0.25, color: "text.secondary",
+                        overflow: "hidden", textOverflow: "ellipsis",
+                        display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                      }}>
+                        {ets.join(", ")}
                       </Typography>
                     )}
                   </Box>
@@ -281,13 +308,23 @@ export default function SeguimientoDiarioPage() {
               />
             )}
 
-            <TextField
-              select fullWidth label="Etapa (opcional)" value={form.etapa}
-              onChange={(e) => setForm(f => ({ ...f, etapa: e.target.value }))}
-            >
-              <MenuItem value="">—</MenuItem>
-              {etapas.map(et => <MenuItem key={et} value={et}>{et}</MenuItem>)}
-            </TextField>
+            <FormControl fullWidth>
+              <InputLabel id="etapas-lbl">Etapas (opcional)</InputLabel>
+              <Select
+                labelId="etapas-lbl" multiple
+                value={form.etapas}
+                onChange={(e) => setForm(f => ({ ...f, etapas: typeof e.target.value === "string" ? e.target.value.split(",") : e.target.value }))}
+                input={<OutlinedInput label="Etapas (opcional)" />}
+                renderValue={(sel) => sel.join(", ")}
+              >
+                {etapas.map(et => (
+                  <MenuItem key={et} value={et}>
+                    <Checkbox checked={form.etapas.indexOf(et) > -1} />
+                    <ListItemText primary={et} />
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
 
             <TextField
               fullWidth label="Observación (opcional)" multiline minRows={2}
