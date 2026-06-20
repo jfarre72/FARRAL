@@ -2,7 +2,7 @@
 import {
   Card, CardContent, Stack, Typography, Alert, Box, Grid, TextField,
   Checkbox, LinearProgress, Divider, Chip, Button, IconButton, Tooltip,
-  Collapse, FormControlLabel, useMediaQuery
+  Collapse, MenuItem, useMediaQuery
 } from "@mui/material";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
@@ -76,6 +76,16 @@ function fade(hex, a) {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
 }
+
+// Estados de una tarea (reemplazan al simple "completado").
+const ESTADOS = [
+  { value: "no_iniciado", label: "No iniciado", color: "default" },
+  { value: "en_curso",    label: "En curso",    color: "warning" },
+  { value: "finalizado",  label: "Finalizado",  color: "success" },
+];
+// Deriva el estado de una tarea (compatibilidad con filas previas a la migración).
+const estadoTarea = (t) =>
+  t.estado || (t.completado ? "finalizado" : ((t.avance ?? 0) > 0 ? "en_curso" : "no_iniciado"));
 function GanttEtapas({ etapas, inicioReal, finReal, onUpdate, getFraccion }) {
   const ini = new Date(inicioReal + "T00:00:00");
   const fin = new Date(finReal + "T00:00:00");
@@ -364,14 +374,6 @@ export default function LineaTiempoPage() {
     reload();
   };
 
-  const toggleTarea = async (t) => {
-    const avance = t.completado ? 0 : 100;
-    const patch = { completado: !t.completado, avance, completado_at: !t.completado ? new Date().toISOString() : null };
-    setTareas(prev => prev.map(x => x.id === t.id ? { ...x, ...patch } : x));
-    const { error } = await supabase.from("hito_tareas").update(patch).eq("id", t.id);
-    if (error) { alert(error.message); reload(); }
-  };
-
   // Setea el % de avance de una tarea; 100% la marca como completada.
   const setAvanceTarea = async (t, valor) => {
     const avance = Math.max(0, Math.min(100, Math.round(Number(valor) || 0)));
@@ -380,6 +382,37 @@ export default function LineaTiempoPage() {
     const patch = { avance, completado };
     if (completado && !eraCompleto) patch.completado_at = new Date().toISOString();
     if (!completado) patch.completado_at = null;
+    setTareas(prev => prev.map(x => x.id === t.id ? { ...x, ...patch } : x));
+    const { error } = await supabase.from("hito_tareas").update(patch).eq("id", t.id);
+    if (error) { alert(error.message); reload(); }
+  };
+
+  // Cambia el estado de una tarea, seteando fechas por defecto (hoy) que
+  // luego se pueden ajustar. Finalizado => avance 100% (suma al avance).
+  const setEstadoTarea = async (t, estado) => {
+    const hoy = toISODate(new Date());
+    const patch = { estado };
+    if (estado === "no_iniciado") {
+      patch.completado = false; patch.avance = 0; patch.completado_at = null;
+    } else if (estado === "en_curso") {
+      patch.completado = false;
+      if ((t.avance ?? 0) >= 100) patch.avance = 50;
+      patch.completado_at = null;
+      if (!t.fecha_inicio) patch.fecha_inicio = hoy;
+    } else if (estado === "finalizado") {
+      patch.completado = true; patch.avance = 100;
+      patch.completado_at = new Date().toISOString();
+      if (!t.fecha_inicio) patch.fecha_inicio = hoy;
+      if (!t.fecha_fin) patch.fecha_fin = hoy;
+    }
+    setTareas(prev => prev.map(x => x.id === t.id ? { ...x, ...patch } : x));
+    const { error } = await supabase.from("hito_tareas").update(patch).eq("id", t.id);
+    if (error) { alert(error.message); reload(); }
+  };
+
+  // Ajusta una fecha (inicio/fin) de la tarea.
+  const setFechaTarea = async (t, campo, valor) => {
+    const patch = { [campo]: valor || null };
     setTareas(prev => prev.map(x => x.id === t.id ? { ...x, ...patch } : x));
     const { error } = await supabase.from("hito_tareas").update(patch).eq("id", t.id);
     if (error) { alert(error.message); reload(); }
@@ -441,8 +474,9 @@ export default function LineaTiempoPage() {
         h.fecha_real ? `Fin: ${fmtDate(h.fecha_real)}` : null,
         d != null ? `${d} días háb.` : null,
       ].filter(Boolean).join(" · ");
+      const simbolo = { finalizado: "✔", en_curso: "◐", no_iniciado: "○" };
       const filas = ts.length
-        ? ts.map(t => `<tr><td>${t.completado ? "✔" : "○"}</td><td><span class="${t.completado ? "done" : ""}">${esc(t.nombre)}</span></td></tr>`).join("")
+        ? ts.map(t => { const e = estadoTarea(t); return `<tr><td>${simbolo[e]}</td><td><span class="${e === "finalizado" ? "done" : ""}">${esc(t.nombre)}</span></td></tr>`; }).join("")
         : `<tr><td></td><td class="muted">Sin tareas</td></tr>`;
       return `<h2>${esc(h.nombre)} <span class="muted" style="font-weight:400">${esc(meta)}</span></h2>
         <table><tbody>${filas}</tbody></table>`;
@@ -666,6 +700,7 @@ export default function LineaTiempoPage() {
                           {ts.map((t) => {
                             const dragging = drag?.fromId === t.id;
                             const isTarget = drag?.hitoId === h.id && drag?.overId === t.id && drag?.fromId !== t.id;
+                            const est = estadoTarea(t);
                             return (
                             <Stack
                               key={t.id} direction="row" alignItems="center"
@@ -698,17 +733,42 @@ export default function LineaTiempoPage() {
                                   <DragIndicatorIcon fontSize="small" />
                                 </IconButton>
                               </Tooltip>
-                              <FormControlLabel
-                                sx={{ flexGrow: 1, m: 0 }}
-                                control={<Checkbox size="small" checked={t.completado} onChange={() => toggleTarea(t)} />}
-                                label={
-                                  <Typography variant="body2" sx={{ textDecoration: t.completado ? "line-through" : "none", color: t.completado ? "text.secondary" : "text.primary" }}>
+                              <Box sx={{ flexGrow: 1, minWidth: 0, py: 0.5 }}>
+                                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                                  <Typography variant="body2" sx={{ flexGrow: 1, minWidth: 120, color: est === "finalizado" ? "text.secondary" : "text.primary" }}>
                                     {t.nombre}
                                   </Typography>
-                                }
-                              />
-                              <Box sx={{ px: 0.5 }} onClick={(e) => e.stopPropagation()}>
-                                <PctField value={avanceTarea(t)} onCommit={(v) => setAvanceTarea(t, v)} />
+                                  <Box onClick={(e) => e.stopPropagation()}>
+                                    <TextField
+                                      select size="small" value={est}
+                                      onChange={(e) => setEstadoTarea(t, e.target.value)}
+                                      sx={{ width: 140 }}
+                                    >
+                                      {ESTADOS.map(op => <MenuItem key={op.value} value={op.value}>{op.label}</MenuItem>)}
+                                    </TextField>
+                                  </Box>
+                                  {est === "en_curso" && (
+                                    <Box sx={{ px: 0.5 }} onClick={(e) => e.stopPropagation()}>
+                                      <PctField value={avanceTarea(t)} onCommit={(v) => setAvanceTarea(t, v)} />
+                                    </Box>
+                                  )}
+                                </Stack>
+                                {(est === "en_curso" || est === "finalizado") && (
+                                  <Stack direction="row" spacing={1} sx={{ mt: 1 }} onClick={(e) => e.stopPropagation()} flexWrap="wrap" useFlexGap>
+                                    <DateField
+                                      label="Inicio" sx={{ width: 150 }}
+                                      value={t.fecha_inicio ?? ""}
+                                      onCommit={(v) => setFechaTarea(t, "fecha_inicio", v)}
+                                    />
+                                    {est === "finalizado" && (
+                                      <DateField
+                                        label="Fin" sx={{ width: 150 }}
+                                        value={t.fecha_fin ?? ""}
+                                        onCommit={(v) => setFechaTarea(t, "fecha_fin", v)}
+                                      />
+                                    )}
+                                  </Stack>
+                                )}
                               </Box>
                               <Tooltip title="Eliminar tarea">
                                 <IconButton className="del" size="small" sx={{ opacity: { xs: 1, sm: 0 }, transition: "opacity .15s" }} onClick={() => delTarea(t)}>

@@ -117,6 +117,15 @@ export default function ReporteriaPage() {
     const tareasPorHito = {};
     for (const t of tareasRango) { (tareasPorHito[t.hito] ||= []).push(t.nombre); }
 
+    // Tareas en curso dentro del período: estado en_curso e iniciadas a más
+    // tardar al fin del rango (siguen activas durante el período reportado).
+    const estadoDe = (t) => t.estado || (t.completado ? "finalizado" : ((t.avance ?? 0) > 0 ? "en_curso" : "no_iniciado"));
+    const tareasEnCurso = tareas
+      .filter(t => estadoDe(t) === "en_curso" && t.fecha_inicio && String(t.fecha_inicio).slice(0, 10) <= hasta)
+      .map(t => ({ nombre: t.nombre, hito: hitoNombre[t.hito_id] || "—", avance: t.avance ?? 0 }));
+    const enCursoPorHito = {};
+    for (const t of tareasEnCurso) { (enCursoPorHito[t.hito] ||= []).push(t); }
+
     // Gasto del rango, total acumulado + serie mensual (historial completo)
     const porMes = new Map();
     let totalUSD = 0, gastoRango = 0, acumHasta = 0;
@@ -142,7 +151,7 @@ export default function ReporteriaPage() {
     // Fotos del rango (por fecha de carga)
     const fotosRango = fotos.filter(f => inRango(f.fecha));
 
-    return { avance: Math.round(avance), tareasPorHito, nTareasRango: tareasRango.length, gastoRango, totalUSD, acumHasta, serie, hastaKey, fotosRango };
+    return { avance: Math.round(avance), tareasPorHito, nTareasRango: tareasRango.length, enCursoPorHito, nEnCurso: tareasEnCurso.length, gastoRango, totalUSD, acumHasta, serie, hastaKey, fotosRango };
   }, [hitos, tareas, movs, fotos, desde, hasta]);
 
   const rangoLabel = `${fmtDate(desde)} a ${fmtDate(hasta)}`;
@@ -153,6 +162,12 @@ export default function ReporteriaPage() {
           `<p style="margin:6px 0 2px"><b>${esc(hito)}</b></p><ul style="margin:0">${ts.map(n => `<li>${esc(n)}</li>`).join("")}</ul>`
         ).join("")
       : `<p class="muted">No se registraron tareas completadas en el período.</p>`;
+
+    const enCursoHtml = Object.keys(rep.enCursoPorHito).length
+      ? Object.entries(rep.enCursoPorHito).map(([hito, ts]) =>
+          `<p style="margin:6px 0 2px"><b>${esc(hito)}</b></p><ul style="margin:0">${ts.map(t => `<li>${esc(t.nombre)}${t.avance ? ` <span class="muted">(${t.avance}%)</span>` : ""}</li>`).join("")}</ul>`
+        ).join("")
+      : `<p class="muted">No hay tareas en curso en el período.</p>`;
 
     const fotosHtml = rep.fotosRango.length
       ? `<div style="display:flex;flex-wrap:wrap;gap:8px">${rep.fotosRango.map(f =>
@@ -172,6 +187,9 @@ export default function ReporteriaPage() {
 
       <h2>Tareas realizadas (${esc(rangoLabel)})</h2>
       ${tareasHtml}
+
+      <h2>Tareas en curso (${esc(rangoLabel)})</h2>
+      ${enCursoHtml}
 
       <h2>Evolución de gastos (USD acumulado)</h2>
       ${svgChart(rep.serie, rep.hastaKey)}
@@ -254,6 +272,27 @@ export default function ReporteriaPage() {
                 <Typography variant="body2" fontWeight={700}>{hito}</Typography>
                 <ul style={{ margin: "2px 0" }}>
                   {ts.map((n, i) => <li key={i}><Typography variant="body2" component="span">{n}</Typography></li>)}
+                </ul>
+              </Box>
+            ))
+          )}
+
+          <Divider sx={{ my: 2 }} />
+          <Typography variant="subtitle1" gutterBottom>Tareas en curso ({rangoLabel})</Typography>
+          {Object.keys(rep.enCursoPorHito).length === 0 ? (
+            <Typography variant="body2" color="text.secondary">No hay tareas en curso en el período.</Typography>
+          ) : (
+            Object.entries(rep.enCursoPorHito).map(([hito, ts]) => (
+              <Box key={hito} sx={{ mb: 1 }}>
+                <Typography variant="body2" fontWeight={700}>{hito}</Typography>
+                <ul style={{ margin: "2px 0" }}>
+                  {ts.map((t, i) => (
+                    <li key={i}>
+                      <Typography variant="body2" component="span">
+                        {t.nombre}{t.avance ? ` (${t.avance}%)` : ""}
+                      </Typography>
+                    </li>
+                  ))}
                 </ul>
               </Box>
             ))
