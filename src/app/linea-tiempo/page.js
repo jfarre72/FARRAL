@@ -13,7 +13,7 @@ import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import { useEffect, useMemo, useState } from "react";
-import { useTheme } from "@mui/material/styles";
+import { useTheme, alpha } from "@mui/material/styles";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtDate } from "@/components/Money";
@@ -710,6 +710,10 @@ export default function LineaTiempoPage() {
                             const dragging = drag?.fromId === t.id;
                             const isTarget = drag?.hitoId === h.id && drag?.overId === t.id && drag?.fromId !== t.id;
                             const est = estadoTarea(t);
+                            const bgEstado =
+                              est === "finalizado" ? alpha(theme.palette.success.main, 0.08)
+                              : est === "en_curso" ? alpha(theme.palette.info.main, 0.08)
+                              : alpha(theme.palette.text.primary, 0.04);
                             return (
                             <Stack
                               key={t.id} direction="row" alignItems="center"
@@ -727,6 +731,7 @@ export default function LineaTiempoPage() {
                                 "&:hover .del": { opacity: 1 },
                                 "&:hover .drag": { opacity: 1 },
                                 opacity: dragging ? 0.4 : 1,
+                                bgcolor: bgEstado, borderRadius: 1.5, py: 0.75, px: 1,
                                 borderTop: isTarget ? "2px solid" : "2px solid transparent",
                                 borderTopColor: isTarget ? "secondary.main" : "transparent",
                               }}
