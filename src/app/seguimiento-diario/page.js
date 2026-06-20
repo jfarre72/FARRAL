@@ -43,21 +43,20 @@ const parseEtapas = (s) => (s ? s.split(",").map(x => x.trim()).filter(Boolean) 
 const joinEtapas = (arr) => (arr && arr.length ? arr.join(", ") : null);
 
 // --- Gráfico de barras verticales liviano (SVG-free, con divs) ---
-// Estructura en 3 zonas alineadas: valor (arriba), barras (alto fijo,
-// baseline común) y etiqueta de mes (abajo). Así ninguna columna queda
-// desfasada respecto del resto.
-function BarrasVerticales({ data, color, alto = 150 }) {
+// Ocupa todo el alto disponible: la zona de barras crece para que las
+// barras queden ancladas al borde inferior del recuadro.
+function BarrasVerticales({ data, color }) {
   const max = Math.max(1, ...data.map(d => d.value));
   return (
-    <Box sx={{ display: "flex", alignItems: "stretch", gap: 0.5 }}>
+    <Box sx={{ display: "flex", alignItems: "stretch", gap: 0.5, flexGrow: 1, minHeight: 180 }}>
       {data.map((d) => (
         <Box key={d.label} sx={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
           {/* valor */}
           <Typography variant="caption" sx={{ fontSize: 10, lineHeight: 1, height: 14, color: "text.secondary" }}>
             {d.value || ""}
           </Typography>
-          {/* zona de barras con baseline común */}
-          <Box sx={{ height: alto, width: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", borderBottom: "1px solid", borderColor: "divider" }}>
+          {/* zona de barras: crece para ocupar el alto y baseline común */}
+          <Box sx={{ flexGrow: 1, width: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", borderBottom: "1px solid", borderColor: "divider" }}>
             <Tooltip title={`${d.full ?? d.label}: ${d.value}`} arrow disableInteractive>
               <Box sx={{
                 width: "70%", borderRadius: "4px 4px 0 0",
@@ -120,6 +119,7 @@ export default function SeguimientoDiarioPage() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
   const [etapasOpen, setEtapasOpen] = useState(false);
+  const [tareasOpen, setTareasOpen] = useState(false);
 
   const reload = async () => {
     if (!proyecto) return;
@@ -285,7 +285,7 @@ export default function SeguimientoDiarioPage() {
       <Grid container spacing={2}>
         <Grid item xs={12} md={7}>
           <Card sx={{ height: "100%" }}>
-            <CardContent>
+            <CardContent sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
               <Typography variant="subtitle2" sx={{ mb: 1.5 }}>Días trabajados por mes · {year}</Typography>
               <BarrasVerticales data={porMes} color={success} />
             </CardContent>
@@ -471,6 +471,9 @@ export default function SeguimientoDiarioPage() {
                   <InputLabel id="tareas-lbl">Tareas (opcional)</InputLabel>
                   <Select
                     labelId="tareas-lbl" multiple
+                    open={tareasOpen}
+                    onOpen={() => setTareasOpen(true)}
+                    onClose={() => setTareasOpen(false)}
                     value={form.tareas}
                     onChange={(e) => setForm(f => ({ ...f, tareas: typeof e.target.value === "string" ? e.target.value.split(",") : e.target.value }))}
                     input={<OutlinedInput label="Tareas (opcional)" />}
@@ -483,6 +486,11 @@ export default function SeguimientoDiarioPage() {
                         <ListItemText primary={t} />
                       </MenuItem>
                     ))}
+                    <Box sx={{ position: "sticky", bottom: 0, bgcolor: "background.paper", p: 1, borderTop: "1px solid", borderColor: "divider", display: "flex", justifyContent: "flex-end" }}>
+                      <Button size="small" variant="contained" onMouseDown={(e) => { e.preventDefault(); setTareasOpen(false); }}>
+                        OK
+                      </Button>
+                    </Box>
                   </Select>
                 </FormControl>
               );
