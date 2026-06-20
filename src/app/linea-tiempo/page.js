@@ -705,7 +705,7 @@ export default function LineaTiempoPage() {
                           </Typography>
                         )}
 
-                        <Stack spacing={0}>
+                        <Stack spacing={1.25}>
                           {ts.map((t) => {
                             const dragging = drag?.fromId === t.id;
                             const isTarget = drag?.hitoId === h.id && drag?.overId === t.id && drag?.fromId !== t.id;
@@ -782,7 +782,16 @@ export default function LineaTiempoPage() {
                                     />
                                   )}
                                 </Box>
-                                <Box sx={{ width: CHIP_W }} />
+                                <Box sx={{ width: CHIP_W, display: "flex", justifyContent: "center" }}>
+                                  {(() => {
+                                    const d = diasHabiles(t.fecha_inicio, t.fecha_fin);
+                                    return d != null ? (
+                                      <Chip size="small" variant="outlined"
+                                        label={`${d} día${Math.abs(d) === 1 ? "" : "s"} háb.`}
+                                        color={d < 0 ? "error" : "default"} />
+                                    ) : null;
+                                  })()}
+                                </Box>
                                 <Box sx={{ width: CHK_W }} />
                                 <Box sx={{ width: CHK_W, display: "flex", justifyContent: "center" }}>
                                   <Tooltip title="Eliminar tarea">
