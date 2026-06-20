@@ -15,6 +15,7 @@ import ChecklistIcon from "@mui/icons-material/Checklist";
 import InsightsIcon from "@mui/icons-material/Insights";
 import AccountTreeIcon from "@mui/icons-material/AccountTree";
 import HandymanIcon from "@mui/icons-material/Handyman";
+import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import PhotoLibraryIcon from "@mui/icons-material/PhotoLibrary";
 import DescriptionIcon from "@mui/icons-material/Description";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -36,6 +37,7 @@ const NAV = [
   ]},
   { section: "Obra", items: [
     { label: "Planificación",   href: "/linea-tiempo",  icon: <TimelineIcon /> },
+    { label: "Seguimiento Diario", href: "/seguimiento-diario", icon: <CalendarMonthIcon /> },
     { label: "Tareas",          href: "/temas",         icon: <ChecklistIcon /> },
     { label: "Equipamientos",   href: "/equipamientos", icon: <HandymanIcon /> },
   ]},
