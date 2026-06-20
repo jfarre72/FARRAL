@@ -43,22 +43,30 @@ const parseEtapas = (s) => (s ? s.split(",").map(x => x.trim()).filter(Boolean) 
 const joinEtapas = (arr) => (arr && arr.length ? arr.join(", ") : null);
 
 // --- Gráfico de barras verticales liviano (SVG-free, con divs) ---
-function BarrasVerticales({ data, color, alto = 130 }) {
+// Estructura en 3 zonas alineadas: valor (arriba), barras (alto fijo,
+// baseline común) y etiqueta de mes (abajo). Así ninguna columna queda
+// desfasada respecto del resto.
+function BarrasVerticales({ data, color, alto = 150 }) {
   const max = Math.max(1, ...data.map(d => d.value));
   return (
-    <Box sx={{ display: "flex", alignItems: "flex-end", gap: 0.5, height: alto }}>
+    <Box sx={{ display: "flex", alignItems: "stretch", gap: 0.5 }}>
       {data.map((d) => (
-        <Box key={d.label} sx={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", height: "100%", justifyContent: "flex-end" }}>
-          <Typography variant="caption" sx={{ fontSize: 10, lineHeight: 1, mb: 0.25, color: "text.secondary" }}>
+        <Box key={d.label} sx={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+          {/* valor */}
+          <Typography variant="caption" sx={{ fontSize: 10, lineHeight: 1, height: 14, color: "text.secondary" }}>
             {d.value || ""}
           </Typography>
-          <Tooltip title={`${d.full ?? d.label}: ${d.value}`} arrow disableInteractive>
-            <Box sx={{
-              width: "78%", borderRadius: "4px 4px 0 0",
-              height: `${(d.value / max) * 100}%`, minHeight: d.value > 0 ? 3 : 0,
-              bgcolor: color, transition: "height .2s",
-            }} />
-          </Tooltip>
+          {/* zona de barras con baseline común */}
+          <Box sx={{ height: alto, width: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", borderBottom: "1px solid", borderColor: "divider" }}>
+            <Tooltip title={`${d.full ?? d.label}: ${d.value}`} arrow disableInteractive>
+              <Box sx={{
+                width: "70%", borderRadius: "4px 4px 0 0",
+                height: `${(d.value / max) * 100}%`, minHeight: d.value > 0 ? 3 : 0,
+                bgcolor: color, transition: "height .2s",
+              }} />
+            </Tooltip>
+          </Box>
+          {/* etiqueta */}
           <Typography variant="caption" sx={{ fontSize: 9.5, lineHeight: 1, mt: 0.5, color: "text.secondary" }}>
             {d.label}
           </Typography>
@@ -98,6 +106,7 @@ export default function SeguimientoDiarioPage() {
 
   const [registros, setRegistros] = useState(() => getCache("seguimiento-diario", proyecto?.id) ?? []);
   const [etapas, setEtapas] = useState([]);
+  const [tareasPorEtapa, setTareasPorEtapa] = useState({}); // { nombreEtapa: [nombreTarea, ...] }
   const [loading, setLoading] = useState(true);
 
   const today = new Date();
@@ -106,10 +115,11 @@ export default function SeguimientoDiarioPage() {
 
   const [open, setOpen] = useState(false);
   const [fechaSel, setFechaSel] = useState(null);
-  const [form, setForm] = useState({ trabajado: true, causa: "", etapas: [], observacion: "" });
+  const [form, setForm] = useState({ trabajado: true, causa: "", etapas: [], tareas: [], observacion: "" });
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
+  const [etapasOpen, setEtapasOpen] = useState(false);
 
   const reload = async () => {
     if (!proyecto) return;
@@ -118,11 +128,26 @@ export default function SeguimientoDiarioPage() {
     setLoading(!cached);
     const [{ data: regs }, { data: hs }] = await Promise.all([
       supabase.from("seguimiento_diario").select("*").eq("proyecto_id", proyecto.id),
-      supabase.from("hitos").select("nombre,orden").eq("proyecto_id", proyecto.id).order("orden"),
+      supabase.from("hitos").select("id,nombre,orden").eq("proyecto_id", proyecto.id).order("orden"),
     ]);
     setCache("seguimiento-diario", proyecto.id, regs ?? []);
     setRegistros(regs ?? []);
     setEtapas((hs ?? []).map(h => h.nombre));
+
+    // Tareas (subtareas) de cada etapa/hito, sólo para asociar (no marca avance)
+    const ids = (hs ?? []).map(h => h.id);
+    const mapa = {};
+    if (ids.length) {
+      const { data: ts } = await supabase
+        .from("hito_tareas").select("hito_id,nombre,orden").in("hito_id", ids).order("orden");
+      const idToNombre = Object.fromEntries((hs ?? []).map(h => [h.id, h.nombre]));
+      for (const t of ts ?? []) {
+        const et = idToNombre[t.hito_id];
+        if (!et) continue;
+        (mapa[et] ??= []).push(t.nombre);
+      }
+    }
+    setTareasPorEtapa(mapa);
     setLoading(false);
   };
 
@@ -199,6 +224,7 @@ export default function SeguimientoDiarioPage() {
       trabajado: r ? r.trabajado : true,
       causa: r?.causa ?? "",
       etapas: parseEtapas(r?.etapa),
+      tareas: parseEtapas(r?.tareas),
       observacion: r?.observacion ?? "",
     });
     setErr(null);
@@ -219,6 +245,7 @@ export default function SeguimientoDiarioPage() {
       trabajado: form.trabajado,
       causa: form.trabajado ? null : (form.causa.trim() || null),
       etapa: joinEtapas(form.etapas),
+      tareas: joinEtapas(form.tareas),
       observacion: form.observacion.trim() || null,
     };
     const res = await supabase
@@ -268,7 +295,7 @@ export default function SeguimientoDiarioPage() {
           <Card sx={{ height: "100%" }}>
             <CardContent>
               <Typography variant="subtitle2" sx={{ mb: 1.5 }}>Días trabajados por etapa</Typography>
-              <BarrasHorizontales data={porEtapa} color={success} />
+              <BarrasHorizontales data={porEtapa} color={alpha(success, 0.45)} />
             </CardContent>
           </Card>
         </Grid>
@@ -315,7 +342,12 @@ export default function SeguimientoDiarioPage() {
                 if (r.trabajado) { bg = alpha(theme.palette.success.main, 0.16); border = alpha(theme.palette.success.main, 0.5); }
                 else { bg = alpha(theme.palette.error.main, 0.16); border = alpha(theme.palette.error.main, 0.5); }
               }
-              const detalle = r ? (r.trabajado ? ets.join(", ") : `No: ${r.causa || "—"}`) : "";
+              const tareasDia = r ? parseEtapas(r.tareas) : [];
+              const detalle = r
+                ? (r.trabajado
+                    ? [ets.join(", "), tareasDia.length ? "Tareas: " + tareasDia.join(", ") : ""].filter(Boolean).join(" · ")
+                    : `No: ${r.causa || "—"}`)
+                : "";
               return (
                 <Tooltip
                   key={fecha}
@@ -400,10 +432,21 @@ export default function SeguimientoDiarioPage() {
               <InputLabel id="etapas-lbl">Etapas (opcional)</InputLabel>
               <Select
                 labelId="etapas-lbl" multiple
+                open={etapasOpen}
+                onOpen={() => setEtapasOpen(true)}
+                onClose={() => setEtapasOpen(false)}
                 value={form.etapas}
-                onChange={(e) => setForm(f => ({ ...f, etapas: typeof e.target.value === "string" ? e.target.value.split(",") : e.target.value }))}
+                onChange={(e) => {
+                  const val = typeof e.target.value === "string" ? e.target.value.split(",") : e.target.value;
+                  // Al cambiar etapas, descartar tareas que ya no pertenezcan a ninguna etapa elegida
+                  setForm(f => {
+                    const disponibles = new Set(val.flatMap(et => tareasPorEtapa[et] ?? []));
+                    return { ...f, etapas: val, tareas: f.tareas.filter(t => disponibles.has(t)) };
+                  });
+                }}
                 input={<OutlinedInput label="Etapas (opcional)" />}
                 renderValue={(sel) => sel.join(", ")}
+                MenuProps={{ PaperProps: { sx: { maxHeight: 360 } } }}
               >
                 {etapas.map(et => (
                   <MenuItem key={et} value={et}>
@@ -411,8 +454,39 @@ export default function SeguimientoDiarioPage() {
                     <ListItemText primary={et} />
                   </MenuItem>
                 ))}
+                <Box sx={{ position: "sticky", bottom: 0, bgcolor: "background.paper", p: 1, borderTop: "1px solid", borderColor: "divider", display: "flex", justifyContent: "flex-end" }}>
+                  <Button size="small" variant="contained" onMouseDown={(e) => { e.preventDefault(); setEtapasOpen(false); }}>
+                    OK
+                  </Button>
+                </Box>
               </Select>
             </FormControl>
+
+            {/* Tareas de las etapas elegidas (opcional, sólo informativo) */}
+            {(() => {
+              const tareasDisponibles = [...new Set(form.etapas.flatMap(et => tareasPorEtapa[et] ?? []))];
+              if (tareasDisponibles.length === 0) return null;
+              return (
+                <FormControl fullWidth>
+                  <InputLabel id="tareas-lbl">Tareas (opcional)</InputLabel>
+                  <Select
+                    labelId="tareas-lbl" multiple
+                    value={form.tareas}
+                    onChange={(e) => setForm(f => ({ ...f, tareas: typeof e.target.value === "string" ? e.target.value.split(",") : e.target.value }))}
+                    input={<OutlinedInput label="Tareas (opcional)" />}
+                    renderValue={(sel) => sel.join(", ")}
+                    MenuProps={{ PaperProps: { sx: { maxHeight: 360 } } }}
+                  >
+                    {tareasDisponibles.map(t => (
+                      <MenuItem key={t} value={t}>
+                        <Checkbox checked={form.tareas.indexOf(t) > -1} />
+                        <ListItemText primary={t} />
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              );
+            })()}
 
             <TextField
               fullWidth label="Observación (opcional)" multiline minRows={2}
