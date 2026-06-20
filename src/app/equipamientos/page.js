@@ -2,13 +2,21 @@
 import {
   Card, CardContent, Stack, Typography, Alert, Box, TextField, MenuItem,
   Button, IconButton, Tooltip, LinearProgress, Divider, Checkbox, Chip,
+  Badge, Dialog, DialogTitle, DialogContent,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
+import DescriptionIcon from "@mui/icons-material/Description";
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
+import OpenInNewIcon from "@mui/icons-material/OpenInNew";
+import CloseIcon from "@mui/icons-material/Close";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
+import { fmtDate } from "@/components/Money";
+
+const esImagen = (f) => (f.mime || "").startsWith("image/");
 
 const GENERAL = "General";
 
@@ -59,19 +67,26 @@ export default function EquipamientosPage() {
   const { proyecto } = useProjects();
   const [etapas, setEtapas] = useState([]);
   const [items, setItems] = useState([]);
+  const [repos, setRepos] = useState([]); // archivos del repositorio
   const [loading, setLoading] = useState(true);
   const [nuevoPorGrupo, setNuevoPorGrupo] = useState({}); // { [grupo]: "nombre" }
+  const [gruposManual, setGruposManual] = useState([]); // grupos agregados sin items todavía
+  const [nuevoGrupo, setNuevoGrupo] = useState("");
+  const [detalle, setDetalle] = useState(null); // equipamiento abierto
+  const [preview, setPreview] = useState(null); // archivo en visor
   const [drag, setDrag] = useState(null); // { grupo, fromId, overId }
 
   const reload = async () => {
     if (!proyecto) return;
     setLoading(true);
-    const [{ data: hs }, { data: eq }] = await Promise.all([
+    const [{ data: hs }, { data: eq }, { data: rp }] = await Promise.all([
       supabase.from("hitos").select("nombre,orden").eq("proyecto_id", proyecto.id).order("orden"),
       supabase.from("equipamientos").select("*").eq("proyecto_id", proyecto.id).order("orden"),
+      supabase.from("repositorio").select("*").eq("proyecto_id", proyecto.id).order("fecha", { ascending: false }),
     ]);
     setEtapas((hs ?? []).map(h => h.nombre));
     setItems(eq ?? []);
+    setRepos(rp ?? []);
     setLoading(false);
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
@@ -79,14 +94,47 @@ export default function EquipamientosPage() {
   const grupoDe = (it) => it.etapa || GENERAL;
   const itemsDe = (g) => items.filter(i => grupoDe(i) === g).sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
 
-  // Grupos a mostrar: todas las etapas del proyecto (aunque estén vacías,
-  // para poder cargar dentro de cada una) + grupos extra con items + General.
+  // Archivos del repositorio asociados a un equipamiento (por etiqueta ↔ nombre).
+  const archivosDe = (it) => {
+    const n = (it.nombre || "").trim().toLowerCase();
+    if (!n) return [];
+    return repos.filter(r => {
+      const et = (r.etiqueta || "").trim().toLowerCase();
+      if (!et) return false;
+      return et === n || et.includes(n) || n.includes(et);
+    });
+  };
+
+  // Grupos a mostrar: los que tienen items + los agregados manualmente.
   const gruposConItems = Array.from(new Set(items.map(grupoDe)));
   const grupos = [
-    ...etapas,
+    ...etapas.filter(e => gruposConItems.includes(e)),
     ...gruposConItems.filter(g => !etapas.includes(g) && g !== GENERAL),
-    GENERAL,
+    ...(gruposConItems.includes(GENERAL) ? [GENERAL] : []),
+    ...gruposManual.filter(g => !gruposConItems.includes(g)),
   ];
+  // Etapas que todavía no son grupo visible (para el selector "Agregar grupo").
+  const etapasDisponibles = [...etapas, GENERAL].filter(e => !grupos.includes(e));
+
+  const agregarGrupo = (g) => {
+    const nombre = (g || "").trim();
+    if (!nombre || grupos.includes(nombre)) { setNuevoGrupo(""); return; }
+    setGruposManual(prev => [...prev, nombre]);
+    setNuevoGrupo("");
+  };
+
+  // Elimina un grupo de la vista: si tiene items, los borra (con confirmación).
+  const eliminarGrupo = async (g) => {
+    const lista = itemsDe(g);
+    if (lista.length > 0) {
+      if (!confirm(`¿Eliminar el grupo "${g}" y sus ${lista.length} equipamiento(s)?`)) return;
+      const ids = lista.map(i => i.id);
+      const { error } = await supabase.from("equipamientos").delete().in("id", ids);
+      if (error) { alert(error.message); return; }
+    }
+    setGruposManual(prev => prev.filter(x => x !== g));
+    reload();
+  };
 
   const update = async (id, patch) => {
     setItems(prev => prev.map(i => i.id === id ? { ...i, ...patch } : i));
@@ -176,6 +224,33 @@ export default function EquipamientosPage() {
 
       {loading && <LinearProgress />}
 
+      {/* Agregar grupo (etapa o nombre libre) */}
+      <Card>
+        <CardContent sx={{ py: 1.5 }}>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }}>
+            <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0 }}>Agregar grupo:</Typography>
+            {etapasDisponibles.length > 0 && (
+              <TextField select size="small" label="Desde una etapa" sx={{ minWidth: 200 }}
+                value="" onChange={(e) => agregarGrupo(e.target.value)}>
+                {etapasDisponibles.map(e => <MenuItem key={e} value={e}>{e}</MenuItem>)}
+              </TextField>
+            )}
+            <TextField size="small" placeholder="o nombre nuevo…" value={nuevoGrupo}
+              onChange={(e) => setNuevoGrupo(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") agregarGrupo(nuevoGrupo); }} />
+            <Button variant="outlined" startIcon={<AddIcon />} onClick={() => agregarGrupo(nuevoGrupo)} sx={{ flexShrink: 0 }}>
+              Agregar grupo
+            </Button>
+          </Stack>
+        </CardContent>
+      </Card>
+
+      {grupos.length === 0 && (
+        <Typography color="text.secondary" sx={{ p: 2, textAlign: "center" }}>
+          No hay grupos. Agregá uno arriba o cargá el checklist sugerido.
+        </Typography>
+      )}
+
       {(
         grupos.map((g) => {
           const lista = itemsDe(g);
@@ -188,6 +263,11 @@ export default function EquipamientosPage() {
                   <Chip size="small" variant="outlined"
                     color={lista.length > 0 && compradosG === lista.length ? "success" : "default"}
                     label={`${compradosG}/${lista.length}`} />
+                  <Tooltip title="Eliminar grupo">
+                    <IconButton size="small" onClick={() => eliminarGrupo(g)}>
+                      <DeleteOutlineIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                 </Stack>
                 <Stack spacing={0.5}>
                   {lista.map((it) => {
@@ -226,6 +306,19 @@ export default function EquipamientosPage() {
                         <CommitField value={it.cantidad} placeholder="Cant." small align="right"
                           sx={{ width: 64, flexShrink: 0 }}
                           onCommit={(v) => update(it.id, { cantidad: v || null })} />
+                        {(() => {
+                          const n = archivosDe(it).length;
+                          return (
+                            <Tooltip title={n > 0 ? `${n} archivo(s) en repositorio` : "Ver repositorio asociado"}>
+                              <IconButton size="small" onClick={() => setDetalle(it)}
+                                sx={{ flexShrink: 0, color: n > 0 ? "secondary.main" : "inherit" }}>
+                                <Badge badgeContent={n} color="secondary">
+                                  <DescriptionIcon fontSize="small" />
+                                </Badge>
+                              </IconButton>
+                            </Tooltip>
+                          );
+                        })()}
                         <Tooltip title="Eliminar">
                           <IconButton className="del" size="small" onClick={() => del(it)}
                             sx={{ opacity: { xs: 1, sm: 0.25 }, transition: "opacity .15s" }}>
@@ -254,6 +347,72 @@ export default function EquipamientosPage() {
           );
         })
       )}
+
+      {/* Detalle: archivos del repositorio asociados al equipamiento */}
+      <Dialog open={!!detalle} onClose={() => setDetalle(null)} fullWidth maxWidth="sm">
+        <DialogTitle>{detalle?.nombre}</DialogTitle>
+        <DialogContent dividers>
+          {(() => {
+            const archivos = detalle ? archivosDe(detalle) : [];
+            if (archivos.length === 0) {
+              return (
+                <Typography variant="body2" color="text.secondary">
+                  No hay archivos en el repositorio con la etiqueta “{detalle?.nombre}”.
+                  Subí presupuestos/planos en Repositorio con esa etiqueta para verlos acá.
+                </Typography>
+              );
+            }
+            return (
+              <Stack spacing={1}>
+                {archivos.map(a => (
+                  <Stack key={a.id} direction="row" spacing={1.5} alignItems="center"
+                    sx={{ p: 1, borderRadius: 1.5, border: "1px solid", borderColor: "divider", cursor: "pointer", "&:hover": { bgcolor: "rgba(15,42,74,0.03)" } }}
+                    onClick={() => setPreview(a)}>
+                    <Box sx={{ width: 44, height: 44, borderRadius: 1, overflow: "hidden", flexShrink: 0, bgcolor: "rgba(15,42,74,0.04)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {esImagen(a)
+                        ? <Box component="img" src={a.url} alt="" sx={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        : <PictureAsPdfIcon sx={{ color: "error.main" }} />}
+                    </Box>
+                    <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                      <Typography variant="body2" noWrap fontWeight={600}>{a.nombre}</Typography>
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        <Typography variant="caption" color="text.secondary">{fmtDate(a.fecha)}</Typography>
+                        {a.etiqueta && <Chip size="small" variant="outlined" label={a.etiqueta} sx={{ height: 18, fontSize: 10 }} />}
+                      </Stack>
+                    </Box>
+                  </Stack>
+                ))}
+              </Stack>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Visor en línea (PDF o imagen) */}
+      <Dialog open={!!preview} onClose={() => setPreview(null)} maxWidth="lg" fullWidth>
+        <Box sx={{ position: "relative", bgcolor: "#000" }}>
+          <Stack direction="row" spacing={0.5} sx={{ position: "absolute", top: 8, right: 8, zIndex: 1 }}>
+            {preview && (
+              <Tooltip title="Abrir en pestaña nueva">
+                <IconButton component="a" href={preview.url} target="_blank" rel="noopener"
+                  sx={{ bgcolor: "rgba(255,255,255,0.85)", "&:hover": { bgcolor: "#fff" } }}>
+                  <OpenInNewIcon />
+                </IconButton>
+              </Tooltip>
+            )}
+            <IconButton onClick={() => setPreview(null)}
+              sx={{ bgcolor: "rgba(255,255,255,0.85)", "&:hover": { bgcolor: "#fff" } }}>
+              <CloseIcon />
+            </IconButton>
+          </Stack>
+          {preview && (esImagen(preview)
+            ? <Box component="img" src={preview.url} alt={preview.nombre}
+                sx={{ maxWidth: "100%", maxHeight: "85vh", display: "block", m: "0 auto" }} />
+            : <Box component="iframe" src={preview.url} title={preview.nombre}
+                sx={{ width: "100%", height: "85vh", border: 0, display: "block", bgcolor: "#fff" }} />
+          )}
+        </Box>
+      </Dialog>
     </Stack>
   );
 }
