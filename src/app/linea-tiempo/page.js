@@ -86,6 +86,11 @@ const ESTADOS = [
 // Deriva el estado de una tarea (compatibilidad con filas previas a la migración).
 const estadoTarea = (t) =>
   t.estado || (t.completado ? "finalizado" : ((t.avance ?? 0) > 0 ? "en_curso" : "no_iniciado"));
+
+// Anchos compartidos para alinear las fechas de tareas con las de la etapa.
+const DATE_W = 150;   // ancho de cada campo de fecha (Inicio / Fin)
+const CHIP_W = 92;    // hueco del chip "días háb." de la etapa
+const CHK_W = 42;     // hueco del checkbox de la etapa
 function GanttEtapas({ etapas, inicioReal, finReal, onUpdate, getFraccion }) {
   const ini = new Date(inicioReal + "T00:00:00");
   const fin = new Date(finReal + "T00:00:00");
@@ -229,7 +234,7 @@ function GanttEtapas({ etapas, inicioReal, finReal, onUpdate, getFraccion }) {
 }
 
 // Campo de fecha que guarda recién al salir del campo (blur/Enter), no en cada
-function DateField({ value, onCommit, disabled, label, fullWidth, sx }) {
+function DateField({ value, onCommit, disabled, label, fullWidth, sx, size }) {
   const [local, setLocal] = useState(value ?? "");
   const [focused, setFocused] = useState(false);
   // Sincroniza con el valor externo cuando el campo no está en edición.
@@ -241,7 +246,7 @@ function DateField({ value, onCommit, disabled, label, fullWidth, sx }) {
   };
   return (
     <TextField
-      label={label} type="date" InputLabelProps={{ shrink: true }}
+      label={label} type="date" InputLabelProps={{ shrink: true }} size={size}
       fullWidth={fullWidth} sx={sx} disabled={disabled}
       value={local}
       onFocus={() => setFocused(true)}
@@ -622,24 +627,28 @@ export default function LineaTiempoPage() {
                       {!isSm && (
                         <Box onClick={(e) => e.stopPropagation()} sx={{ display: "flex", gap: 1.5, alignItems: "center" }}>
                           <DateField
-                            label="Inicio" sx={{ width: 155 }}
+                            label="Inicio" sx={{ width: DATE_W }}
                             value={h.fecha_estimada ?? ""}
                             disabled={savingId === h.id}
                             onCommit={(v) => updateHito(h.id, { fecha_estimada: v })}
                           />
                           <DateField
-                            label="Fin" sx={{ width: 155 }}
+                            label="Fin" sx={{ width: DATE_W }}
                             value={h.fecha_real ?? ""}
                             disabled={savingId === h.id}
                             onCommit={(v) => updateHito(h.id, { fecha_real: v })}
                           />
                           {(() => {
                             const d = diasHabiles(h.fecha_estimada, h.fecha_real);
-                            return d != null ? (
-                              <Chip size="small" variant="outlined"
-                                label={`${d} día${Math.abs(d) === 1 ? "" : "s"} háb.`}
-                                color={d < 0 ? "error" : "default"} />
-                            ) : <Box sx={{ width: 70 }} />;
+                            return (
+                              <Box sx={{ width: CHIP_W, display: "flex", justifyContent: "center" }}>
+                                {d != null && (
+                                  <Chip size="small" variant="outlined"
+                                    label={`${d} día${Math.abs(d) === 1 ? "" : "s"} háb.`}
+                                    color={d < 0 ? "error" : "default"} />
+                                )}
+                              </Box>
+                            );
                           })()}
                         </Box>
                       )}
@@ -733,48 +742,56 @@ export default function LineaTiempoPage() {
                                   <DragIndicatorIcon fontSize="small" />
                                 </IconButton>
                               </Tooltip>
-                              <Box sx={{ flexGrow: 1, minWidth: 0, py: 0.5 }}>
-                                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                                  <Typography variant="body2" sx={{ flexGrow: 1, minWidth: 120, color: est === "finalizado" ? "text.secondary" : "text.primary" }}>
-                                    {t.nombre}
-                                  </Typography>
-                                  <Box onClick={(e) => e.stopPropagation()}>
-                                    <TextField
-                                      select size="small" value={est}
-                                      onChange={(e) => setEstadoTarea(t, e.target.value)}
-                                      sx={{ width: 140 }}
-                                    >
-                                      {ESTADOS.map(op => <MenuItem key={op.value} value={op.value}>{op.label}</MenuItem>)}
-                                    </TextField>
-                                  </Box>
-                                  {est === "en_curso" && (
-                                    <Box sx={{ px: 0.5 }} onClick={(e) => e.stopPropagation()}>
-                                      <PctField value={avanceTarea(t)} onCommit={(v) => setAvanceTarea(t, v)} />
-                                    </Box>
-                                  )}
-                                </Stack>
-                                {(est === "en_curso" || est === "finalizado") && (
-                                  <Stack direction="row" spacing={1} sx={{ mt: 1 }} onClick={(e) => e.stopPropagation()} flexWrap="wrap" useFlexGap>
+                              {/* nombre */}
+                              <Typography variant="body2" noWrap sx={{ flexGrow: 1, minWidth: 0, mr: 1, color: est === "finalizado" ? "text.secondary" : "text.primary" }}>
+                                {t.nombre}
+                              </Typography>
+                              {/* estado */}
+                              <Box onClick={(e) => e.stopPropagation()} sx={{ mr: 1 }}>
+                                <TextField
+                                  select size="small" value={est}
+                                  onChange={(e) => setEstadoTarea(t, e.target.value)}
+                                  sx={{ width: 130 }}
+                                >
+                                  {ESTADOS.map(op => <MenuItem key={op.value} value={op.value}>{op.label}</MenuItem>)}
+                                </TextField>
+                              </Box>
+                              {/* avance (sólo en curso) */}
+                              <Box onClick={(e) => e.stopPropagation()} sx={{ mr: 1.5, width: 92, display: "flex", justifyContent: "flex-end" }}>
+                                {est === "en_curso" && (
+                                  <PctField value={avanceTarea(t)} onCommit={(v) => setAvanceTarea(t, v)} />
+                                )}
+                              </Box>
+                              {/* fechas alineadas con la etapa */}
+                              <Box onClick={(e) => e.stopPropagation()} sx={{ display: "flex", gap: 1.5, alignItems: "center" }}>
+                                <Box sx={{ width: DATE_W }}>
+                                  {est !== "no_iniciado" && (
                                     <DateField
-                                      label="Inicio" sx={{ width: 150 }}
+                                      label="Inicio" size="small" fullWidth
                                       value={t.fecha_inicio ?? ""}
                                       onCommit={(v) => setFechaTarea(t, "fecha_inicio", v)}
                                     />
-                                    {est === "finalizado" && (
-                                      <DateField
-                                        label="Fin" sx={{ width: 150 }}
-                                        value={t.fecha_fin ?? ""}
-                                        onCommit={(v) => setFechaTarea(t, "fecha_fin", v)}
-                                      />
-                                    )}
-                                  </Stack>
-                                )}
+                                  )}
+                                </Box>
+                                <Box sx={{ width: DATE_W }}>
+                                  {est === "finalizado" && (
+                                    <DateField
+                                      label="Fin" size="small" fullWidth
+                                      value={t.fecha_fin ?? ""}
+                                      onCommit={(v) => setFechaTarea(t, "fecha_fin", v)}
+                                    />
+                                  )}
+                                </Box>
+                                <Box sx={{ width: CHIP_W }} />
+                                <Box sx={{ width: CHK_W }} />
+                                <Box sx={{ width: CHK_W, display: "flex", justifyContent: "center" }}>
+                                  <Tooltip title="Eliminar tarea">
+                                    <IconButton className="del" size="small" sx={{ opacity: { xs: 1, sm: 0 }, transition: "opacity .15s" }} onClick={() => delTarea(t)}>
+                                      <DeleteOutlineIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                </Box>
                               </Box>
-                              <Tooltip title="Eliminar tarea">
-                                <IconButton className="del" size="small" sx={{ opacity: { xs: 1, sm: 0 }, transition: "opacity .15s" }} onClick={() => delTarea(t)}>
-                                  <DeleteOutlineIcon fontSize="small" />
-                                </IconButton>
-                              </Tooltip>
                             </Stack>
                             );
                           })}
