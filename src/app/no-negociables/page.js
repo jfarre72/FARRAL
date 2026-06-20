@@ -27,7 +27,10 @@ function NotaField({ value, onCommit }) {
       onFocus={() => setFocused(true)}
       onChange={(e) => setLocal(e.target.value)}
       onBlur={commit}
-      InputProps={{ disableUnderline: true }}
+      sx={{
+        "& .MuiInput-root::before": { borderBottomColor: "transparent" },
+        "& .MuiInput-root:hover:not(.Mui-focused)::before": { borderBottomColor: "rgba(15,42,74,0.2) !important" },
+      }}
     />
   );
 }

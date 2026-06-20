@@ -2,7 +2,7 @@
 import {
   Card, CardContent, Stack, Typography, Alert, Box, TextField, MenuItem,
   Button, IconButton, Tooltip, LinearProgress, Divider, Checkbox, Chip,
-  Badge, Dialog, DialogTitle, DialogContent,
+  Badge, Dialog, DialogTitle, DialogContent, Collapse,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
@@ -11,12 +11,19 @@ import DescriptionIcon from "@mui/icons-material/Description";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import CloseIcon from "@mui/icons-material/Close";
-import { useEffect, useState } from "react";
+import UploadFileIcon from "@mui/icons-material/UploadFile";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtDate } from "@/components/Money";
 
 const esImagen = (f) => (f.mime || "").startsWith("image/");
+const hoyISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 const GENERAL = "General";
 
@@ -74,7 +81,10 @@ export default function EquipamientosPage() {
   const [nuevoGrupo, setNuevoGrupo] = useState("");
   const [detalle, setDetalle] = useState(null); // equipamiento abierto
   const [preview, setPreview] = useState(null); // archivo en visor
+  const [colapsado, setColapsado] = useState({}); // { [grupo]: true } => cerrado
+  const [subiendo, setSubiendo] = useState(false);
   const [drag, setDrag] = useState(null); // { grupo, fromId, overId }
+  const fileRef = useRef(null);
 
   const reload = async () => {
     if (!proyecto) return;
@@ -134,6 +144,33 @@ export default function EquipamientosPage() {
     }
     setGruposManual(prev => prev.filter(x => x !== g));
     reload();
+  };
+
+  // Adjunta archivos a un equipamiento: se suben al repositorio con etiqueta =
+  // nombre del equipamiento, por lo que quedan asociados automáticamente.
+  const onAdjuntar = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length || !proyecto || !detalle) return;
+    setSubiendo(true);
+    try {
+      for (const file of files) {
+        const ext = (file.name.split(".").pop() || "bin").toLowerCase();
+        const path = `${proyecto.id}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+        const { error: upErr } = await supabase.storage.from("repositorio").upload(path, file, { upsert: false, contentType: file.type || undefined });
+        if (upErr) { alert(upErr.message); continue; }
+        const { data: pub } = supabase.storage.from("repositorio").getPublicUrl(path);
+        const { error: insErr } = await supabase.from("repositorio").insert({
+          proyecto_id: proyecto.id, url: pub.publicUrl, path,
+          nombre: file.name, mime: file.type || null,
+          fecha: hoyISO(), etiqueta: detalle.nombre,
+        });
+        if (insErr) alert(insErr.message);
+      }
+      await reload();
+    } finally {
+      setSubiendo(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
   };
 
   const update = async (id, patch) => {
@@ -258,17 +295,22 @@ export default function EquipamientosPage() {
           return (
             <Card key={g}>
               <CardContent>
-                <Stack direction="row" alignItems="center" sx={{ mb: 1.5 }} spacing={1}>
+                <Stack direction="row" alignItems="center" sx={{ mb: colapsado[g] ? 0 : 1.5, cursor: "pointer" }} spacing={1}
+                  onClick={() => setColapsado(p => ({ ...p, [g]: !p[g] }))}>
+                  <IconButton size="small" sx={{ pointerEvents: "none" }}>
+                    {colapsado[g] ? <ExpandMoreIcon /> : <ExpandLessIcon />}
+                  </IconButton>
                   <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>{g}</Typography>
                   <Chip size="small" variant="outlined"
                     color={lista.length > 0 && compradosG === lista.length ? "success" : "default"}
                     label={`${compradosG}/${lista.length}`} />
                   <Tooltip title="Eliminar grupo">
-                    <IconButton size="small" onClick={() => eliminarGrupo(g)}>
+                    <IconButton size="small" onClick={(e) => { e.stopPropagation(); eliminarGrupo(g); }}>
                       <DeleteOutlineIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
                 </Stack>
+                <Collapse in={!colapsado[g]} unmountOnExit>
                 <Stack spacing={0.5}>
                   {lista.map((it) => {
                     const isTarget = drag && drag.grupo === g && drag.overId === it.id && drag.fromId !== it.id;
@@ -342,6 +384,7 @@ export default function EquipamientosPage() {
                     Agregar
                   </Button>
                 </Stack>
+                </Collapse>
               </CardContent>
             </Card>
           );
@@ -350,8 +393,18 @@ export default function EquipamientosPage() {
 
       {/* Detalle: archivos del repositorio asociados al equipamiento */}
       <Dialog open={!!detalle} onClose={() => setDetalle(null)} fullWidth maxWidth="sm">
-        <DialogTitle>{detalle?.nombre}</DialogTitle>
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Box sx={{ flexGrow: 1 }}>{detalle?.nombre}</Box>
+            <input ref={fileRef} type="file" accept="application/pdf,image/*" multiple hidden onChange={onAdjuntar} />
+            <Button size="small" variant="contained" color="secondary" startIcon={<UploadFileIcon />}
+              onClick={() => fileRef.current?.click()} disabled={subiendo}>
+              {subiendo ? "Subiendo…" : "Adjuntar"}
+            </Button>
+          </Stack>
+        </DialogTitle>
         <DialogContent dividers>
+          {subiendo && <LinearProgress sx={{ mb: 1.5 }} />}
           {(() => {
             const archivos = detalle ? archivosDe(detalle) : [];
             if (archivos.length === 0) {
