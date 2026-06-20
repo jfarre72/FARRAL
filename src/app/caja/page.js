@@ -321,18 +321,24 @@ export default function CajaPage() {
       }
       return true;
     });
-    if (caja === "all") {
-      return filtered.map(r => ({ ...r, _delta: null, _saldo: null }));
-    }
+    // Saldo acumulado (corrido) en ambas monedas, en orden cronológico.
     const asc = [...filtered].sort((a, b) => a.fecha > b.fecha ? 1 : -1);
-    let saldo = 0;
+    let saldo = 0, saldoUSD = 0, saldoARS = 0;
     const acc = {};
     for (const r of asc) {
-      const d = deltaPara(r, caja);
-      saldo += d;
-      acc[r.id] = { delta: d, saldo };
+      const d = caja === "all" ? null : deltaPara(r, caja);
+      if (d != null) saldo += d;
+      saldoUSD += deltaPara(r, "USD");
+      saldoARS += deltaPara(r, "ARS");
+      acc[r.id] = { delta: d, saldo, saldoUSD, saldoARS };
     }
-    return filtered.map(r => ({ ...r, _delta: acc[r.id]?.delta ?? 0, _saldo: acc[r.id]?.saldo ?? 0 }));
+    return filtered.map(r => ({
+      ...r,
+      _delta: acc[r.id]?.delta ?? (caja === "all" ? null : 0),
+      _saldo: caja === "all" ? null : (acc[r.id]?.saldo ?? 0),
+      _saldoUSD: acc[r.id]?.saldoUSD ?? 0,
+      _saldoARS: acc[r.id]?.saldoARS ?? 0,
+    }));
   }, [unified, filtroMoneda, filtroTitular]);
 
   const tipoLabel = { ingreso: "Ingreso", egreso: "Egreso", cambio: "Cambio", traspaso: "Traspaso" };
@@ -742,7 +748,14 @@ export default function CajaPage() {
                       <TableCell align="center">Categoría</TableCell>
                       <TableCell align="center">Etapa</TableCell>
                       <TableCell align="right">Monto</TableCell>
-                      {filtroMoneda !== "all" && <TableCell align="right">Saldo</TableCell>}
+                      {filtroMoneda === "all" ? (
+                        <>
+                          <TableCell align="right">Saldo USD</TableCell>
+                          <TableCell align="right">Saldo ARS</TableCell>
+                        </>
+                      ) : (
+                        <TableCell align="right">Saldo</TableCell>
+                      )}
                       <TableCell sx={{ width: 70 }}>Comprob.</TableCell>
                       <TableCell align="right" sx={{ width: 90 }}></TableCell>
                     </TableRow>
@@ -815,7 +828,20 @@ export default function CajaPage() {
                             </Typography>
                           )}
                         </TableCell>
-                        {filtroMoneda !== "all" && (
+                        {filtroMoneda === "all" ? (
+                          <>
+                            <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                              <Typography component="span" fontWeight={600} color="text.secondary" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                                {fmtMoney(m._saldoUSD || 0, "USD")}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                              <Typography component="span" fontWeight={600} color="text.secondary" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                                {fmtMoney(m._saldoARS || 0, "ARS")}
+                              </Typography>
+                            </TableCell>
+                          </>
+                        ) : (
                           <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
                             <Typography component="span" fontWeight={600} sx={{ fontVariantNumeric: "tabular-nums" }}>
                               {fmtMoney(m._saldo || 0, filtroMoneda)}
