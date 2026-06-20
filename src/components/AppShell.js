@@ -18,6 +18,8 @@ import HandymanIcon from "@mui/icons-material/Handyman";
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import PhotoLibraryIcon from "@mui/icons-material/PhotoLibrary";
 import DescriptionIcon from "@mui/icons-material/Description";
+import FolderOpenIcon from "@mui/icons-material/FolderOpen";
+import GppMaybeIcon from "@mui/icons-material/GppMaybe";
 import SettingsIcon from "@mui/icons-material/Settings";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { useState } from "react";
@@ -33,6 +35,7 @@ const NAV = [
   { section: "Proyecto", items: [
     { label: "Proyectos",       href: "/proyectos",     icon: <AccountBalanceIcon /> },
     { label: "Inversores",      href: "/inversores",    icon: <GroupsIcon /> },
+    { label: "No negociables",  href: "/no-negociables", icon: <GppMaybeIcon /> },
     { label: "Ajustes",         href: "/configuracion", icon: <SettingsIcon /> },
   ]},
   { section: "Obra", items: [
@@ -49,6 +52,7 @@ const NAV = [
   ]},
   { section: "Documentación", items: [
     { label: "Galería",         href: "/galeria",       icon: <PhotoLibraryIcon /> },
+    { label: "Repositorio",     href: "/repositorio",   icon: <FolderOpenIcon /> },
     { label: "Reportería",      href: "/reporteria",    icon: <DescriptionIcon /> },
   ]},
 ];

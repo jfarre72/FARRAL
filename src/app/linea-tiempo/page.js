@@ -282,6 +282,30 @@ function PctField({ value, onCommit }) {
   );
 }
 
+// Nombre de tarea editable que guarda al salir del campo (blur/Enter).
+function NameField({ value, onCommit, strike }) {
+  const [local, setLocal] = useState(value ?? "");
+  const [focused, setFocused] = useState(false);
+  useEffect(() => { if (!focused) setLocal(value ?? ""); }, [value, focused]);
+  const commit = () => {
+    setFocused(false);
+    const v = local.trim();
+    if (v && v !== String(value ?? "")) onCommit(v);
+    else setLocal(value ?? "");
+  };
+  return (
+    <TextField
+      variant="standard" fullWidth value={local}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+      InputProps={{ disableUnderline: true }}
+      inputProps={{ style: { fontSize: 14, ...(strike ? { color: "rgba(0,0,0,0.55)" } : {}) } }}
+    />
+  );
+}
+
 export default function LineaTiempoPage() {
   const { proyecto } = useProjects();
   const theme = useTheme();
@@ -420,6 +444,12 @@ export default function LineaTiempoPage() {
     const patch = { [campo]: valor || null };
     setTareas(prev => prev.map(x => x.id === t.id ? { ...x, ...patch } : x));
     const { error } = await supabase.from("hito_tareas").update(patch).eq("id", t.id);
+    if (error) { alert(error.message); reload(); }
+  };
+
+  const setNombreTarea = async (t, nombre) => {
+    setTareas(prev => prev.map(x => x.id === t.id ? { ...x, nombre } : x));
+    const { error } = await supabase.from("hito_tareas").update({ nombre }).eq("id", t.id);
     if (error) { alert(error.message); reload(); }
   };
 
@@ -747,16 +777,17 @@ export default function LineaTiempoPage() {
                                   <DragIndicatorIcon fontSize="small" />
                                 </IconButton>
                               </Tooltip>
-                              {/* nombre */}
-                              <Typography variant="body2" noWrap sx={{ flexGrow: 1, minWidth: 0, mr: 1, color: est === "finalizado" ? "text.secondary" : "text.primary" }}>
-                                {t.nombre}
-                              </Typography>
+                              {/* nombre (editable) */}
+                              <Box onClick={(e) => e.stopPropagation()} sx={{ flexGrow: 1, minWidth: 0, mr: 1 }}>
+                                <NameField value={t.nombre} strike={est === "finalizado"}
+                                  onCommit={(v) => setNombreTarea(t, v)} />
+                              </Box>
                               {/* estado */}
                               <Box onClick={(e) => e.stopPropagation()} sx={{ mr: 1 }}>
                                 <TextField
                                   select size="small" value={est}
                                   onChange={(e) => setEstadoTarea(t, e.target.value)}
-                                  sx={{ width: 130 }}
+                                  sx={{ width: 150 }}
                                 >
                                   {ESTADOS.map(op => <MenuItem key={op.value} value={op.value}>{op.label}</MenuItem>)}
                                 </TextField>

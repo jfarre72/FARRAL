@@ -60,7 +60,7 @@ export default function EquipamientosPage() {
   const [etapas, setEtapas] = useState([]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [nuevo, setNuevo] = useState({ nombre: "", cantidad: "", etapa: GENERAL });
+  const [nuevoPorGrupo, setNuevoPorGrupo] = useState({}); // { [grupo]: "nombre" }
   const [drag, setDrag] = useState(null); // { grupo, fromId, overId }
 
   const reload = async () => {
@@ -79,16 +79,14 @@ export default function EquipamientosPage() {
   const grupoDe = (it) => it.etapa || GENERAL;
   const itemsDe = (g) => items.filter(i => grupoDe(i) === g).sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
 
-  // Grupos a mostrar: los que tienen items (en orden de etapas + el resto).
+  // Grupos a mostrar: todas las etapas del proyecto (aunque estén vacías,
+  // para poder cargar dentro de cada una) + grupos extra con items + General.
   const gruposConItems = Array.from(new Set(items.map(grupoDe)));
   const grupos = [
-    ...etapas.filter(e => gruposConItems.includes(e)),
+    ...etapas,
     ...gruposConItems.filter(g => !etapas.includes(g) && g !== GENERAL),
-    ...(gruposConItems.includes(GENERAL) ? [GENERAL] : []),
+    GENERAL,
   ];
-
-  // Opciones de etapa para el alta (etapas del proyecto + grupos existentes + General).
-  const opcionesEtapa = Array.from(new Set([...etapas, ...gruposConItems, GENERAL]));
 
   const update = async (id, patch) => {
     setItems(prev => prev.map(i => i.id === id ? { ...i, ...patch } : i));
@@ -96,15 +94,15 @@ export default function EquipamientosPage() {
     if (error) { alert(error.message); reload(); }
   };
 
-  const add = async () => {
-    const nombre = nuevo.nombre.trim();
+  const add = async (grupo) => {
+    const nombre = (nuevoPorGrupo[grupo] || "").trim();
     if (!nombre || !proyecto) return;
-    const etapa = nuevo.etapa === GENERAL ? null : nuevo.etapa;
-    const orden = (itemsDe(nuevo.etapa).reduce((m, i) => Math.max(m, i.orden || 0), 0)) + 1;
+    const etapa = grupo === GENERAL ? null : grupo;
+    const orden = (itemsDe(grupo).reduce((m, i) => Math.max(m, i.orden || 0), 0)) + 1;
     const { error } = await supabase.from("equipamientos")
-      .insert({ proyecto_id: proyecto.id, etapa, nombre, cantidad: nuevo.cantidad || null, orden });
+      .insert({ proyecto_id: proyecto.id, etapa, nombre, orden });
     if (error) { alert(error.message); return; }
-    setNuevo({ nombre: "", cantidad: "", etapa: nuevo.etapa });
+    setNuevoPorGrupo(p => ({ ...p, [grupo]: "" }));
     reload();
   };
 
@@ -169,42 +167,16 @@ export default function EquipamientosPage() {
           <Chip label={`${comprados}/${totalItems} comprados`}
             color={comprados === totalItems ? "success" : "default"} variant="outlined" />
         )}
+        {totalItems === 0 && (
+          <Button variant="outlined" onClick={seed} sx={{ flexShrink: 0 }}>
+            Cargar checklist sugerido
+          </Button>
+        )}
       </Stack>
 
       {loading && <LinearProgress />}
 
-      {/* Alta rápida */}
-      <Card>
-        <CardContent>
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "flex-end" }}>
-            <TextField label="Nuevo equipamiento" placeholder="Nombre" fullWidth size="small"
-              value={nuevo.nombre} onChange={(e) => setNuevo(n => ({ ...n, nombre: e.target.value }))}
-              onKeyDown={(e) => { if (e.key === "Enter") add(); }} />
-            <TextField label="Cantidad" size="small" sx={{ width: { xs: "100%", sm: 120 } }}
-              value={nuevo.cantidad} onChange={(e) => setNuevo(n => ({ ...n, cantidad: e.target.value }))}
-              onKeyDown={(e) => { if (e.key === "Enter") add(); }} />
-            <TextField select label="Etapa" size="small" sx={{ width: { xs: "100%", sm: 200 } }}
-              value={nuevo.etapa} onChange={(e) => setNuevo(n => ({ ...n, etapa: e.target.value }))}>
-              {opcionesEtapa.map(e => <MenuItem key={e} value={e}>{e}</MenuItem>)}
-            </TextField>
-            <Button variant="contained" color="secondary" startIcon={<AddIcon />}
-              onClick={add} sx={{ flexShrink: 0, width: { xs: "100%", sm: "auto" } }}>
-              Agregar
-            </Button>
-          </Stack>
-        </CardContent>
-      </Card>
-
-      {totalItems === 0 ? (
-        <Card>
-          <CardContent>
-            <Stack spacing={2} alignItems="flex-start">
-              <Typography color="text.secondary">No hay equipamientos cargados.</Typography>
-              <Button variant="outlined" onClick={seed}>Cargar checklist sugerido</Button>
-            </Stack>
-          </CardContent>
-        </Card>
-      ) : (
+      {(
         grupos.map((g) => {
           const lista = itemsDe(g);
           const compradosG = lista.filter(i => i.comprado).length;
@@ -263,6 +235,19 @@ export default function EquipamientosPage() {
                       </Box>
                     );
                   })}
+                </Stack>
+
+                {/* Alta dentro del grupo (como en Planificación) */}
+                <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                  <TextField
+                    size="small" fullWidth placeholder="Agregar equipamiento…"
+                    value={nuevoPorGrupo[g] || ""}
+                    onChange={(e) => setNuevoPorGrupo(p => ({ ...p, [g]: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === "Enter") add(g); }}
+                  />
+                  <Button variant="outlined" startIcon={<AddIcon />} onClick={() => add(g)} sx={{ flexShrink: 0 }}>
+                    Agregar
+                  </Button>
                 </Stack>
               </CardContent>
             </Card>
