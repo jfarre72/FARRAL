@@ -2,7 +2,7 @@
 import {
   Card, CardContent, Stack, Typography, Alert, Box, TextField, MenuItem,
   Button, IconButton, Tooltip, LinearProgress, Divider, Checkbox, Chip,
-  Badge, Dialog, DialogTitle, DialogContent, Collapse,
+  Dialog, Collapse,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
@@ -12,12 +12,31 @@ import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import CloseIcon from "@mui/icons-material/Close";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
+import AttachFileIcon from "@mui/icons-material/AttachFile";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import EditNoteIcon from "@mui/icons-material/EditNote";
+import DriveFileRenameOutlineIcon from "@mui/icons-material/DriveFileRenameOutline";
+import NotesIcon from "@mui/icons-material/Notes";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
-import { fmtDate } from "@/components/Money";
+import { fmtDate, fmtMoney } from "@/components/Money";
+
+// Suma de valores por moneda y su texto.
+const sumarValores = (lista) => lista.reduce((acc, i) => {
+  const v = Number(i.valor);
+  if (!v) return acc;
+  const m = i.moneda || "USD";
+  acc[m] = (acc[m] || 0) + v;
+  return acc;
+}, {});
+const fmtSuma = (s) => {
+  const parts = [];
+  if (s.USD) parts.push(fmtMoney(s.USD, "USD"));
+  if (s.ARS) parts.push(fmtMoney(s.ARS, "ARS"));
+  return parts.length ? parts.join(" · ") : null;
+};
 
 const esImagen = (f) => (f.mime || "").startsWith("image/");
 const hoyISO = () => {
@@ -38,7 +57,7 @@ const SEED = [
 ];
 
 // Campo que guarda al salir (blur/Enter), no en cada tecla.
-function CommitField({ value, onCommit, placeholder, sx, strike, bold, small, align }) {
+function CommitField({ value, onCommit, placeholder, sx, strike, bold, small, align, autoFocus }) {
   const [local, setLocal] = useState(value ?? "");
   const [focused, setFocused] = useState(false);
   useEffect(() => { if (!focused) setLocal(value ?? ""); }, [value, focused]);
@@ -48,6 +67,7 @@ function CommitField({ value, onCommit, placeholder, sx, strike, bold, small, al
   };
   return (
     <TextField
+      autoFocus={autoFocus}
       size="small" variant="standard" value={local} sx={{
         ...sx,
         "& .MuiInput-root::before": { borderBottomColor: "transparent" },
@@ -70,6 +90,58 @@ function CommitField({ value, onCommit, placeholder, sx, strike, bold, small, al
   );
 }
 
+// Valor de referencia (numérico) + moneda (USD/ARS toggle).
+function ValorField({ valor, moneda, onCommit }) {
+  const [local, setLocal] = useState(valor ?? "");
+  const [focused, setFocused] = useState(false);
+  useEffect(() => { if (!focused) setLocal(valor ?? ""); }, [valor, focused]);
+  const commit = () => {
+    setFocused(false);
+    const v = local === "" || local === null ? null : Number(local);
+    if ((valor ?? null) !== (v ?? null)) onCommit({ valor: v });
+  };
+  const cur = moneda || "USD";
+  return (
+    <Stack direction="row" alignItems="center" spacing={0.25} onClick={(e) => e.stopPropagation()}>
+      <Tooltip title="Cambiar moneda">
+        <Button size="small" onClick={() => onCommit({ moneda: cur === "USD" ? "ARS" : "USD" })}
+          sx={{ minWidth: 0, px: 0.5, fontSize: 11, color: "text.secondary" }}>{cur}</Button>
+      </Tooltip>
+      <TextField
+        size="small" variant="standard" type="number" placeholder="valor"
+        value={local}
+        onFocus={() => setFocused(true)}
+        onChange={(e) => setLocal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+        sx={{ width: 84 }}
+        inputProps={{ style: { textAlign: "right", fontSize: 13 } }}
+      />
+    </Stack>
+  );
+}
+
+// Nota multilínea que guarda al salir.
+function NoteField({ value, onCommit }) {
+  const [local, setLocal] = useState(value ?? "");
+  const [focused, setFocused] = useState(false);
+  useEffect(() => { if (!focused) setLocal(value ?? ""); }, [value, focused]);
+  const commit = () => {
+    setFocused(false);
+    const v = local.trim() || null;
+    if ((value ?? null) !== v) onCommit(v);
+  };
+  return (
+    <TextField
+      fullWidth multiline minRows={2} size="small" label="Nota" placeholder="Agregar nota…"
+      value={local}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={commit}
+    />
+  );
+}
+
 export default function EquipamientosPage() {
   const { proyecto } = useProjects();
   const [etapas, setEtapas] = useState([]);
@@ -79,12 +151,14 @@ export default function EquipamientosPage() {
   const [nuevoPorGrupo, setNuevoPorGrupo] = useState({}); // { [grupo]: "nombre" }
   const [gruposManual, setGruposManual] = useState([]); // grupos agregados sin items todavía
   const [nuevoGrupo, setNuevoGrupo] = useState("");
-  const [detalle, setDetalle] = useState(null); // equipamiento abierto
   const [preview, setPreview] = useState(null); // archivo en visor
   const [colapsado, setColapsado] = useState({}); // { [grupo]: true } => cerrado
-  const [subiendo, setSubiendo] = useState(false);
+  const [expandItem, setExpandItem] = useState({}); // { [id]: true } => detalle abierto
+  const [editName, setEditName] = useState({}); // { [id]: true } => editando nombre
+  const [subiendoId, setSubiendoId] = useState(null);
   const [drag, setDrag] = useState(null); // { grupo, fromId, overId }
   const fileRef = useRef(null);
+  const attachTo = useRef(null); // equipamiento al que se adjunta
 
   const reload = async () => {
     if (!proyecto) return;
@@ -146,12 +220,17 @@ export default function EquipamientosPage() {
     reload();
   };
 
-  // Adjunta archivos a un equipamiento: se suben al repositorio con etiqueta =
-  // nombre del equipamiento, por lo que quedan asociados automáticamente.
+  // Dispara el selector de archivos para un equipamiento.
+  const pickAttach = (it) => { attachTo.current = it; fileRef.current?.click(); };
+
+  // Adjunta archivos: se suben al repositorio con etiqueta = nombre del
+  // equipamiento, por lo que quedan asociados automáticamente.
   const onAdjuntar = async (e) => {
     const files = Array.from(e.target.files || []);
-    if (!files.length || !proyecto || !detalle) return;
-    setSubiendo(true);
+    const it = attachTo.current;
+    if (!files.length || !proyecto || !it) return;
+    setSubiendoId(it.id);
+    setExpandItem(p => ({ ...p, [it.id]: true }));
     try {
       for (const file of files) {
         const ext = (file.name.split(".").pop() || "bin").toLowerCase();
@@ -162,13 +241,13 @@ export default function EquipamientosPage() {
         const { error: insErr } = await supabase.from("repositorio").insert({
           proyecto_id: proyecto.id, url: pub.publicUrl, path,
           nombre: file.name, mime: file.type || null,
-          fecha: hoyISO(), etiqueta: detalle.nombre,
+          fecha: hoyISO(), etiqueta: it.nombre,
         });
         if (insErr) alert(insErr.message);
       }
       await reload();
     } finally {
-      setSubiendo(false);
+      setSubiendoId(null);
       if (fileRef.current) fileRef.current.value = "";
     }
   };
@@ -248,16 +327,25 @@ export default function EquipamientosPage() {
             Listado de compras por etapa. Tildá lo que ya se compró.
           </Typography>
         </Box>
-        {totalItems > 0 && (
-          <Chip label={`${comprados}/${totalItems} comprados`}
-            color={comprados === totalItems ? "success" : "default"} variant="outlined" />
-        )}
+        {totalItems > 0 && (() => {
+          const tot = fmtSuma(sumarValores(items));
+          return (
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+              {tot && <Chip label={`Total: ${tot}`} color="secondary" />}
+              <Chip label={`${comprados}/${totalItems} comprados`}
+                color={comprados === totalItems ? "success" : "default"} variant="outlined" />
+            </Stack>
+          );
+        })()}
         {totalItems === 0 && (
           <Button variant="outlined" onClick={seed} sx={{ flexShrink: 0 }}>
             Cargar checklist sugerido
           </Button>
         )}
       </Stack>
+
+      {/* Input oculto para adjuntar archivos a un equipamiento */}
+      <input ref={fileRef} type="file" accept="application/pdf,image/*" multiple hidden onChange={onAdjuntar} />
 
       {loading && <LinearProgress />}
 
@@ -301,6 +389,9 @@ export default function EquipamientosPage() {
                     {colapsado[g] ? <ExpandMoreIcon /> : <ExpandLessIcon />}
                   </IconButton>
                   <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>{g}</Typography>
+                  {(() => { const s = fmtSuma(sumarValores(lista)); return s ? (
+                    <Chip size="small" color="secondary" variant="outlined" label={s} />
+                  ) : null; })()}
                   <Chip size="small" variant="outlined"
                     color={lista.length > 0 && compradosG === lista.length ? "success" : "default"}
                     label={`${compradosG}/${lista.length}`} />
@@ -314,59 +405,129 @@ export default function EquipamientosPage() {
                 <Stack spacing={0.5}>
                   {lista.map((it) => {
                     const isTarget = drag && drag.grupo === g && drag.overId === it.id && drag.fromId !== it.id;
+                    const archivos = archivosDe(it);
+                    const abierto = !!expandItem[it.id];
+                    const editando = !!editName[it.id];
+                    const toggleExp = () => setExpandItem(p => ({ ...p, [it.id]: !p[it.id] }));
                     return (
                       <Box
                         key={it.id}
                         onDragOver={(e) => { if (drag?.grupo === g) { e.preventDefault(); if (drag.overId !== it.id) setDrag(d => ({ ...d, overId: it.id })); } }}
                         onDrop={(e) => { e.preventDefault(); if (drag?.grupo === g) reordenar(g, drag.fromId, it.id); setDrag(null); }}
                         sx={{
-                          display: "flex", alignItems: "center", gap: 1,
-                          px: 1, py: 0.75, borderRadius: 2,
+                          borderRadius: 2,
                           opacity: drag?.fromId === it.id ? 0.4 : 1,
                           bgcolor: it.comprado ? "rgba(30,142,62,0.06)" : "transparent",
                           outline: isTarget ? "2px solid" : "none", outlineColor: "secondary.main",
-                          "&:hover": { bgcolor: it.comprado ? "rgba(30,142,62,0.1)" : "rgba(15,42,74,0.035)" },
                           "&:hover .drag, &:hover .del": { opacity: 1 },
                         }}
                       >
-                        <Tooltip title="Arrastrá para reordenar">
-                          <IconButton className="drag" size="small" draggable
-                            onDragStart={() => setDrag({ grupo: g, fromId: it.id, overId: it.id })}
-                            onDragEnd={() => setDrag(null)}
-                            sx={{ cursor: "grab", touchAction: "none", opacity: { xs: 1, sm: 0.25 }, transition: "opacity .15s" }}>
-                            <DragIndicatorIcon fontSize="small" />
+                        {/* Fila principal: tocar en cualquier lado despliega el detalle */}
+                        <Box onClick={toggleExp}
+                          sx={{
+                            display: "flex", alignItems: "center", gap: 1, px: 1, py: 0.75,
+                            borderRadius: 2, cursor: "pointer",
+                            "&:hover": { bgcolor: it.comprado ? "rgba(30,142,62,0.1)" : "rgba(15,42,74,0.035)" },
+                          }}
+                        >
+                          <Tooltip title="Arrastrá para reordenar">
+                            <IconButton className="drag" size="small" draggable
+                              onClick={(e) => e.stopPropagation()}
+                              onDragStart={() => setDrag({ grupo: g, fromId: it.id, overId: it.id })}
+                              onDragEnd={() => setDrag(null)}
+                              sx={{ cursor: "grab", touchAction: "none", opacity: { xs: 1, sm: 0.25 }, transition: "opacity .15s" }}>
+                              <DragIndicatorIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Checkbox size="small" checked={!!it.comprado}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => update(it.id, { comprado: e.target.checked })} sx={{ p: 0.5 }} />
+                          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                            {editando ? (
+                              <CommitField value={it.nombre} autoFocus bold sx={{ width: "100%" }}
+                                onCommit={(v) => { const n = String(v).trim(); if (n) update(it.id, { nombre: n }); setEditName(p => ({ ...p, [it.id]: false })); }} />
+                            ) : (
+                              <Typography variant="body2" noWrap fontWeight={600}
+                                sx={{ textDecoration: it.comprado ? "line-through" : "none", color: it.comprado ? "text.secondary" : "text.primary" }}>
+                                {it.nombre}
+                              </Typography>
+                            )}
+                          </Box>
+                          {it.observacion && <Tooltip title={it.observacion}><NotesIcon sx={{ fontSize: 16, color: "text.disabled" }} /></Tooltip>}
+                          <ValorField valor={it.valor} moneda={it.moneda}
+                            onCommit={(patch) => update(it.id, patch)} />
+                          <Box onClick={(e) => e.stopPropagation()}>
+                            <CommitField value={it.cantidad} placeholder="Cant." small align="right"
+                              sx={{ width: 56 }} onCommit={(v) => update(it.id, { cantidad: v || null })} />
+                          </Box>
+                          {archivos.length > 0 && (
+                            <Chip size="small" variant="outlined" icon={<DescriptionIcon sx={{ fontSize: 14 }} />}
+                              label={archivos.length} sx={{ height: 22 }} />
+                          )}
+                          <Tooltip title="Editar nombre">
+                            <IconButton size="small" onClick={(e) => { e.stopPropagation(); setEditName(p => ({ ...p, [it.id]: !p[it.id] })); }}>
+                              <DriveFileRenameOutlineIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Notas">
+                            <IconButton size="small" onClick={(e) => { e.stopPropagation(); setExpandItem(p => ({ ...p, [it.id]: true })); }}>
+                              <EditNoteIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Adjuntar archivo">
+                            <IconButton size="small" onClick={(e) => { e.stopPropagation(); pickAttach(it); }}>
+                              <AttachFileIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Eliminar">
+                            <IconButton className="del" size="small" onClick={(e) => { e.stopPropagation(); del(it); }}
+                              sx={{ opacity: { xs: 1, sm: 0.25 }, transition: "opacity .15s" }}>
+                              <DeleteOutlineIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <IconButton size="small" sx={{ pointerEvents: "none" }}>
+                            {abierto ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
                           </IconButton>
-                        </Tooltip>
-                        <Checkbox size="small" checked={!!it.comprado}
-                          onChange={(e) => update(it.id, { comprado: e.target.checked })} sx={{ p: 0.5 }} />
-                        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                          <CommitField value={it.nombre} sx={{ width: "100%" }} strike={it.comprado} bold
-                            onCommit={(v) => { const n = String(v).trim(); if (n) update(it.id, { nombre: n }); else reload(); }} />
-                          <CommitField value={it.observacion} placeholder="Agregar nota…" small sx={{ width: "100%" }}
-                            onCommit={(v) => update(it.id, { observacion: v || null })} />
                         </Box>
-                        <CommitField value={it.cantidad} placeholder="Cant." small align="right"
-                          sx={{ width: 64, flexShrink: 0 }}
-                          onCommit={(v) => update(it.id, { cantidad: v || null })} />
-                        {(() => {
-                          const n = archivosDe(it).length;
-                          return (
-                            <Tooltip title={n > 0 ? `${n} archivo(s) en repositorio` : "Ver repositorio asociado"}>
-                              <IconButton size="small" onClick={() => setDetalle(it)}
-                                sx={{ flexShrink: 0, color: n > 0 ? "secondary.main" : "inherit" }}>
-                                <Badge badgeContent={n} color="secondary">
-                                  <DescriptionIcon fontSize="small" />
-                                </Badge>
-                              </IconButton>
-                            </Tooltip>
-                          );
-                        })()}
-                        <Tooltip title="Eliminar">
-                          <IconButton className="del" size="small" onClick={() => del(it)}
-                            sx={{ opacity: { xs: 1, sm: 0.25 }, transition: "opacity .15s" }}>
-                            <DeleteOutlineIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
+
+                        {/* Detalle desplegable: nota + archivos adjuntos */}
+                        <Collapse in={abierto} unmountOnExit>
+                          <Box sx={{ px: 2, pb: 1.5, pt: 0.5 }}>
+                            <NoteField value={it.observacion} onCommit={(v) => update(it.id, { observacion: v })} />
+                            <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 1.5, mb: 0.5 }}>
+                              <Typography variant="caption" color="text.secondary" sx={{ flexGrow: 1 }}>
+                                Archivos adjuntos
+                              </Typography>
+                              <Button size="small" startIcon={<UploadFileIcon />} onClick={() => pickAttach(it)} disabled={subiendoId === it.id}>
+                                {subiendoId === it.id ? "Subiendo…" : "Adjuntar"}
+                              </Button>
+                            </Stack>
+                            {subiendoId === it.id && <LinearProgress sx={{ mb: 1 }} />}
+                            {archivos.length === 0 ? (
+                              <Typography variant="body2" color="text.secondary">
+                                Sin archivos. Adjuntá presupuestos o planos (se guardan en Repositorio).
+                              </Typography>
+                            ) : (
+                              <Stack spacing={1}>
+                                {archivos.map(a => (
+                                  <Stack key={a.id} direction="row" spacing={1.5} alignItems="center"
+                                    sx={{ p: 1, borderRadius: 1.5, border: "1px solid", borderColor: "divider", cursor: "pointer", "&:hover": { bgcolor: "rgba(15,42,74,0.03)" } }}
+                                    onClick={() => setPreview(a)}>
+                                    <Box sx={{ width: 40, height: 40, borderRadius: 1, overflow: "hidden", flexShrink: 0, bgcolor: "rgba(15,42,74,0.04)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                      {esImagen(a)
+                                        ? <Box component="img" src={a.url} alt="" sx={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                        : <PictureAsPdfIcon sx={{ color: "error.main" }} />}
+                                    </Box>
+                                    <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                                      <Typography variant="body2" noWrap fontWeight={600}>{a.nombre}</Typography>
+                                      <Typography variant="caption" color="text.secondary">{fmtDate(a.fecha)}</Typography>
+                                    </Box>
+                                  </Stack>
+                                ))}
+                              </Stack>
+                            )}
+                          </Box>
+                        </Collapse>
                       </Box>
                     );
                   })}
@@ -390,56 +551,6 @@ export default function EquipamientosPage() {
           );
         })
       )}
-
-      {/* Detalle: archivos del repositorio asociados al equipamiento */}
-      <Dialog open={!!detalle} onClose={() => setDetalle(null)} fullWidth maxWidth="sm">
-        <DialogTitle>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <Box sx={{ flexGrow: 1 }}>{detalle?.nombre}</Box>
-            <input ref={fileRef} type="file" accept="application/pdf,image/*" multiple hidden onChange={onAdjuntar} />
-            <Button size="small" variant="contained" color="secondary" startIcon={<UploadFileIcon />}
-              onClick={() => fileRef.current?.click()} disabled={subiendo}>
-              {subiendo ? "Subiendo…" : "Adjuntar"}
-            </Button>
-          </Stack>
-        </DialogTitle>
-        <DialogContent dividers>
-          {subiendo && <LinearProgress sx={{ mb: 1.5 }} />}
-          {(() => {
-            const archivos = detalle ? archivosDe(detalle) : [];
-            if (archivos.length === 0) {
-              return (
-                <Typography variant="body2" color="text.secondary">
-                  No hay archivos en el repositorio con la etiqueta “{detalle?.nombre}”.
-                  Subí presupuestos/planos en Repositorio con esa etiqueta para verlos acá.
-                </Typography>
-              );
-            }
-            return (
-              <Stack spacing={1}>
-                {archivos.map(a => (
-                  <Stack key={a.id} direction="row" spacing={1.5} alignItems="center"
-                    sx={{ p: 1, borderRadius: 1.5, border: "1px solid", borderColor: "divider", cursor: "pointer", "&:hover": { bgcolor: "rgba(15,42,74,0.03)" } }}
-                    onClick={() => setPreview(a)}>
-                    <Box sx={{ width: 44, height: 44, borderRadius: 1, overflow: "hidden", flexShrink: 0, bgcolor: "rgba(15,42,74,0.04)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      {esImagen(a)
-                        ? <Box component="img" src={a.url} alt="" sx={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                        : <PictureAsPdfIcon sx={{ color: "error.main" }} />}
-                    </Box>
-                    <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                      <Typography variant="body2" noWrap fontWeight={600}>{a.nombre}</Typography>
-                      <Stack direction="row" spacing={0.5} alignItems="center">
-                        <Typography variant="caption" color="text.secondary">{fmtDate(a.fecha)}</Typography>
-                        {a.etiqueta && <Chip size="small" variant="outlined" label={a.etiqueta} sx={{ height: 18, fontSize: 10 }} />}
-                      </Stack>
-                    </Box>
-                  </Stack>
-                ))}
-              </Stack>
-            );
-          })()}
-        </DialogContent>
-      </Dialog>
 
       {/* Visor en línea (PDF o imagen) */}
       <Dialog open={!!preview} onClose={() => setPreview(null)} maxWidth="lg" fullWidth>
