@@ -408,58 +408,55 @@ export default function MaterialesPage() {
           return (
             <Accordion key={c.id} disableGutters defaultExpanded={false}>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Grid container spacing={1} alignItems="center">
-                  <Grid item xs={12} sm={4}>
-                    <Stack>
-                      <Typography fontWeight={700}>{c.proveedor}</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {c.descripcion ? `${c.descripcion} · ` : ""}{c.fecha ? fmtDate(c.fecha) : ""} · {c.moneda}
-                      </Typography>
-                    </Stack>
+                <Box sx={{ width: "100%" }}>
+                  <Grid container spacing={1} alignItems="center">
+                    <Grid item xs={12} sm={4}>
+                      <Stack>
+                        <Typography fontWeight={700}>{c.proveedor}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {c.descripcion ? `${c.descripcion} · ` : ""}{c.fecha ? fmtDate(c.fecha) : ""} · {c.moneda}
+                        </Typography>
+                      </Stack>
+                    </Grid>
+                    <Resumen sm={2.5} label={ant.length > 1 ? `Anticipo (${ant.length})` : "Anticipo"} value={fmtMoney(k.anticipado, c.moneda)} />
+                    <Resumen sm={2.5} label="Retirado" value={fmtMoney(k.retirado, c.moneda)} color="error.main" />
+                    <Grid item xs={12} sm={3}>
+                      <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5 }}>Saldo</Typography>
+                      <Stack direction="row" alignItems="center" spacing={1}>
+                        <Typography fontWeight={700} color={k.saldo <= 0 ? "text.secondary" : "success.main"}>
+                          {fmtMoney(k.saldo, c.moneda)}
+                        </Typography>
+                        {k.saldo <= 0 && <Chip size="small" color="success" label="Saldado" />}
+                      </Stack>
+                    </Grid>
                   </Grid>
-                  <Resumen sm={2.5} label={ant.length > 1 ? `Anticipo (${ant.length})` : "Anticipo"} value={fmtMoney(k.anticipado, c.moneda)} />
-                  <Resumen sm={2.5} label="Retirado" value={fmtMoney(k.retirado, c.moneda)} color="error.main" />
-                  <Grid item xs={12} sm={3}>
-                    <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5 }}>Saldo</Typography>
-                    <Stack direction="row" alignItems="center" spacing={1}>
-                      <Typography fontWeight={700} color={k.saldo <= 0 ? "text.secondary" : "success.main"}>
-                        {fmtMoney(k.saldo, c.moneda)}
-                      </Typography>
-                      {k.saldo <= 0 && <Chip size="small" color="success" label="Saldado" />}
-                    </Stack>
-                  </Grid>
-                </Grid>
-              </AccordionSummary>
-              <AccordionDetails>
-                {/* Barra de consumo */}
-                <Box sx={{ mb: 2, height: 8, bgcolor: "rgba(15,42,74,0.08)", borderRadius: 4, overflow: "hidden" }}>
-                  <Box sx={{ height: "100%", width: `${pct}%`, bgcolor: pct >= 100 ? "error.main" : "secondary.main", transition: "width .4s" }} />
-                </Box>
 
-                {/* Anticipos / acopios de la cuenta */}
-                <Box sx={{ mb: 2, p: 1.5, borderRadius: 2, border: "1px dashed", borderColor: "divider", bgcolor: "rgba(15,42,74,0.02)" }}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                    <Typography variant="subtitle2">Anticipos / acopios</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Total anticipado: <b>{fmtMoney(k.anticipado, c.moneda)}</b>
-                    </Typography>
-                  </Stack>
-                  {ant.length > 0 && (
-                    <Stack spacing={0.5} sx={{ mb: 1 }}>
-                      {ant.map((a) => (
-                        <Stack key={a.id} direction="row" alignItems="center" spacing={1}
-                          sx={{ py: 0.25, borderBottom: "1px solid", borderColor: "rgba(15,42,74,0.06)" }}>
-                          <Typography variant="body2" sx={{ width: 110, whiteSpace: "nowrap" }}>{a.fecha ? fmtDate(a.fecha) : "—"}</Typography>
-                          <Typography variant="body2" sx={{ flex: 1, fontWeight: 600 }}>{fmtMoney(a.monto, c.moneda)}</Typography>
-                          <Tooltip title="Eliminar anticipo"><span>
-                            <IconButton size="small" disabled={ant.length === 1} onClick={() => delAnticipo(a)}>
-                              <DeleteOutlineIcon fontSize="small" />
-                            </IconButton>
-                          </span></Tooltip>
-                        </Stack>
-                      ))}
+                  {/* Indicadores de recupero a nivel de la cuenta */}
+                  {k.aRecuperar > 0 && (
+                    <Stack direction="row" spacing={1} sx={{ mt: 1.25, flexWrap: "wrap" }} useFlexGap>
+                      <Chip size="small" color="warning" variant="outlined" label={`A recuperar: ${fmtMoney(k.aRecuperar, c.moneda)}`} />
+                      <Chip size="small" color="success" variant="outlined" label={`Recuperado: ${fmtMoney(k.recuperado, c.moneda)}`} />
+                      <Chip size="small" color={k.pendienteRecupero <= 0 ? "success" : "warning"}
+                        label={`Pendiente: ${fmtMoney(k.pendienteRecupero, c.moneda)}`} />
+                      {k.palletsADevolver > 0 && (
+                        <Chip size="small" variant="outlined"
+                          color={k.palletsDevueltos >= k.palletsADevolver ? "success" : "warning"}
+                          label={`Pallets: ${fmtNum0(k.palletsDevueltos)} / ${fmtNum0(k.palletsADevolver)} devueltos`} />
+                      )}
+                      {k.bolsonesADevolver > 0 && (
+                        <Chip size="small" variant="outlined"
+                          color={k.bolsonesDevueltos >= k.bolsonesADevolver ? "success" : "warning"}
+                          label={`Bolsones: ${fmtNum0(k.bolsonesDevueltos)} / ${fmtNum0(k.bolsonesADevolver)} devueltos`} />
+                      )}
                     </Stack>
                   )}
+                </Box>
+              </AccordionSummary>
+              <AccordionDetails sx={{ bgcolor: "rgba(15,42,74,0.015)" }}>
+                {/* ===================== SECCIÓN 1: ANTICIPOS ===================== */}
+                <Section title="Anticipos / acopios" accent="#1E8E3E"
+                  right={<Typography variant="caption" color="text.secondary">Total anticipado: <b>{fmtMoney(k.anticipado, c.moneda)}</b></Typography>}>
+                  {/* Input arriba */}
                   <Grid container spacing={1.5} alignItems="center">
                     <Grid item xs={6} sm={3}>
                       <TextField type="date" label="Fecha" InputLabelProps={{ shrink: true }} fullWidth size="small"
@@ -478,77 +475,42 @@ export default function MaterialesPage() {
                       </Button>
                     </Grid>
                   </Grid>
-                </Box>
+                  {/* Detalle de anticipos abajo (por fecha) */}
+                  {ant.length > 0 && (
+                    <Box sx={{ mt: 1.5 }}>
+                      <Stack direction="row" sx={{ px: 0.5, pb: 0.5 }}>
+                        <Typography variant="caption" color="text.secondary" sx={{ width: 120, textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5 }}>Fecha</Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ flex: 1, textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5 }}>Monto</Typography>
+                      </Stack>
+                      <Stack>
+                        {ant.map((a) => (
+                          <Stack key={a.id} direction="row" alignItems="center" spacing={1}
+                            sx={{ px: 0.5, py: 0.5, borderTop: "1px solid", borderColor: "rgba(15,42,74,0.06)" }}>
+                            <Typography variant="body2" sx={{ width: 120, whiteSpace: "nowrap" }}>{a.fecha ? fmtDate(a.fecha) : "—"}</Typography>
+                            <Typography variant="body2" sx={{ flex: 1, fontWeight: 600, color: "#1E8E3E" }}>{fmtMoney(a.monto, c.moneda)}</Typography>
+                            <Tooltip title="Eliminar anticipo"><span>
+                              <IconButton size="small" disabled={ant.length === 1} onClick={() => delAnticipo(a)}>
+                                <DeleteOutlineIcon fontSize="small" />
+                              </IconButton>
+                            </span></Tooltip>
+                          </Stack>
+                        ))}
+                      </Stack>
+                    </Box>
+                  )}
+                </Section>
 
-                {/* Resumen de recupero de la cuenta */}
-                {k.aRecuperar > 0 && (
-                  <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: "wrap" }} useFlexGap>
-                    <Chip size="small" color="warning" variant="outlined" label={`A recuperar: ${fmtMoney(k.aRecuperar, c.moneda)}`} />
-                    <Chip size="small" color="success" variant="outlined" label={`Recuperado: ${fmtMoney(k.recuperado, c.moneda)}`} />
-                    <Chip size="small" color={k.pendienteRecupero <= 0 ? "success" : "warning"}
-                      label={`Pendiente: ${fmtMoney(k.pendienteRecupero, c.moneda)}`} />
-                    {k.palletsADevolver > 0 && (
-                      <Chip size="small" variant="outlined"
-                        color={k.palletsDevueltos >= k.palletsADevolver ? "success" : "warning"}
-                        label={`Pallets: ${fmtNum0(k.palletsDevueltos)} / ${fmtNum0(k.palletsADevolver)} devueltos`} />
-                    )}
-                    {k.bolsonesADevolver > 0 && (
-                      <Chip size="small" variant="outlined"
-                        color={k.bolsonesDevueltos >= k.bolsonesADevolver ? "success" : "warning"}
-                        label={`Bolsones: ${fmtNum0(k.bolsonesDevueltos)} / ${fmtNum0(k.bolsonesADevolver)} devueltos`} />
-                    )}
-                  </Stack>
-                )}
+                {/* ===================== SECCIÓN 2: RETIROS ===================== */}
+                <Section title="Retiros" accent="#C0392B"
+                  right={<Typography variant="caption" color="text.secondary">Retirado: <b style={{ color: "#C0392B" }}>{fmtMoney(k.retirado, c.moneda)}</b> · Saldo: <b>{fmtMoney(k.saldo, c.moneda)}</b></Typography>}>
+                  {/* Barra de consumo */}
+                  <Box sx={{ mb: 1.5, height: 6, bgcolor: "rgba(15,42,74,0.08)", borderRadius: 4, overflow: "hidden" }}>
+                    <Box sx={{ height: "100%", width: `${pct}%`, bgcolor: pct >= 100 ? "error.main" : "secondary.main", transition: "width .4s" }} />
+                  </Box>
 
-                {/* Tabla de retiros */}
-                <Box sx={{ overflowX: "auto" }}>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell sx={{ width: 110 }}>Fecha</TableCell>
-                        <TableCell>Detalle</TableCell>
-                        <TableCell align="right">Monto</TableCell>
-                        <TableCell align="center" sx={{ width: 80 }}>Remito</TableCell>
-                        <TableCell align="right" sx={{ width: 56 }}></TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {rs.length === 0 && (
-                        <TableRow><TableCell colSpan={5}>
-                          <Typography variant="body2" color="text.secondary">Todavía no hay retiros en esta cuenta.</Typography>
-                        </TableCell></TableRow>
-                      )}
-                      {rs.map((r) => (
-                        <TableRow key={r.id} hover>
-                          <TableCell sx={{ whiteSpace: "nowrap" }}>{fmtDate(r.fecha)}</TableCell>
-                          <TableCell>
-                            {r.descripcion || "—"}
-                            {r.recupero && itemsRecupero(r).map((it, i) => (
-                              <Typography key={i} variant="caption" color="warning.main" sx={{ display: "block" }}>
-                                Recupero · {fmtNum0(it.cantidad)} {it.unidad === "bolson" ? "bolsón/es" : "pallet/s"} · {fmtMoney(it.total, c.moneda)}
-                              </Typography>
-                            ))}
-                          </TableCell>
-                          <TableCell align="right" sx={{ whiteSpace: "nowrap", color: "error.main", fontWeight: 600 }}>
-                            −{fmtMoney(r.monto, c.moneda)}
-                          </TableCell>
-                          <TableCell align="center">
-                            {r.remito_url
-                              ? <Tooltip title="Ver remito"><IconButton size="small" component={Link} href={r.remito_url} target="_blank"><ReceiptLongIcon fontSize="small" /></IconButton></Tooltip>
-                              : <Typography variant="body2" color="text.disabled">—</Typography>}
-                          </TableCell>
-                          <TableCell align="right">
-                            <Tooltip title="Eliminar retiro"><IconButton size="small" onClick={() => delRetiro(r)}><DeleteOutlineIcon fontSize="small" /></IconButton></Tooltip>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </Box>
-
-                {/* Alta de retiro */}
-                <Box sx={{ mt: 2, p: 1.5, borderRadius: 2, border: "1px dashed", borderColor: "divider", bgcolor: "rgba(15,42,74,0.02)" }}>
-                  <Typography variant="subtitle2" sx={{ mb: 1 }}>Nuevo retiro</Typography>
+                  {/* Input arriba: nuevo retiro */}
+                  <Box sx={{ p: 1.5, borderRadius: 2, border: "1px dashed", borderColor: "divider", bgcolor: "rgba(255,255,255,0.6)" }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5, display: "block", mb: 1 }}>Nuevo retiro</Typography>
                   <Grid container spacing={1.5} alignItems="center">
                     <Grid item xs={6} sm={2.5}>
                       <TextField type="date" label="Fecha" InputLabelProps={{ shrink: true }} fullWidth size="small"
@@ -666,7 +628,54 @@ export default function MaterialesPage() {
                       );
                     })()}
                   </Box>
-                </Box>
+                  </Box>
+
+                  {/* Detalle de retiros abajo (por fecha) */}
+                  <Box sx={{ overflowX: "auto", mt: 1.5 }}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell sx={{ width: 110 }}>Fecha</TableCell>
+                          <TableCell>Detalle</TableCell>
+                          <TableCell align="right">Monto</TableCell>
+                          <TableCell align="center" sx={{ width: 80 }}>Remito</TableCell>
+                          <TableCell align="right" sx={{ width: 56 }}></TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {rs.length === 0 && (
+                          <TableRow><TableCell colSpan={5}>
+                            <Typography variant="body2" color="text.secondary">Todavía no hay retiros en esta cuenta.</Typography>
+                          </TableCell></TableRow>
+                        )}
+                        {rs.map((r) => (
+                          <TableRow key={r.id} hover>
+                            <TableCell sx={{ whiteSpace: "nowrap" }}>{fmtDate(r.fecha)}</TableCell>
+                            <TableCell>
+                              {r.descripcion || "—"}
+                              {r.recupero && itemsRecupero(r).map((it, i) => (
+                                <Typography key={i} variant="caption" color="warning.main" sx={{ display: "block" }}>
+                                  Recupero · {fmtNum0(it.cantidad)} {it.unidad === "bolson" ? "bolsón/es" : "pallet/s"} · {fmtMoney(it.total, c.moneda)}
+                                </Typography>
+                              ))}
+                            </TableCell>
+                            <TableCell align="right" sx={{ whiteSpace: "nowrap", color: "error.main", fontWeight: 600 }}>
+                              −{fmtMoney(r.monto, c.moneda)}
+                            </TableCell>
+                            <TableCell align="center">
+                              {r.remito_url
+                                ? <Tooltip title="Ver remito"><IconButton size="small" component={Link} href={r.remito_url} target="_blank"><ReceiptLongIcon fontSize="small" /></IconButton></Tooltip>
+                                : <Typography variant="body2" color="text.disabled">—</Typography>}
+                            </TableCell>
+                            <TableCell align="right">
+                              <Tooltip title="Eliminar retiro"><IconButton size="small" onClick={() => delRetiro(r)}><DeleteOutlineIcon fontSize="small" /></IconButton></Tooltip>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </Box>
+                </Section>
 
                 <Stack direction="row" spacing={1} sx={{ mt: 2 }} justifyContent="flex-end">
                   <Button size="small" startIcon={<EditIcon />} onClick={() => openEditCuenta(c)}>Editar cuenta</Button>
@@ -723,6 +732,24 @@ export default function MaterialesPage() {
         </DialogActions>
       </Dialog>
     </Stack>
+  );
+}
+
+// Sección visual con encabezado (título a la izquierda, dato resumen a la
+// derecha) y una barra de color que la identifica. Agrupa input + detalle.
+function Section({ title, accent = "#0F2A4A", right, children }) {
+  return (
+    <Box sx={{ borderRadius: 2, border: "1px solid", borderColor: "divider", overflow: "hidden", mb: 2, bgcolor: "background.paper" }}>
+      <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "center" }}
+        spacing={0.5}
+        sx={{ px: 1.5, py: 1, bgcolor: "rgba(15,42,74,0.035)", borderLeft: `4px solid ${accent}` }}>
+        <Typography variant="subtitle2" fontWeight={800} sx={{ textTransform: "uppercase", letterSpacing: 0.6, fontSize: 12.5 }}>
+          {title}
+        </Typography>
+        {right}
+      </Stack>
+      <Box sx={{ p: 1.5 }}>{children}</Box>
+    </Box>
   );
 }
 
