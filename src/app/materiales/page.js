@@ -299,7 +299,7 @@ export default function MaterialesPage() {
         ? (f.recupero_items || []).map(it => ({
             unidad: it.unidad === "bolson" ? "bolson" : "pallet",
             cantidad: Number(parseMiles(it.cantidad ?? "")) || 0,
-            precio: Number(parseMiles(it.precio ?? "")) || 0,
+            precio: Number(it.precio ?? 0) || 0,
           })).filter(it => it.cantidad > 0 || it.precio > 0)
           .map(it => ({ ...it, total: it.cantidad * it.precio }))
         : [];
@@ -600,14 +600,14 @@ export default function MaterialesPage() {
                       const items = recItemsDe(c.id);
                       const granTotal = items.reduce((s, it) => {
                         const cant = Number(parseMiles(it.cantidad ?? "")) || 0;
-                        const prec = Number(parseMiles(it.precio ?? "")) || 0;
+                        const prec = Number(it.precio ?? 0) || 0;
                         return s + cant * prec;
                       }, 0);
                       return (
                         <Stack spacing={1.5} sx={{ mt: 0.5 }}>
                           {items.map((it, idx) => {
                             const cant = Number(parseMiles(it.cantidad ?? "")) || 0;
-                            const prec = Number(parseMiles(it.precio ?? "")) || 0;
+                            const prec = Number(it.precio ?? 0) || 0;
                             return (
                               <Grid container spacing={1.5} alignItems="center" key={idx}>
                                 <Grid item xs={12} sm={3}>
