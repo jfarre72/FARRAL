@@ -426,7 +426,7 @@ export default function MaterialesPage() {
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                 <Box sx={{ width: "100%" }}>
                   <Grid container spacing={1} alignItems="center">
-                    <Grid item xs={12} sm={4}>
+                    <Grid item xs={12} sm={3}>
                       <Stack>
                         <Typography fontWeight={700}>{c.proveedor}</Typography>
                         <Typography variant="caption" color="text.secondary">
@@ -434,9 +434,9 @@ export default function MaterialesPage() {
                         </Typography>
                       </Stack>
                     </Grid>
-                    <Resumen sm={2.5} label={ant.length > 1 ? `Anticipo (${ant.length})` : "Anticipo"} value={fmtMoney(k.anticipado, c.moneda)} />
-                    <Resumen sm={2.5} label="Retirado" value={fmtMoney(k.retirado, c.moneda)} color="error.main" />
-                    <Grid item xs={12} sm={3}>
+                    <Resumen sm={2.25} label={ant.length > 1 ? `Anticipado (${ant.length})` : "Anticipado"} value={fmtMoney(k.anticipado, c.moneda)} />
+                    <Resumen sm={2.25} label="Retirado" value={fmtMoney(k.retirado, c.moneda)} color="error.main" />
+                    <Grid item xs={12} sm={2.25}>
                       <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5 }}>Saldo disponible</Typography>
                       <Stack direction="row" alignItems="center" spacing={1}>
                         <Typography fontWeight={700} color={k.saldo < -0.005 ? "error.main" : Math.abs(k.saldo) <= 0.005 ? "text.secondary" : "success.main"}>
@@ -446,13 +446,14 @@ export default function MaterialesPage() {
                         {k.saldo < -0.005 && <Chip size="small" color="error" variant="outlined" label="Excedido" />}
                       </Stack>
                     </Grid>
+                    <Resumen sm={2.25} label="Pendiente a recuperar"
+                      value={k.aRecuperar > 0 ? fmtMoney(k.pendienteRecupero, c.moneda) : "—"}
+                      color={k.aRecuperar <= 0 ? "text.disabled" : k.pendienteRecupero <= 0 ? "success.main" : "warning.main"} />
                   </Grid>
 
                   {/* Indicadores de recupero a nivel de la cuenta */}
-                  {k.aRecuperar > 0 && (
+                  {k.aRecuperar > 0 && (k.bolsonesADevolver > 0 || k.palletsADevolver > 0) && (
                     <Stack direction="row" spacing={1} sx={{ mt: 1.25, flexWrap: "wrap" }} useFlexGap>
-                      <Chip size="small" color={k.pendienteRecupero <= 0 ? "success" : "warning"}
-                        label={`Pendiente a recuperar: ${fmtMoney(k.pendienteRecupero, c.moneda)}`} />
                       {k.bolsonesADevolver > 0 && (
                         <Chip size="small" variant="outlined"
                           color={k.bolsonesDevueltos >= k.bolsonesADevolver ? "success" : "warning"}
