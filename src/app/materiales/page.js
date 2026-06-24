@@ -34,6 +34,30 @@ const fmtNum0 = (val) => {
   return Number.isInteger(n) ? String(n) : n.toLocaleString("es-AR", { maximumFractionDigits: 2 });
 };
 
+// Ítem vacío para el formulario de recupero (varios por retiro).
+const emptyRecItem = () => ({ unidad: "pallet", cantidad: "", precio: "" });
+
+// Devuelve los ítems de recupero de un retiro como arreglo normalizado.
+// Usa recupero_items (V28) si existe; si no, sintetiza el ítem único de la V27.
+const itemsRecupero = (r) => {
+  if (!r?.recupero) return [];
+  if (Array.isArray(r.recupero_items) && r.recupero_items.length) {
+    return r.recupero_items.map(it => ({
+      unidad: it.unidad === "bolson" ? "bolson" : "pallet",
+      cantidad: Number(it.cantidad || 0),
+      precio: Number(it.precio || 0),
+      total: Number(it.total != null ? it.total : Number(it.cantidad || 0) * Number(it.precio || 0)),
+    }));
+  }
+  // Legado V27: un solo ítem en columnas planas.
+  return [{
+    unidad: r.recupero_unidad === "bolson" ? "bolson" : "pallet",
+    cantidad: Number(r.recupero_cantidad || 0),
+    precio: Number(r.recupero_precio || 0),
+    total: Number(r.recupero_total || 0),
+  }];
+};
+
 // Formatea un string numérico con separadores de miles (formato AR: punto miles, coma decimal).
 const fmtMiles = (val) => {
   if (val === "" || val === null || val === undefined) return "";
@@ -111,12 +135,12 @@ export default function MaterialesPage() {
     const saldo = Number(c.monto_inicial || 0) - retirado;
     // Recupero: total a recuperar (de los retiros con recupero) vs ya recuperado (ingresos de caja)
     const rec = recuperosDe(c.id);
-    const aRecuperar = rs.reduce((s, r) => s + (r.recupero ? Number(r.recupero_total || 0) : 0), 0);
+    const aRecuperar = rs.reduce((s, r) => s + itemsRecupero(r).reduce((a, it) => a + it.total, 0), 0);
     const recuperado = rec.reduce((s, r) => s + Number(r.monto || 0), 0);
     const pendienteRecupero = aRecuperar - recuperado;
     // Cantidades de pallets / bolsones a devolver (de los retiros) vs devueltos (de los recuperos)
-    const palletsADevolver = rs.reduce((s, r) => s + (r.recupero && r.recupero_unidad === "pallet" ? Number(r.recupero_cantidad || 0) : 0), 0);
-    const bolsonesADevolver = rs.reduce((s, r) => s + (r.recupero && r.recupero_unidad === "bolson" ? Number(r.recupero_cantidad || 0) : 0), 0);
+    const palletsADevolver = rs.reduce((s, r) => s + itemsRecupero(r).reduce((a, it) => a + (it.unidad === "pallet" ? it.cantidad : 0), 0), 0);
+    const bolsonesADevolver = rs.reduce((s, r) => s + itemsRecupero(r).reduce((a, it) => a + (it.unidad === "bolson" ? it.cantidad : 0), 0), 0);
     const palletsDevueltos = rec.reduce((s, r) => s + Number(r.recupero_pallets || 0), 0);
     const bolsonesDevueltos = rec.reduce((s, r) => s + Number(r.recupero_bolsones || 0), 0);
     return { retirado, saldo, n: rs.length, aRecuperar, recuperado, pendienteRecupero,
@@ -180,7 +204,21 @@ export default function MaterialesPage() {
 
   // ---- Retiro ----
   const setRet = (cuentaId, patch) =>
-    setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", file: null, ...prev[cuentaId], ...patch } }));
+    setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", file: null, recupero_items: [emptyRecItem()], ...prev[cuentaId], ...patch } }));
+
+  // ---- Ítems de recupero del retiro en curso ----
+  const recItemsDe = (cuentaId) => {
+    const its = nuevoRetiro[cuentaId]?.recupero_items;
+    return Array.isArray(its) && its.length ? its : [emptyRecItem()];
+  };
+  const addRecItem = (cuentaId) =>
+    setRet(cuentaId, { recupero_items: [...recItemsDe(cuentaId), emptyRecItem()] });
+  const setRecItem = (cuentaId, idx, patch) =>
+    setRet(cuentaId, { recupero_items: recItemsDe(cuentaId).map((it, i) => i === idx ? { ...it, ...patch } : it) });
+  const delRecItem = (cuentaId, idx) => {
+    const next = recItemsDe(cuentaId).filter((_, i) => i !== idx);
+    setRet(cuentaId, { recupero_items: next.length ? next : [emptyRecItem()] });
+  };
 
   const addRetiro = async (cuentaId) => {
     const f = nuevoRetiro[cuentaId] || {};
@@ -198,21 +236,29 @@ export default function MaterialesPage() {
         remito_url = pub.publicUrl; remito_path = path;
       }
       const recupero = !!f.recupero;
-      const recCant = recupero ? (Number(f.recupero_cantidad) || 0) : 0;
-      const recPrecio = recupero ? (Number(f.recupero_precio) || 0) : 0;
+      // Normalizo los ítems cargados: descarto los que no tengan cantidad ni precio.
+      const items = recupero
+        ? (f.recupero_items || []).map(it => ({
+            unidad: it.unidad === "bolson" ? "bolson" : "pallet",
+            cantidad: Number(parseMiles(it.cantidad ?? "")) || 0,
+            precio: Number(parseMiles(it.precio ?? "")) || 0,
+          })).filter(it => it.cantidad > 0 || it.precio > 0)
+          .map(it => ({ ...it, total: it.cantidad * it.precio }))
+        : [];
+      const recuperoTotal = items.reduce((s, it) => s + it.total, 0);
       const { error } = await supabase.from("retiros_materiales").insert({
         cuenta_id: cuentaId,
         fecha: f.fecha || hoyISO(),
         descripcion: (f.descripcion || "").trim() || null,
         monto, remito_url, remito_path,
-        recupero,
-        recupero_unidad: recupero ? (f.recupero_unidad || "pallet") : null,
-        recupero_cantidad: recupero ? recCant : null,
-        recupero_precio: recupero ? recPrecio : null,
-        recupero_total: recupero ? recCant * recPrecio : null,
+        recupero: recupero && items.length > 0,
+        recupero_items: recupero && items.length > 0 ? items : null,
+        recupero_total: recupero && items.length > 0 ? recuperoTotal : null,
+        // columnas planas V27 en null: ya se usa recupero_items
+        recupero_unidad: null, recupero_cantidad: null, recupero_precio: null,
       });
       if (error) { alert(error.message); setSubiendo(null); return; }
-      setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", file: null, recupero: false, recupero_unidad: "pallet", recupero_cantidad: "", recupero_precio: "" } }));
+      setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", file: null, recupero: false, recupero_items: [emptyRecItem()] } }));
       reload();
     } finally {
       setSubiendo(null);
@@ -373,11 +419,11 @@ export default function MaterialesPage() {
                           <TableCell sx={{ whiteSpace: "nowrap" }}>{fmtDate(r.fecha)}</TableCell>
                           <TableCell>
                             {r.descripcion || "—"}
-                            {r.recupero && (
-                              <Typography variant="caption" color="warning.main" sx={{ display: "block" }}>
-                                Recupero · {Number(r.recupero_cantidad || 0)} {r.recupero_unidad === "bolson" ? "bolsón/es" : "pallet/s"} · {fmtMoney(r.recupero_total, c.moneda)}
+                            {r.recupero && itemsRecupero(r).map((it, i) => (
+                              <Typography key={i} variant="caption" color="warning.main" sx={{ display: "block" }}>
+                                Recupero · {fmtNum0(it.cantidad)} {it.unidad === "bolson" ? "bolsón/es" : "pallet/s"} · {fmtMoney(it.total, c.moneda)}
                               </Typography>
-                            )}
+                            ))}
                           </TableCell>
                           <TableCell align="right" sx={{ whiteSpace: "nowrap", color: "error.main", fontWeight: 600 }}>
                             −{fmtMoney(r.monto, c.moneda)}
@@ -447,40 +493,72 @@ export default function MaterialesPage() {
                       sx={{ alignItems: "flex-start", m: 0 }}
                     />
                     {nr.recupero && (() => {
-                      const recCant = Number(nr.recupero_cantidad) || 0;
-                      const recPrecio = Number(parseMiles(nr.recupero_precio ?? "")) || 0;
-                      const recTotal = recCant * recPrecio;
+                      const items = recItemsDe(c.id);
+                      const granTotal = items.reduce((s, it) => {
+                        const cant = Number(parseMiles(it.cantidad ?? "")) || 0;
+                        const prec = Number(parseMiles(it.precio ?? "")) || 0;
+                        return s + cant * prec;
+                      }, 0);
                       return (
-                        <Grid container spacing={1.5} alignItems="center" sx={{ mt: 0.5 }}>
-                          <Grid item xs={12} sm={3}>
-                            <ToggleButtonGroup exclusive size="small" fullWidth
-                              value={nr.recupero_unidad ?? "pallet"}
-                              onChange={(_, v) => v && setRet(c.id, { recupero_unidad: v })}>
-                              <ToggleButton value="pallet">Pallet</ToggleButton>
-                              <ToggleButton value="bolson">Bolsón</ToggleButton>
-                            </ToggleButtonGroup>
-                          </Grid>
-                          <Grid item xs={6} sm={2.5}>
-                            <TextField label="Cantidad" fullWidth size="small"
-                              inputProps={{ inputMode: "decimal" }}
-                              value={nr.recupero_cantidad ?? ""}
-                              onChange={(e) => setRet(c.id, { recupero_cantidad: e.target.value.replace(/[^\d.,]/g, "") })} />
-                          </Grid>
-                          <Grid item xs={6} sm={3}>
-                            <TextField label={`Precio unitario (${c.moneda})`} fullWidth size="small"
-                              inputProps={{ inputMode: "decimal" }}
-                              value={fmtMiles(nr.recupero_precio ?? "")}
-                              onChange={(e) => setRet(c.id, { recupero_precio: parseMiles(e.target.value) })} />
-                          </Grid>
-                          <Grid item xs={12} sm={3.5}>
-                            <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5, display: "block" }}>
-                              Total a recuperar
+                        <Stack spacing={1.5} sx={{ mt: 0.5 }}>
+                          {items.map((it, idx) => {
+                            const cant = Number(parseMiles(it.cantidad ?? "")) || 0;
+                            const prec = Number(parseMiles(it.precio ?? "")) || 0;
+                            return (
+                              <Grid container spacing={1.5} alignItems="center" key={idx}>
+                                <Grid item xs={12} sm={3}>
+                                  <ToggleButtonGroup exclusive size="small" fullWidth
+                                    value={it.unidad ?? "pallet"}
+                                    onChange={(_, v) => v && setRecItem(c.id, idx, { unidad: v })}>
+                                    <ToggleButton value="pallet">Pallet</ToggleButton>
+                                    <ToggleButton value="bolson">Bolsón</ToggleButton>
+                                  </ToggleButtonGroup>
+                                </Grid>
+                                <Grid item xs={6} sm={2}>
+                                  <TextField label="Cantidad" fullWidth size="small"
+                                    inputProps={{ inputMode: "decimal" }}
+                                    value={it.cantidad ?? ""}
+                                    onChange={(e) => setRecItem(c.id, idx, { cantidad: e.target.value.replace(/[^\d.,]/g, "") })} />
+                                </Grid>
+                                <Grid item xs={6} sm={3}>
+                                  <TextField label={`Precio unitario (${c.moneda})`} fullWidth size="small"
+                                    inputProps={{ inputMode: "decimal" }}
+                                    value={fmtMiles(it.precio ?? "")}
+                                    onChange={(e) => setRecItem(c.id, idx, { precio: parseMiles(e.target.value) })} />
+                                </Grid>
+                                <Grid item xs={10} sm={3}>
+                                  <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5, display: "block" }}>
+                                    Subtotal
+                                  </Typography>
+                                  <Typography fontWeight={700} color="warning.main" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                                    {fmtMoney(cant * prec, c.moneda)}
+                                  </Typography>
+                                </Grid>
+                                <Grid item xs={2} sm={1} sx={{ textAlign: "right" }}>
+                                  <Tooltip title="Quitar ítem">
+                                    <span>
+                                      <IconButton size="small" disabled={items.length === 1}
+                                        onClick={() => delRecItem(c.id, idx)}>
+                                        <DeleteOutlineIcon fontSize="small" />
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
+                                </Grid>
+                              </Grid>
+                            );
+                          })}
+                          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ flexWrap: "wrap", gap: 1 }}>
+                            <Button size="small" startIcon={<AddIcon />} onClick={() => addRecItem(c.id)}>
+                              Agregar ítem
+                            </Button>
+                            <Typography variant="body2">
+                              Total a recuperar:{" "}
+                              <Typography component="span" fontWeight={700} color="warning.main" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                                {fmtMoney(granTotal, c.moneda)}
+                              </Typography>
                             </Typography>
-                            <Typography fontWeight={700} color="warning.main" sx={{ fontVariantNumeric: "tabular-nums" }}>
-                              {fmtMoney(recTotal, c.moneda)}
-                            </Typography>
-                          </Grid>
-                        </Grid>
+                          </Stack>
+                        </Stack>
                       );
                     })()}
                   </Box>
