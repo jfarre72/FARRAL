@@ -73,6 +73,9 @@ const emptyMov = {
   // Cambio puro entre cajas (tipo === "cambio")
   // reutiliza moneda (origen), monto (origen), moneda_destino, tipo_cambio
   moneda_destino: "ARS",
+  // Ingreso por recupero de materiales (vincula el ingreso a una cuenta de materiales)
+  recupero_materiales: false,
+  cuenta_materiales_id: "",
 };
 
 export default function CajaPage() {
@@ -98,6 +101,7 @@ export default function CajaPage() {
   const [categorias, setCategorias] = useState([]);
   const [hitos, setHitos] = useState([]);
   const [conceptos, setConceptos] = useState([]);
+  const [cuentasMateriales, setCuentasMateriales] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Dialog principal (crear / editar mov)
@@ -115,7 +119,7 @@ export default function CajaPage() {
   const reload = async () => {
     if (!proyecto) return;
     setLoading(true);
-    const [r1, r2, r3, r4, r5, r6, r7, r8, r9] = await Promise.all([
+    const [r1, r2, r3, r4, r5, r6, r7, r8, r9, r10] = await Promise.all([
       supabase.from("aportes").select("*").eq("proyecto_id", proyecto.id).order("fecha", { ascending: false }),
       supabase.from("inversores").select("id,nombre").eq("proyecto_id", proyecto.id),
       supabase.from("movimientos_caja").select("*").eq("proyecto_id", proyecto.id).order("fecha", { ascending: false }),
@@ -125,6 +129,7 @@ export default function CajaPage() {
       supabase.from("presupuesto_items").select("id,presupuesto_id,nombre,monto_presupuestado,avance_pct").order("orden"),
       supabase.from("hitos").select("nombre,orden").eq("proyecto_id", proyecto.id).order("orden"),
       supabase.from("conceptos").select("nombre,usa_etapas,orden").eq("proyecto_id", proyecto.id).order("orden"),
+      supabase.from("cuentas_materiales").select("id,proveedor,moneda").eq("proyecto_id", proyecto.id).order("fecha", { ascending: false }),
     ]);
     setAportes(r1.data ?? []);
     setInversores(r2.data ?? []);
@@ -134,6 +139,7 @@ export default function CajaPage() {
     setPresupuestos(r6.data ?? []);
     setHitos((r8.data ?? []).map(h => h.nombre));
     setConceptos(r9.data ?? []);
+    setCuentasMateriales(r10.data ?? []);
     // index items por presupuesto
     const idx = {};
     for (const it of (r7.data ?? [])) {
@@ -259,13 +265,16 @@ export default function CajaPage() {
         ? `Cambio ${mv.moneda} → ${mv.moneda_destino} @ ${fmtNum(mv.tipo_cambio, 2)}`
         : mv.tipo === "traspaso"
           ? `Traspaso ${mv.titular || "?"} → ${mv.titular_destino || "?"}`
-          : (mv.descripcion || (mv.tipo === "ingreso" ? "Ingreso" : "Egreso")),
+          : mv.recupero_materiales
+            ? `Recupero de materiales${mv.descripcion ? ` · ${mv.descripcion}` : ""}`
+            : (mv.descripcion || (mv.tipo === "ingreso" ? "Ingreso" : "Egreso")),
       observacion: mv.descripcion ?? null,
       titular: mv.titular ?? null,
       titular_destino: mv.titular_destino ?? null,
       categoria: mv.categoria, concepto: mv.concepto, etapa: mv.etapa,
       tipo_costo: mv.tipo_costo, rubro: mv.rubro, comprobante_url: mv.comprobante_url, raw: mv,
       moneda_destino: mv.moneda_destino, monto_destino: mv.monto_destino,
+      recupero_materiales: mv.recupero_materiales, cuenta_materiales_id: mv.cuenta_materiales_id,
       con_cambio: mv.con_cambio,
       cambio_moneda_origen: mv.cambio_moneda_origen,
       cambio_monto_origen: mv.cambio_monto_origen,
@@ -425,6 +434,8 @@ export default function CajaPage() {
       cambio_monto_origen: mv.cambio_monto_origen ?? "",
       cambio_tipo_cambio: (mv.tipo === "cambio" ? mv.tipo_cambio : mv.cambio_tipo_cambio) ?? "",
       moneda_destino: mv.moneda_destino ?? "ARS",
+      recupero_materiales: !!mv.recupero_materiales,
+      cuenta_materiales_id: mv.cuenta_materiales_id ?? "",
     });
     setEditId(mv.id);
     setKeepCompPath(mv.comprobante_url ?? null);
@@ -485,6 +496,9 @@ export default function CajaPage() {
     } else {
       const esCambioPuro = form.tipo === "egreso" && form.con_cambio;
       if (!esCambioPuro && (!form.monto || monto <= 0)) { setErr("Ingresá un monto válido."); return; }
+      if (form.tipo === "ingreso" && form.recupero_materiales && !form.cuenta_materiales_id) {
+        setErr("Elegí la cuenta de materiales del recupero."); return;
+      }
       if (form.tipo === "egreso" && form.con_cambio) {
         if (form.cambio_moneda_origen === form.moneda) { setErr("La caja origen del cambio debe ser distinta de la caja del gasto."); return; }
         if (!monOrigen || monOrigen <= 0) { setErr("Ingresá el monto a convertir."); return; }
@@ -585,6 +599,10 @@ export default function CajaPage() {
         tipo_cambio_gasto: form.tipo === "egreso" && !form.con_cambio && form.moneda === "ARS"
           ? (Number(form.tipo_cambio_gasto) > 0 ? Number(form.tipo_cambio_gasto) : null)
           : null,
+        recupero_materiales: form.tipo === "ingreso" ? !!form.recupero_materiales : false,
+        cuenta_materiales_id: form.tipo === "ingreso" && form.recupero_materiales
+          ? (form.cuenta_materiales_id || null)
+          : null,
       };
     }
 
@@ -681,6 +699,7 @@ export default function CajaPage() {
           <Button startIcon={<PictureAsPdfIcon />} variant="outlined" onClick={exportarPdf}>PDF</Button>
           <Button startIcon={<SwapHorizIcon />} variant="outlined" color="primary" onClick={() => openNew("cambio")}>Cambio</Button>
           <Button startIcon={<SyncAltIcon />} variant="outlined" color="primary" onClick={() => openNew("traspaso")}>Traspaso</Button>
+          <Button startIcon={<ArrowUpwardIcon />} variant="contained" color="success" onClick={() => openNew("ingreso")}>Ingreso</Button>
           <Button startIcon={<ArrowDownwardIcon />} variant="contained" color="secondary" onClick={() => openNew("egreso")}>Egreso</Button>
         </Stack>
       </Stack>
@@ -895,6 +914,15 @@ export default function CajaPage() {
                   </Typography>
                 }
               />
+              {detail.recupero_materiales && (
+                <DetailRow
+                  label="Recupero"
+                  value={
+                    <Chip size="small" color="warning" variant="outlined"
+                      label={`Recupero de materiales · ${cuentasMateriales.find(cm => cm.id === detail.cuenta_materiales_id)?.proveedor ?? "Cuenta"}`} />
+                  }
+                />
+              )}
               {detail.tipo === "egreso" && !detail.con_cambio && detail.moneda === "ARS" && Number(detail.tipo_cambio_gasto) > 0 && (
                 <DetailRow
                   label="Imputado (USD)"
@@ -967,8 +995,8 @@ export default function CajaPage() {
       <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="md" fullScreen={fullScreen}>
         <DialogTitle>
           {editId
-            ? form.tipo === "cambio" ? "Editar cambio" : form.tipo === "traspaso" ? "Editar traspaso" : "Editar egreso"
-            : form.tipo === "cambio" ? "Cambio entre cajas" : form.tipo === "traspaso" ? "Traspaso entre cajas personales" : "Registrar egreso"}
+            ? form.tipo === "cambio" ? "Editar cambio" : form.tipo === "traspaso" ? "Editar traspaso" : form.tipo === "ingreso" ? "Editar ingreso" : "Editar egreso"
+            : form.tipo === "cambio" ? "Cambio entre cajas" : form.tipo === "traspaso" ? "Traspaso entre cajas personales" : form.tipo === "ingreso" ? "Registrar ingreso" : "Registrar egreso"}
         </DialogTitle>
         <DialogContent dividers>
           {err && <Alert severity="error" sx={{ mb: 2 }}>{err}</Alert>}
@@ -1142,7 +1170,7 @@ export default function CajaPage() {
 
               <Grid item xs={12} sm={6}>
                 <TextField
-                  label="Monto del gasto"
+                  label={form.tipo === "ingreso" ? "Monto del ingreso" : "Monto del gasto"}
                   type="number" fullWidth
                   value={form.monto}
                   helperText={form.con_cambio ? "0 si es solo cambio de divisa" : " "}
@@ -1247,6 +1275,52 @@ export default function CajaPage() {
                 <TextField label="Descripción / observación" fullWidth multiline minRows={2}
                   value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} />
               </Grid>
+
+              {/* Recupero de materiales (sólo ingresos) */}
+              {form.tipo === "ingreso" && (
+                <Grid item xs={12}>
+                  <Box sx={{
+                    p: 1.5, borderRadius: 2,
+                    border: "1px solid", borderColor: "divider",
+                    bgcolor: "rgba(15,42,74,0.025)",
+                  }}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={form.recupero_materiales}
+                          onChange={(e) => {
+                            const next = e.target.checked;
+                            setForm({ ...form, recupero_materiales: next, cuenta_materiales_id: next ? form.cuenta_materiales_id : "" });
+                          }}
+                        />
+                      }
+                      label={
+                        <Stack>
+                          <Typography fontWeight={600}>¿Es recupero de materiales?</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Plata que entra por la devolución de material de una cuenta de materiales.
+                          </Typography>
+                        </Stack>
+                      }
+                      sx={{ alignItems: "flex-start", m: 0 }}
+                    />
+                    {form.recupero_materiales && (
+                      <Box sx={{ mt: 2 }}>
+                        <TextField select fullWidth label="Cuenta de materiales"
+                          value={form.cuenta_materiales_id}
+                          onChange={(e) => setForm({ ...form, cuenta_materiales_id: e.target.value })}
+                          helperText={cuentasMateriales.length === 0 ? "No hay cuentas de materiales cargadas" : "Cuenta a la que se imputa el recupero"}
+                        >
+                          {cuentasMateriales.length === 0 && <MenuItem value="" disabled>Sin cuentas</MenuItem>}
+                          {cuentasMateriales.map(cm => (
+                            <MenuItem key={cm.id} value={cm.id}>{cm.proveedor} ({cm.moneda})</MenuItem>
+                          ))}
+                        </TextField>
+                      </Box>
+                    )}
+                  </Box>
+                </Grid>
+              )}
 
               {form.tipo === "egreso" && (
                 <Grid item xs={12}>

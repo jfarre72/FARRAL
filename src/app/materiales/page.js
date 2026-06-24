@@ -4,7 +4,7 @@ import {
   Button, IconButton, Tooltip, LinearProgress, Dialog, DialogTitle, DialogContent,
   DialogActions, Accordion, AccordionSummary, AccordionDetails, Table, TableHead,
   TableBody, TableRow, TableCell, Chip, Link, ToggleButton, ToggleButtonGroup,
-  useMediaQuery,
+  Divider, FormControlLabel, Switch, useMediaQuery,
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
@@ -54,6 +54,7 @@ export default function MaterialesPage() {
   const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
   const [cuentas, setCuentas] = useState([]);
   const [retiros, setRetiros] = useState([]);
+  const [recuperos, setRecuperos] = useState([]); // ingresos de caja marcados como recupero
   const [loading, setLoading] = useState(true);
 
   // Dialog cuenta
@@ -74,35 +75,51 @@ export default function MaterialesPage() {
       .from("cuentas_materiales").select("*").eq("proyecto_id", proyecto.id)
       .order("fecha", { ascending: false });
     const ids = (cs ?? []).map(c => c.id);
-    let rs = [];
+    let rs = [], rec = [];
     if (ids.length) {
       const { data } = await supabase
         .from("retiros_materiales").select("*").in("cuenta_id", ids)
         .order("fecha", { ascending: false }).order("created_at", { ascending: false });
       rs = data ?? [];
+      const { data: rc } = await supabase
+        .from("movimientos_caja")
+        .select("id, fecha, monto, moneda, cuenta_materiales_id")
+        .eq("proyecto_id", proyecto.id)
+        .eq("tipo", "ingreso")
+        .eq("recupero_materiales", true)
+        .in("cuenta_materiales_id", ids);
+      rec = rc ?? [];
     }
     setCuentas(cs ?? []);
     setRetiros(rs);
+    setRecuperos(rec);
     setLoading(false);
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
 
   const retirosDe = (cuentaId) => retiros.filter(r => r.cuenta_id === cuentaId);
+  const recuperosDe = (cuentaId) => recuperos.filter(r => r.cuenta_materiales_id === cuentaId);
   const calc = (c) => {
     const rs = retirosDe(c.id);
     const retirado = rs.reduce((s, r) => s + Number(r.monto || 0), 0);
     const saldo = Number(c.monto_inicial || 0) - retirado;
-    return { retirado, saldo, n: rs.length };
+    // Recupero: total a recuperar (de los retiros con recupero) vs ya recuperado (ingresos de caja)
+    const aRecuperar = rs.reduce((s, r) => s + (r.recupero ? Number(r.recupero_total || 0) : 0), 0);
+    const recuperado = recuperosDe(c.id).reduce((s, r) => s + Number(r.monto || 0), 0);
+    const pendienteRecupero = aRecuperar - recuperado;
+    return { retirado, saldo, n: rs.length, aRecuperar, recuperado, pendienteRecupero };
   };
 
   const totales = useMemo(() => {
-    let inicial = 0, retirado = 0;
+    let inicial = 0, retirado = 0, aRecuperar = 0, recuperado = 0;
     for (const c of cuentas) {
       inicial += Number(c.monto_inicial || 0);
       retirado += retirosDe(c.id).reduce((s, r) => s + Number(r.monto || 0), 0);
+      aRecuperar += retirosDe(c.id).reduce((s, r) => s + (r.recupero ? Number(r.recupero_total || 0) : 0), 0);
+      recuperado += recuperosDe(c.id).reduce((s, r) => s + Number(r.monto || 0), 0);
     }
-    return { inicial, retirado, saldo: inicial - retirado };
-  }, [cuentas, retiros]);
+    return { inicial, retirado, saldo: inicial - retirado, aRecuperar, recuperado, pendienteRecupero: aRecuperar - recuperado };
+  }, [cuentas, retiros, recuperos]);
 
   // ---- Cuenta ----
   const openNewCuenta = () => { setFormCuenta(emptyCuenta); setEditCuentaId(null); setErrCuenta(null); setOpenCuenta(true); };
@@ -159,14 +176,22 @@ export default function MaterialesPage() {
         const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
         remito_url = pub.publicUrl; remito_path = path;
       }
+      const recupero = !!f.recupero;
+      const recCant = recupero ? (Number(f.recupero_cantidad) || 0) : 0;
+      const recPrecio = recupero ? (Number(f.recupero_precio) || 0) : 0;
       const { error } = await supabase.from("retiros_materiales").insert({
         cuenta_id: cuentaId,
         fecha: f.fecha || hoyISO(),
         descripcion: (f.descripcion || "").trim() || null,
         monto, remito_url, remito_path,
+        recupero,
+        recupero_unidad: recupero ? (f.recupero_unidad || "pallet") : null,
+        recupero_cantidad: recupero ? recCant : null,
+        recupero_precio: recupero ? recPrecio : null,
+        recupero_total: recupero ? recCant * recPrecio : null,
       });
       if (error) { alert(error.message); setSubiendo(null); return; }
-      setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", file: null } }));
+      setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", file: null, recupero: false, recupero_unidad: "pallet", recupero_cantidad: "", recupero_precio: "" } }));
       reload();
     } finally {
       setSubiendo(null);
@@ -208,6 +233,17 @@ export default function MaterialesPage() {
               <Resumen label="Retirado" value={fmtMoney(totales.retirado, "ARS")} color="error.main" />
               <Resumen label="Saldo disponible" value={fmtMoney(totales.saldo, "ARS")} color="success.main" />
             </Grid>
+            {totales.aRecuperar > 0 && (
+              <>
+                <Divider sx={{ my: 1.5 }} />
+                <Grid container spacing={2}>
+                  <Resumen label="Saldo a recuperar" value={fmtMoney(totales.aRecuperar, "ARS")} color="warning.main" />
+                  <Resumen label="Recuperado" value={fmtMoney(totales.recuperado, "ARS")} color="success.main" />
+                  <Resumen label="Pendiente de recupero" value={fmtMoney(totales.pendienteRecupero, "ARS")}
+                    color={totales.pendienteRecupero <= 0 ? "success.main" : "warning.main"} />
+                </Grid>
+              </>
+            )}
             <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
               Totales sumando todas las cuentas (mezcla monedas si tenés en ARS y USD; mirá cada cuenta para el detalle exacto).
             </Typography>
@@ -259,6 +295,16 @@ export default function MaterialesPage() {
                   <Box sx={{ height: "100%", width: `${pct}%`, bgcolor: pct >= 100 ? "error.main" : "secondary.main", transition: "width .4s" }} />
                 </Box>
 
+                {/* Resumen de recupero de la cuenta */}
+                {k.aRecuperar > 0 && (
+                  <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: "wrap" }} useFlexGap>
+                    <Chip size="small" color="warning" variant="outlined" label={`A recuperar: ${fmtMoney(k.aRecuperar, c.moneda)}`} />
+                    <Chip size="small" color="success" variant="outlined" label={`Recuperado: ${fmtMoney(k.recuperado, c.moneda)}`} />
+                    <Chip size="small" color={k.pendienteRecupero <= 0 ? "success" : "warning"}
+                      label={`Pendiente: ${fmtMoney(k.pendienteRecupero, c.moneda)}`} />
+                  </Stack>
+                )}
+
                 {/* Tabla de retiros */}
                 <Box sx={{ overflowX: "auto" }}>
                   <Table size="small">
@@ -280,7 +326,14 @@ export default function MaterialesPage() {
                       {rs.map((r) => (
                         <TableRow key={r.id} hover>
                           <TableCell sx={{ whiteSpace: "nowrap" }}>{fmtDate(r.fecha)}</TableCell>
-                          <TableCell>{r.descripcion || "—"}</TableCell>
+                          <TableCell>
+                            {r.descripcion || "—"}
+                            {r.recupero && (
+                              <Typography variant="caption" color="warning.main" sx={{ display: "block" }}>
+                                Recupero · {Number(r.recupero_cantidad || 0)} {r.recupero_unidad === "bolson" ? "bolsón/es" : "pallet/s"} · {fmtMoney(r.recupero_total, c.moneda)}
+                              </Typography>
+                            )}
+                          </TableCell>
                           <TableCell align="right" sx={{ whiteSpace: "nowrap", color: "error.main", fontWeight: 600 }}>
                             −{fmtMoney(r.monto, c.moneda)}
                           </TableCell>
@@ -330,6 +383,62 @@ export default function MaterialesPage() {
                       </Button>
                     </Grid>
                   </Grid>
+
+                  {/* Recupero del retiro */}
+                  <Box sx={{ mt: 1.5 }}>
+                    <FormControlLabel
+                      control={
+                        <Switch size="small" checked={!!nr.recupero}
+                          onChange={(e) => setRet(c.id, { recupero: e.target.checked })} />
+                      }
+                      label={
+                        <Stack>
+                          <Typography variant="body2" fontWeight={600}>¿Presenta recupero?</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Material (pallets / bolsones) que se devuelve y genera plata a recuperar.
+                          </Typography>
+                        </Stack>
+                      }
+                      sx={{ alignItems: "flex-start", m: 0 }}
+                    />
+                    {nr.recupero && (() => {
+                      const recCant = Number(nr.recupero_cantidad) || 0;
+                      const recPrecio = Number(parseMiles(nr.recupero_precio ?? "")) || 0;
+                      const recTotal = recCant * recPrecio;
+                      return (
+                        <Grid container spacing={1.5} alignItems="center" sx={{ mt: 0.5 }}>
+                          <Grid item xs={12} sm={3}>
+                            <ToggleButtonGroup exclusive size="small" fullWidth
+                              value={nr.recupero_unidad ?? "pallet"}
+                              onChange={(_, v) => v && setRet(c.id, { recupero_unidad: v })}>
+                              <ToggleButton value="pallet">Pallet</ToggleButton>
+                              <ToggleButton value="bolson">Bolsón</ToggleButton>
+                            </ToggleButtonGroup>
+                          </Grid>
+                          <Grid item xs={6} sm={2.5}>
+                            <TextField label="Cantidad" fullWidth size="small"
+                              inputProps={{ inputMode: "decimal" }}
+                              value={nr.recupero_cantidad ?? ""}
+                              onChange={(e) => setRet(c.id, { recupero_cantidad: e.target.value.replace(/[^\d.,]/g, "") })} />
+                          </Grid>
+                          <Grid item xs={6} sm={3}>
+                            <TextField label={`Precio unitario (${c.moneda})`} fullWidth size="small"
+                              inputProps={{ inputMode: "decimal" }}
+                              value={fmtMiles(nr.recupero_precio ?? "")}
+                              onChange={(e) => setRet(c.id, { recupero_precio: parseMiles(e.target.value) })} />
+                          </Grid>
+                          <Grid item xs={12} sm={3.5}>
+                            <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5, display: "block" }}>
+                              Total a recuperar
+                            </Typography>
+                            <Typography fontWeight={700} color="warning.main" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                              {fmtMoney(recTotal, c.moneda)}
+                            </Typography>
+                          </Grid>
+                        </Grid>
+                      );
+                    })()}
+                  </Box>
                 </Box>
 
                 <Stack direction="row" spacing={1} sx={{ mt: 2 }} justifyContent="flex-end">
