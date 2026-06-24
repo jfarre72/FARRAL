@@ -27,7 +27,10 @@ alter table public.retiros_materiales
 -- ---------------------------------------------------------------------
 alter table public.movimientos_caja
   add column if not exists recupero_materiales  boolean not null default false,
-  add column if not exists cuenta_materiales_id uuid references public.cuentas_materiales(id) on delete set null;
+  add column if not exists cuenta_materiales_id uuid references public.cuentas_materiales(id) on delete set null,
+  -- cantidad de pallets / bolsones efectivamente devueltos en este recupero
+  add column if not exists recupero_pallets     numeric(16,2),
+  add column if not exists recupero_bolsones    numeric(16,2);
 
 create index if not exists idx_movcaja_cuenta_materiales
   on public.movimientos_caja(cuenta_materiales_id);

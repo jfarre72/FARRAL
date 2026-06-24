@@ -28,6 +28,12 @@ const hoyISO = () => {
 
 const emptyCuenta = { proveedor: "", descripcion: "", moneda: "ARS", monto_inicial: "", fecha: hoyISO() };
 
+// Formatea una cantidad sin decimales innecesarios (ej. 3, 2.5).
+const fmtNum0 = (val) => {
+  const n = Number(val || 0);
+  return Number.isInteger(n) ? String(n) : n.toLocaleString("es-AR", { maximumFractionDigits: 2 });
+};
+
 // Formatea un string numérico con separadores de miles (formato AR: punto miles, coma decimal).
 const fmtMiles = (val) => {
   if (val === "" || val === null || val === undefined) return "";
@@ -83,7 +89,7 @@ export default function MaterialesPage() {
       rs = data ?? [];
       const { data: rc } = await supabase
         .from("movimientos_caja")
-        .select("id, fecha, monto, moneda, cuenta_materiales_id")
+        .select("id, fecha, monto, moneda, cuenta_materiales_id, recupero_pallets, recupero_bolsones")
         .eq("proyecto_id", proyecto.id)
         .eq("tipo", "ingreso")
         .eq("recupero_materiales", true)
@@ -104,21 +110,36 @@ export default function MaterialesPage() {
     const retirado = rs.reduce((s, r) => s + Number(r.monto || 0), 0);
     const saldo = Number(c.monto_inicial || 0) - retirado;
     // Recupero: total a recuperar (de los retiros con recupero) vs ya recuperado (ingresos de caja)
+    const rec = recuperosDe(c.id);
     const aRecuperar = rs.reduce((s, r) => s + (r.recupero ? Number(r.recupero_total || 0) : 0), 0);
-    const recuperado = recuperosDe(c.id).reduce((s, r) => s + Number(r.monto || 0), 0);
+    const recuperado = rec.reduce((s, r) => s + Number(r.monto || 0), 0);
     const pendienteRecupero = aRecuperar - recuperado;
-    return { retirado, saldo, n: rs.length, aRecuperar, recuperado, pendienteRecupero };
+    // Cantidades de pallets / bolsones a devolver (de los retiros) vs devueltos (de los recuperos)
+    const palletsADevolver = rs.reduce((s, r) => s + (r.recupero && r.recupero_unidad === "pallet" ? Number(r.recupero_cantidad || 0) : 0), 0);
+    const bolsonesADevolver = rs.reduce((s, r) => s + (r.recupero && r.recupero_unidad === "bolson" ? Number(r.recupero_cantidad || 0) : 0), 0);
+    const palletsDevueltos = rec.reduce((s, r) => s + Number(r.recupero_pallets || 0), 0);
+    const bolsonesDevueltos = rec.reduce((s, r) => s + Number(r.recupero_bolsones || 0), 0);
+    return { retirado, saldo, n: rs.length, aRecuperar, recuperado, pendienteRecupero,
+      palletsADevolver, bolsonesADevolver, palletsDevueltos, bolsonesDevueltos };
   };
 
   const totales = useMemo(() => {
     let inicial = 0, retirado = 0, aRecuperar = 0, recuperado = 0;
+    let palletsADevolver = 0, bolsonesADevolver = 0, palletsDevueltos = 0, bolsonesDevueltos = 0;
     for (const c of cuentas) {
+      const k = calc(c);
       inicial += Number(c.monto_inicial || 0);
-      retirado += retirosDe(c.id).reduce((s, r) => s + Number(r.monto || 0), 0);
-      aRecuperar += retirosDe(c.id).reduce((s, r) => s + (r.recupero ? Number(r.recupero_total || 0) : 0), 0);
-      recuperado += recuperosDe(c.id).reduce((s, r) => s + Number(r.monto || 0), 0);
+      retirado += k.retirado;
+      aRecuperar += k.aRecuperar;
+      recuperado += k.recuperado;
+      palletsADevolver += k.palletsADevolver;
+      bolsonesADevolver += k.bolsonesADevolver;
+      palletsDevueltos += k.palletsDevueltos;
+      bolsonesDevueltos += k.bolsonesDevueltos;
     }
-    return { inicial, retirado, saldo: inicial - retirado, aRecuperar, recuperado, pendienteRecupero: aRecuperar - recuperado };
+    return { inicial, retirado, saldo: inicial - retirado, aRecuperar, recuperado,
+      pendienteRecupero: aRecuperar - recuperado,
+      palletsADevolver, bolsonesADevolver, palletsDevueltos, bolsonesDevueltos };
   }, [cuentas, retiros, recuperos]);
 
   // ---- Cuenta ----
@@ -242,6 +263,20 @@ export default function MaterialesPage() {
                   <Resumen label="Pendiente de recupero" value={fmtMoney(totales.pendienteRecupero, "ARS")}
                     color={totales.pendienteRecupero <= 0 ? "success.main" : "warning.main"} />
                 </Grid>
+                {(totales.palletsADevolver > 0 || totales.bolsonesADevolver > 0) && (
+                  <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: "wrap" }} useFlexGap>
+                    {totales.palletsADevolver > 0 && (
+                      <Chip size="small" variant="outlined"
+                        color={totales.palletsDevueltos >= totales.palletsADevolver ? "success" : "warning"}
+                        label={`Pallets: ${fmtNum0(totales.palletsDevueltos)} / ${fmtNum0(totales.palletsADevolver)} devueltos`} />
+                    )}
+                    {totales.bolsonesADevolver > 0 && (
+                      <Chip size="small" variant="outlined"
+                        color={totales.bolsonesDevueltos >= totales.bolsonesADevolver ? "success" : "warning"}
+                        label={`Bolsones: ${fmtNum0(totales.bolsonesDevueltos)} / ${fmtNum0(totales.bolsonesADevolver)} devueltos`} />
+                    )}
+                  </Stack>
+                )}
               </>
             )}
             <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
@@ -302,6 +337,16 @@ export default function MaterialesPage() {
                     <Chip size="small" color="success" variant="outlined" label={`Recuperado: ${fmtMoney(k.recuperado, c.moneda)}`} />
                     <Chip size="small" color={k.pendienteRecupero <= 0 ? "success" : "warning"}
                       label={`Pendiente: ${fmtMoney(k.pendienteRecupero, c.moneda)}`} />
+                    {k.palletsADevolver > 0 && (
+                      <Chip size="small" variant="outlined"
+                        color={k.palletsDevueltos >= k.palletsADevolver ? "success" : "warning"}
+                        label={`Pallets: ${fmtNum0(k.palletsDevueltos)} / ${fmtNum0(k.palletsADevolver)} devueltos`} />
+                    )}
+                    {k.bolsonesADevolver > 0 && (
+                      <Chip size="small" variant="outlined"
+                        color={k.bolsonesDevueltos >= k.bolsonesADevolver ? "success" : "warning"}
+                        label={`Bolsones: ${fmtNum0(k.bolsonesDevueltos)} / ${fmtNum0(k.bolsonesADevolver)} devueltos`} />
+                    )}
                   </Stack>
                 )}
 

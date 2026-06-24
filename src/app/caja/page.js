@@ -76,6 +76,8 @@ const emptyMov = {
   // Ingreso por recupero de materiales (vincula el ingreso a una cuenta de materiales)
   recupero_materiales: false,
   cuenta_materiales_id: "",
+  recupero_pallets: "",
+  recupero_bolsones: "",
 };
 
 export default function CajaPage() {
@@ -436,6 +438,8 @@ export default function CajaPage() {
       moneda_destino: mv.moneda_destino ?? "ARS",
       recupero_materiales: !!mv.recupero_materiales,
       cuenta_materiales_id: mv.cuenta_materiales_id ?? "",
+      recupero_pallets: mv.recupero_pallets ?? "",
+      recupero_bolsones: mv.recupero_bolsones ?? "",
     });
     setEditId(mv.id);
     setKeepCompPath(mv.comprobante_url ?? null);
@@ -602,6 +606,12 @@ export default function CajaPage() {
         recupero_materiales: form.tipo === "ingreso" ? !!form.recupero_materiales : false,
         cuenta_materiales_id: form.tipo === "ingreso" && form.recupero_materiales
           ? (form.cuenta_materiales_id || null)
+          : null,
+        recupero_pallets: form.tipo === "ingreso" && form.recupero_materiales
+          ? (Number(form.recupero_pallets) > 0 ? Number(form.recupero_pallets) : null)
+          : null,
+        recupero_bolsones: form.tipo === "ingreso" && form.recupero_materiales
+          ? (Number(form.recupero_bolsones) > 0 ? Number(form.recupero_bolsones) : null)
           : null,
       };
     }
@@ -1305,18 +1315,30 @@ export default function CajaPage() {
                       sx={{ alignItems: "flex-start", m: 0 }}
                     />
                     {form.recupero_materiales && (
-                      <Box sx={{ mt: 2 }}>
-                        <TextField select fullWidth label="Cuenta de materiales"
-                          value={form.cuenta_materiales_id}
-                          onChange={(e) => setForm({ ...form, cuenta_materiales_id: e.target.value })}
-                          helperText={cuentasMateriales.length === 0 ? "No hay cuentas de materiales cargadas" : "Cuenta a la que se imputa el recupero"}
-                        >
-                          {cuentasMateriales.length === 0 && <MenuItem value="" disabled>Sin cuentas</MenuItem>}
-                          {cuentasMateriales.map(cm => (
-                            <MenuItem key={cm.id} value={cm.id}>{cm.proveedor} ({cm.moneda})</MenuItem>
-                          ))}
-                        </TextField>
-                      </Box>
+                      <Grid container spacing={2} sx={{ mt: 0.5 }}>
+                        <Grid item xs={12} sm={6}>
+                          <TextField select fullWidth label="Cuenta de materiales"
+                            value={form.cuenta_materiales_id}
+                            onChange={(e) => setForm({ ...form, cuenta_materiales_id: e.target.value })}
+                            helperText={cuentasMateriales.length === 0 ? "No hay cuentas de materiales cargadas" : "Cuenta a la que se imputa el recupero"}
+                          >
+                            {cuentasMateriales.length === 0 && <MenuItem value="" disabled>Sin cuentas</MenuItem>}
+                            {cuentasMateriales.map(cm => (
+                              <MenuItem key={cm.id} value={cm.id}>{cm.proveedor} ({cm.moneda})</MenuItem>
+                            ))}
+                          </TextField>
+                        </Grid>
+                        <Grid item xs={6} sm={3}>
+                          <TextField fullWidth type="number" label="Pallets devueltos"
+                            value={form.recupero_pallets}
+                            onChange={(e) => setForm({ ...form, recupero_pallets: e.target.value })} />
+                        </Grid>
+                        <Grid item xs={6} sm={3}>
+                          <TextField fullWidth type="number" label="Bolsones devueltos"
+                            value={form.recupero_bolsones}
+                            onChange={(e) => setForm({ ...form, recupero_bolsones: e.target.value })} />
+                        </Grid>
+                      </Grid>
                     )}
                   </Box>
                 </Grid>
