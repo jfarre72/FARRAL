@@ -87,6 +87,7 @@ export default function MaterialesPage() {
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
   const [cuentas, setCuentas] = useState([]);
+  const [anticipos, setAnticipos] = useState([]);
   const [retiros, setRetiros] = useState([]);
   const [recuperos, setRecuperos] = useState([]); // ingresos de caja marcados como recupero
   const [loading, setLoading] = useState(true);
@@ -109,8 +110,12 @@ export default function MaterialesPage() {
       .from("cuentas_materiales").select("*").eq("proyecto_id", proyecto.id)
       .order("fecha", { ascending: false });
     const ids = (cs ?? []).map(c => c.id);
-    let rs = [], rec = [];
+    let rs = [], rec = [], ant = [];
     if (ids.length) {
+      const { data: as } = await supabase
+        .from("anticipos_materiales").select("*").in("cuenta_id", ids)
+        .order("fecha", { ascending: true }).order("created_at", { ascending: true });
+      ant = as ?? [];
       const { data } = await supabase
         .from("retiros_materiales").select("*").in("cuenta_id", ids)
         .order("fecha", { ascending: false }).order("created_at", { ascending: false });
@@ -125,6 +130,7 @@ export default function MaterialesPage() {
       rec = rc ?? [];
     }
     setCuentas(cs ?? []);
+    setAnticipos(ant);
     setRetiros(rs);
     setRecuperos(rec);
     setLoading(false);
@@ -133,10 +139,18 @@ export default function MaterialesPage() {
 
   const retirosDe = (cuentaId) => retiros.filter(r => r.cuenta_id === cuentaId);
   const recuperosDe = (cuentaId) => recuperos.filter(r => r.cuenta_materiales_id === cuentaId);
+  const anticiposDe = (cuentaId) => anticipos.filter(a => a.cuenta_id === cuentaId);
+  // Anticipo total de la cuenta: suma de sus anticipos; si todavía no tiene
+  // (migración no corrida), cae al monto_inicial heredado.
+  const totalAnticipoDe = (c) => {
+    const as = anticiposDe(c.id);
+    return as.length ? as.reduce((s, a) => s + Number(a.monto || 0), 0) : Number(c.monto_inicial || 0);
+  };
   const calc = (c) => {
     const rs = retirosDe(c.id);
+    const anticipado = totalAnticipoDe(c);
     const retirado = rs.reduce((s, r) => s + Number(r.monto || 0), 0);
-    const saldo = Number(c.monto_inicial || 0) - retirado;
+    const saldo = anticipado - retirado;
     // Recupero: total a recuperar (de los retiros con recupero) vs ya recuperado (ingresos de caja)
     const rec = recuperosDe(c.id);
     const aRecuperar = rs.reduce((s, r) => s + itemsRecupero(r).reduce((a, it) => a + it.total, 0), 0);
@@ -147,7 +161,7 @@ export default function MaterialesPage() {
     const bolsonesADevolver = rs.reduce((s, r) => s + itemsRecupero(r).reduce((a, it) => a + (it.unidad === "bolson" ? it.cantidad : 0), 0), 0);
     const palletsDevueltos = rec.reduce((s, r) => s + Number(r.recupero_pallets || 0), 0);
     const bolsonesDevueltos = rec.reduce((s, r) => s + Number(r.recupero_bolsones || 0), 0);
-    return { retirado, saldo, n: rs.length, aRecuperar, recuperado, pendienteRecupero,
+    return { anticipado, retirado, saldo, n: rs.length, aRecuperar, recuperado, pendienteRecupero,
       palletsADevolver, bolsonesADevolver, palletsDevueltos, bolsonesDevueltos };
   };
 
@@ -156,7 +170,7 @@ export default function MaterialesPage() {
     let palletsADevolver = 0, bolsonesADevolver = 0, palletsDevueltos = 0, bolsonesDevueltos = 0;
     for (const c of cuentas) {
       const k = calc(c);
-      inicial += Number(c.monto_inicial || 0);
+      inicial += k.anticipado;
       retirado += k.retirado;
       aRecuperar += k.aRecuperar;
       recuperado += k.recuperado;
@@ -168,7 +182,7 @@ export default function MaterialesPage() {
     return { inicial, retirado, saldo: inicial - retirado, aRecuperar, recuperado,
       pendienteRecupero: aRecuperar - recuperado,
       palletsADevolver, bolsonesADevolver, palletsDevueltos, bolsonesDevueltos };
-  }, [cuentas, retiros, recuperos]);
+  }, [cuentas, anticipos, retiros, recuperos]);
 
   // ---- Cuenta ----
   const openNewCuenta = () => { setFormCuenta(emptyCuenta); setEditCuentaId(null); setErrCuenta(null); setOpenCuenta(true); };
@@ -183,20 +197,60 @@ export default function MaterialesPage() {
     setErrCuenta(null);
     if (!formCuenta.proveedor.trim()) { setErrCuenta("El proveedor es obligatorio."); return; }
     setSaving(true);
-    const payload = {
+    if (editCuentaId) {
+      // En edición no se toca el anticipo: los anticipos se gestionan dentro
+      // de la cuenta (varios acopios). Sólo datos de la cuenta.
+      const res = await supabase.from("cuentas_materiales").update({
+        proveedor: formCuenta.proveedor.trim(),
+        descripcion: formCuenta.descripcion || null,
+        moneda: formCuenta.moneda,
+        fecha: formCuenta.fecha || null,
+      }).eq("id", editCuentaId);
+      setSaving(false);
+      if (res.error) { setErrCuenta(res.error.message); return; }
+      setOpenCuenta(false); reload();
+      return;
+    }
+    // Alta: creo la cuenta y su primer anticipo.
+    const montoInicial = Math.max(0, Number(parseMiles(formCuenta.monto_inicial)) || 0);
+    const ins = await supabase.from("cuentas_materiales").insert({
       proyecto_id: proyecto.id,
       proveedor: formCuenta.proveedor.trim(),
       descripcion: formCuenta.descripcion || null,
       moneda: formCuenta.moneda,
-      monto_inicial: Math.max(0, Number(formCuenta.monto_inicial) || 0),
+      monto_inicial: montoInicial, // legado; el anticipo real va en anticipos_materiales
       fecha: formCuenta.fecha || null,
-    };
-    const res = editCuentaId
-      ? await supabase.from("cuentas_materiales").update(payload).eq("id", editCuentaId)
-      : await supabase.from("cuentas_materiales").insert(payload);
+    }).select("id").single();
+    if (ins.error) { setSaving(false); setErrCuenta(ins.error.message); return; }
+    if (montoInicial > 0) {
+      const insA = await supabase.from("anticipos_materiales").insert({
+        cuenta_id: ins.data.id, monto: montoInicial, fecha: formCuenta.fecha || null,
+      });
+      if (insA.error) { setSaving(false); setErrCuenta(insA.error.message); return; }
+    }
     setSaving(false);
-    if (res.error) { setErrCuenta(res.error.message); return; }
     setOpenCuenta(false); reload();
+  };
+
+  // ---- Anticipos (acopios sucesivos de una cuenta) ----
+  const [nuevoAnticipo, setNuevoAnticipo] = useState({}); // { [cuentaId]: { monto, fecha } }
+  const setAnt = (cuentaId, patch) =>
+    setNuevoAnticipo(prev => ({ ...prev, [cuentaId]: { monto: "", fecha: hoyISO(), ...prev[cuentaId], ...patch } }));
+  const addAnticipo = async (cuentaId) => {
+    const f = nuevoAnticipo[cuentaId] || {};
+    const monto = Number(parseMiles(f.monto ?? "")) || 0;
+    if (monto <= 0) { alert("Ingresá el monto del anticipo."); return; }
+    const { error } = await supabase.from("anticipos_materiales").insert({
+      cuenta_id: cuentaId, monto, fecha: f.fecha || hoyISO(),
+    });
+    if (error) { alert(error.message); return; }
+    setNuevoAnticipo(prev => ({ ...prev, [cuentaId]: { monto: "", fecha: hoyISO() } }));
+    reload();
+  };
+  const delAnticipo = async (a) => {
+    if (!confirm("¿Eliminar este anticipo?")) return;
+    const { error } = await supabase.from("anticipos_materiales").delete().eq("id", a.id);
+    if (error) alert(error.message); else reload();
   };
   const delCuenta = async (c) => {
     if (!confirm(`¿Eliminar la cuenta de "${c.proveedor}" y todos sus retiros?`)) return;
@@ -347,8 +401,10 @@ export default function MaterialesPage() {
         cuentas.map((c) => {
           const k = calc(c);
           const rs = retirosDe(c.id);
+          const ant = anticiposDe(c.id);
+          const na = nuevoAnticipo[c.id] || {};
           const nr = nuevoRetiro[c.id] || {};
-          const pct = Number(c.monto_inicial || 0) > 0 ? Math.min(100, (k.retirado / Number(c.monto_inicial)) * 100) : 0;
+          const pct = k.anticipado > 0 ? Math.min(100, (k.retirado / k.anticipado) * 100) : 0;
           return (
             <Accordion key={c.id} disableGutters defaultExpanded={false}>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
@@ -361,7 +417,7 @@ export default function MaterialesPage() {
                       </Typography>
                     </Stack>
                   </Grid>
-                  <Resumen sm={2.5} label="Anticipo" value={fmtMoney(c.monto_inicial, c.moneda)} />
+                  <Resumen sm={2.5} label={ant.length > 1 ? `Anticipo (${ant.length})` : "Anticipo"} value={fmtMoney(k.anticipado, c.moneda)} />
                   <Resumen sm={2.5} label="Retirado" value={fmtMoney(k.retirado, c.moneda)} color="error.main" />
                   <Grid item xs={12} sm={3}>
                     <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5 }}>Saldo</Typography>
@@ -378,6 +434,50 @@ export default function MaterialesPage() {
                 {/* Barra de consumo */}
                 <Box sx={{ mb: 2, height: 8, bgcolor: "rgba(15,42,74,0.08)", borderRadius: 4, overflow: "hidden" }}>
                   <Box sx={{ height: "100%", width: `${pct}%`, bgcolor: pct >= 100 ? "error.main" : "secondary.main", transition: "width .4s" }} />
+                </Box>
+
+                {/* Anticipos / acopios de la cuenta */}
+                <Box sx={{ mb: 2, p: 1.5, borderRadius: 2, border: "1px dashed", borderColor: "divider", bgcolor: "rgba(15,42,74,0.02)" }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                    <Typography variant="subtitle2">Anticipos / acopios</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Total anticipado: <b>{fmtMoney(k.anticipado, c.moneda)}</b>
+                    </Typography>
+                  </Stack>
+                  {ant.length > 0 && (
+                    <Stack spacing={0.5} sx={{ mb: 1 }}>
+                      {ant.map((a) => (
+                        <Stack key={a.id} direction="row" alignItems="center" spacing={1}
+                          sx={{ py: 0.25, borderBottom: "1px solid", borderColor: "rgba(15,42,74,0.06)" }}>
+                          <Typography variant="body2" sx={{ width: 110, whiteSpace: "nowrap" }}>{a.fecha ? fmtDate(a.fecha) : "—"}</Typography>
+                          <Typography variant="body2" sx={{ flex: 1, fontWeight: 600 }}>{fmtMoney(a.monto, c.moneda)}</Typography>
+                          <Tooltip title="Eliminar anticipo"><span>
+                            <IconButton size="small" disabled={ant.length === 1} onClick={() => delAnticipo(a)}>
+                              <DeleteOutlineIcon fontSize="small" />
+                            </IconButton>
+                          </span></Tooltip>
+                        </Stack>
+                      ))}
+                    </Stack>
+                  )}
+                  <Grid container spacing={1.5} alignItems="center">
+                    <Grid item xs={6} sm={3}>
+                      <TextField type="date" label="Fecha" InputLabelProps={{ shrink: true }} fullWidth size="small"
+                        value={na.fecha ?? hoyISO()} onChange={(e) => setAnt(c.id, { fecha: e.target.value })} />
+                    </Grid>
+                    <Grid item xs={6} sm={4}>
+                      <TextField label={`Nuevo anticipo (${c.moneda})`} fullWidth size="small"
+                        inputProps={{ inputMode: "decimal" }}
+                        value={fmtMiles(na.monto ?? "")}
+                        onChange={(e) => setAnt(c.id, { monto: parseMiles(e.target.value) })} />
+                    </Grid>
+                    <Grid item xs={12} sm={3}>
+                      <Button variant="outlined" color="secondary" fullWidth size="small" startIcon={<AddIcon />}
+                        onClick={() => addAnticipo(c.id)}>
+                        Sumar anticipo
+                      </Button>
+                    </Grid>
+                  </Grid>
                 </Box>
 
                 {/* Resumen de recupero de la cuenta */}
@@ -604,13 +704,15 @@ export default function MaterialesPage() {
                 <ToggleButton value="USD">USD</ToggleButton>
               </ToggleButtonGroup>
             </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField label={`Anticipo (${formCuenta.moneda})`} fullWidth
-                inputProps={{ inputMode: "decimal" }}
-                value={fmtMiles(formCuenta.monto_inicial)}
-                helperText="Monto congelado pagado al proveedor"
-                onChange={(e) => setFormCuenta({ ...formCuenta, monto_inicial: parseMiles(e.target.value) })} />
-            </Grid>
+            {!editCuentaId && (
+              <Grid item xs={12} sm={6}>
+                <TextField label={`Anticipo inicial (${formCuenta.moneda})`} fullWidth
+                  inputProps={{ inputMode: "decimal" }}
+                  value={fmtMiles(formCuenta.monto_inicial)}
+                  helperText="Primer acopio; después podés sumar más anticipos"
+                  onChange={(e) => setFormCuenta({ ...formCuenta, monto_inicial: parseMiles(e.target.value) })} />
+              </Grid>
+            )}
           </Grid>
         </DialogContent>
         <DialogActions sx={{ px: 3, py: 2 }}>
