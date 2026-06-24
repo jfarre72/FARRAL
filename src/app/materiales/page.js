@@ -61,7 +61,11 @@ const itemsRecupero = (r) => {
 // Formatea un string numérico con separadores de miles (formato AR: punto miles, coma decimal).
 const fmtMiles = (val) => {
   if (val === "" || val === null || val === undefined) return "";
-  const s = String(val).replace(/\./g, "").replace(",", ".");
+  // El estado guarda el valor en formato JS (punto = decimal, sin separador
+  // de miles). Sólo si viene en formato AR (con coma) normalizo coma->punto y
+  // descarto los puntos de miles; si no, conservo el punto como decimal.
+  let s = String(val);
+  s = s.includes(",") ? s.replace(/\./g, "").replace(",", ".") : s;
   if (s === "" || s === "-") return s;
   const neg = s.startsWith("-");
   const [intPart, decPart] = s.replace("-", "").split(".");
