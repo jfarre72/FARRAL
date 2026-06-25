@@ -26,7 +26,13 @@ const hoyISO = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
-const emptyCuenta = { proveedor: "", descripcion: "", moneda: "ARS", monto_inicial: "", fecha: hoyISO() };
+const emptyCuenta = { proveedor: "", descripcion: "", moneda: "ARS", monto_inicial: "", tipo_cambio: "", fecha: hoyISO() };
+
+// Etapas por defecto si el proyecto todavía no tiene hitos cargados.
+const ETAPAS_DEFAULT = [
+  "Inicio", "Cimentación", "Estructura",
+  "Obra cerrada", "Instalaciones + revoques", "Terminada",
+];
 
 // Formatea una cantidad sin decimales innecesarios (ej. 3, 2.5).
 const fmtNum0 = (val) => {
@@ -90,8 +96,9 @@ export default function MaterialesPage() {
   const [anticipos, setAnticipos] = useState([]);
   const [retiros, setRetiros] = useState([]);
   const [recuperos, setRecuperos] = useState([]); // ingresos de caja marcados como recupero
+  const [hitos, setHitos] = useState([]); // nombres de etapas del proyecto
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState(0); // 0 = Cuentas, 1 = Cuenta corriente
+  const [tab, setTab] = useState(0); // 0 = Cuentas, 1 = Cuenta corriente, 2 = Por etapa
   const [cuentaSel, setCuentaSel] = useState(""); // cuenta elegida en la solapa de cuenta corriente
 
   // Dialog cuenta
@@ -131,10 +138,13 @@ export default function MaterialesPage() {
         .in("cuenta_materiales_id", ids);
       rec = rc ?? [];
     }
+    const { data: hs } = await supabase
+      .from("hitos").select("nombre,orden").eq("proyecto_id", proyecto.id).order("orden");
     setCuentas(cs ?? []);
     setAnticipos(ant);
     setRetiros(rs);
     setRecuperos(rec);
+    setHitos((hs ?? []).map(h => h.nombre));
     setLoading(false);
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
@@ -147,6 +157,33 @@ export default function MaterialesPage() {
   // por separado.
   const anticiposReales = (cuentaId) => anticiposDe(cuentaId).filter(a => !a.es_devolucion);
   const devolucionesDe = (cuentaId) => anticiposDe(cuentaId).filter(a => a.es_devolucion);
+
+  // ---- Valuación en USD (gasto real por etapa) ----
+  // Cada anticipo congela su propio TC (lista nueva = nuevo acopio = nuevo TC).
+  // El TC de la cuenta es el promedio ponderado de sus anticipos reales:
+  //   TC = total ARS anticipado / total USD anticipado.
+  // En cuentas USD no aplica (el USD es el monto directo).
+  const esARS = (c) => (c?.moneda || "ARS") === "ARS";
+  const tcDe = (c) => {
+    if (!esARS(c)) return null;
+    const reales = anticiposReales(c.id).filter(a => Number(a.tipo_cambio || 0) > 0 && Number(a.monto || 0) > 0);
+    const ars = reales.reduce((s, a) => s + Number(a.monto || 0), 0);
+    const usd = reales.reduce((s, a) => s + Number(a.monto || 0) / Number(a.tipo_cambio), 0);
+    return usd > 0 ? ars / usd : null;
+  };
+  // TC del último acopio cargado (para sugerir en el retiro).
+  const ultimoTcDe = (cuentaId) => {
+    const reales = anticiposReales(cuentaId).filter(a => Number(a.tipo_cambio || 0) > 0);
+    return reales.length ? Number(reales[reales.length - 1].tipo_cambio) : null;
+  };
+  // USD de un monto en la moneda de la cuenta, usando el TC dado o el de la cuenta.
+  const usdDe = (c, monto, tc) => {
+    if (!esARS(c)) return Number(monto || 0);
+    const t = Number(tc || 0) > 0 ? Number(tc) : tcDe(c);
+    return t > 0 ? Number(monto || 0) / t : 0;
+  };
+  // Neto de un retiro en la moneda de la cuenta (monto - recupero del retiro).
+  const netoRetiro = (r) => Number(r.monto || 0) - itemsRecupero(r).reduce((a, it) => a + it.total, 0);
   // Anticipo total de la cuenta: suma de sus anticipos; si todavía no tiene
   // (migración no corrida), cae al monto_inicial heredado.
   const totalAnticipoDe = (c) => {
@@ -208,6 +245,39 @@ export default function MaterialesPage() {
   }, [cuentas, anticipos, retiros, recuperos]);
   const monedasConCuentas = ["ARS", "USD"].filter(m => totalesPorMoneda[m]);
 
+  // Gasto real por etapa en USD: por cada retiro, neto (monto - recupero)
+  // valuado al TC congelado, imputado a su etapa. "A recuperar" = el recupero
+  // del retiro (lo que se descontó), también en USD.
+  const { gastoPorEtapa, totalNetoUSD, totalARecuperarUSD } = useMemo(() => {
+    const map = {}; // etapa -> { netoUSD, aRecuperarUSD, n }
+    let totalNetoUSD = 0, totalARecuperarUSD = 0;
+    for (const c of cuentas) {
+      for (const r of retirosDe(c.id)) {
+        const et = r.etapa || "(Sin etapa)";
+        const rec = itemsRecupero(r).reduce((a, it) => a + it.total, 0);
+        const neto = Number(r.monto || 0) - rec;
+        const netoUSD = usdDe(c, neto, r.tipo_cambio);
+        const recUSD = usdDe(c, rec, r.tipo_cambio);
+        (map[et] ??= { netoUSD: 0, aRecuperarUSD: 0, n: 0 });
+        map[et].netoUSD += netoUSD;
+        map[et].aRecuperarUSD += recUSD;
+        map[et].n += 1;
+        totalNetoUSD += netoUSD;
+        totalARecuperarUSD += recUSD;
+      }
+    }
+    const orden = (hitos.length ? hitos : ETAPAS_DEFAULT);
+    const idx = Object.fromEntries(orden.map((n, i) => [n, i]));
+    const filas = Object.entries(map).map(([etapa, v]) => ({ etapa, ...v }))
+      .sort((a, b) => {
+        if (a.etapa === "(Sin etapa)") return 1;
+        if (b.etapa === "(Sin etapa)") return -1;
+        return (idx[a.etapa] ?? 999) - (idx[b.etapa] ?? 999);
+      });
+    return { gastoPorEtapa: filas, totalNetoUSD, totalARecuperarUSD };
+    // eslint-disable-next-line
+  }, [cuentas, retiros, anticipos, hitos]);
+
   // ---- Cuenta ----
   const openNewCuenta = () => { setFormCuenta(emptyCuenta); setEditCuentaId(null); setErrCuenta(null); setOpenCuenta(true); };
   const openEditCuenta = (c) => {
@@ -220,6 +290,11 @@ export default function MaterialesPage() {
   const saveCuenta = async () => {
     setErrCuenta(null);
     if (!formCuenta.proveedor.trim()) { setErrCuenta("El proveedor es obligatorio."); return; }
+    const montoIni = Math.max(0, Number(parseMiles(formCuenta.monto_inicial)) || 0);
+    const tcIni = Number(parseMiles(formCuenta.tipo_cambio)) || 0;
+    if (!editCuentaId && formCuenta.moneda === "ARS" && montoIni > 0 && tcIni <= 0) {
+      setErrCuenta("Ingresá el tipo de cambio del acopio inicial (ARS por 1 USD)."); return;
+    }
     setSaving(true);
     if (editCuentaId) {
       // En edición no se toca el anticipo: los anticipos se gestionan dentro
@@ -249,6 +324,7 @@ export default function MaterialesPage() {
     if (montoInicial > 0) {
       const insA = await supabase.from("anticipos_materiales").insert({
         cuenta_id: ins.data.id, monto: montoInicial, fecha: formCuenta.fecha || null,
+        tipo_cambio: formCuenta.moneda === "ARS" ? (tcIni > 0 ? tcIni : null) : null,
       });
       if (insA.error) { setSaving(false); setErrCuenta(insA.error.message); return; }
     }
@@ -259,16 +335,20 @@ export default function MaterialesPage() {
   // ---- Anticipos (acopios sucesivos de una cuenta) ----
   const [nuevoAnticipo, setNuevoAnticipo] = useState({}); // { [cuentaId]: { monto, fecha } }
   const setAnt = (cuentaId, patch) =>
-    setNuevoAnticipo(prev => ({ ...prev, [cuentaId]: { monto: "", fecha: hoyISO(), ...prev[cuentaId], ...patch } }));
+    setNuevoAnticipo(prev => ({ ...prev, [cuentaId]: { monto: "", tc: "", fecha: hoyISO(), ...prev[cuentaId], ...patch } }));
   const addAnticipo = async (cuentaId) => {
     const f = nuevoAnticipo[cuentaId] || {};
     const monto = Number(parseMiles(f.monto ?? "")) || 0;
     if (monto <= 0) { alert("Ingresá el monto del anticipo."); return; }
+    const c = cuentas.find(x => x.id === cuentaId);
+    const tc = Number(parseMiles(f.tc ?? "")) || 0;
+    if (esARS(c) && tc <= 0) { alert("Ingresá el tipo de cambio del acopio (ARS por 1 USD)."); return; }
     const { error } = await supabase.from("anticipos_materiales").insert({
       cuenta_id: cuentaId, monto, fecha: f.fecha || hoyISO(),
+      tipo_cambio: esARS(c) ? tc : null,
     });
     if (error) { alert(error.message); return; }
-    setNuevoAnticipo(prev => ({ ...prev, [cuentaId]: { monto: "", fecha: hoyISO() } }));
+    setNuevoAnticipo(prev => ({ ...prev, [cuentaId]: { monto: "", tc: "", fecha: hoyISO() } }));
     reload();
   };
   const delAnticipo = async (a) => {
@@ -391,11 +471,18 @@ export default function MaterialesPage() {
           .map(it => ({ ...it, total: it.cantidad * it.precio }))
         : [];
       const recuperoTotal = items.reduce((s, it) => s + it.total, 0);
+      const c = cuentas.find(x => x.id === cuentaId);
+      // TC congelado del retiro: el cargado, o el del último acopio, o el de la cuenta.
+      const tcRet = esARS(c)
+        ? (Number(parseMiles(f.tc ?? "")) || ultimoTcDe(cuentaId) || tcDe(c) || null)
+        : null;
       const { error } = await supabase.from("retiros_materiales").insert({
         cuenta_id: cuentaId,
         fecha: f.fecha || hoyISO(),
         descripcion: (f.descripcion || "").trim() || null,
         remito_nro: (f.remito_nro || "").trim() || null,
+        etapa: f.etapa || null,
+        tipo_cambio: tcRet,
         monto, remito_url, remito_path,
         recupero: recupero && items.length > 0,
         recupero_items: recupero && items.length > 0 ? items : null,
@@ -404,7 +491,7 @@ export default function MaterialesPage() {
         recupero_unidad: null, recupero_cantidad: null, recupero_precio: null,
       });
       if (error) { alert(error.message); setSubiendo(null); return; }
-      setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", remito_nro: "", file: null, recupero: false, recupero_items: [emptyRecItem()] } }));
+      setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", remito_nro: "", etapa: "", tc: "", file: null, recupero: false, recupero_items: [emptyRecItem()] } }));
       reload();
     } finally {
       setSubiendo(null);
@@ -477,6 +564,7 @@ export default function MaterialesPage() {
         <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: "divider" }}>
           <Tab label="Cuentas" />
           <Tab label="Cuenta corriente" />
+          <Tab label="Por etapa (USD)" />
         </Tabs>
       )}
 
@@ -556,6 +644,7 @@ export default function MaterialesPage() {
                     <Typography fontWeight={700}>{c.proveedor}</Typography>
                     <Typography variant="caption" color="text.secondary">
                       {c.descripcion ? `${c.descripcion} · ` : ""}{c.fecha ? fmtDate(c.fecha) : ""} · {c.moneda}
+                      {esARS(c) && tcDe(c) ? ` · Dólar acopio ~${fmtNum0(tcDe(c))} · ${fmtMoney(usdDe(c, k.anticipado), "USD")}` : ""}
                     </Typography>
                   </Stack>
 
@@ -605,13 +694,26 @@ export default function MaterialesPage() {
                       <TextField type="date" label="Fecha" InputLabelProps={{ shrink: true }} fullWidth size="small"
                         value={na.fecha ?? hoyISO()} onChange={(e) => setAnt(c.id, { fecha: e.target.value })} />
                     </Grid>
-                    <Grid item xs={6} sm={4}>
+                    <Grid item xs={6} sm={esARS(c) ? 3 : 5}>
                       <TextField label={`Nuevo anticipo (${c.moneda})`} fullWidth size="small"
                         inputProps={{ inputMode: "decimal" }}
                         value={fmtMiles(na.monto ?? "")}
                         onChange={(e) => setAnt(c.id, { monto: parseMiles(e.target.value) })} />
                     </Grid>
-                    <Grid item xs={12} sm={3}>
+                    {esARS(c) && (
+                      <Grid item xs={6} sm={2}>
+                        <TextField label="TC (ARS/USD)" fullWidth size="small"
+                          inputProps={{ inputMode: "decimal" }}
+                          value={fmtMiles(na.tc ?? "")}
+                          helperText={(() => {
+                            const m = Number(parseMiles(na.monto ?? "")) || 0;
+                            const t = Number(parseMiles(na.tc ?? "")) || 0;
+                            return m > 0 && t > 0 ? `= ${fmtMoney(m / t, "USD")}` : "Dólar del acopio";
+                          })()}
+                          onChange={(e) => setAnt(c.id, { tc: parseMiles(e.target.value) })} />
+                      </Grid>
+                    )}
+                    <Grid item xs={esARS(c) ? 6 : 12} sm={esARS(c) ? 4 : 4}>
                       <Button variant="outlined" color="secondary" fullWidth size="small" startIcon={<AddIcon />}
                         onClick={() => addAnticipo(c.id)}>
                         Sumar anticipo
@@ -624,6 +726,8 @@ export default function MaterialesPage() {
                       <Stack direction="row" sx={{ px: 0.5, pb: 0.5 }}>
                         <Typography variant="caption" color="text.secondary" sx={{ width: 120, textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5 }}>Fecha</Typography>
                         <Typography variant="caption" color="text.secondary" sx={{ flex: 1, textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5 }}>Monto</Typography>
+                        {esARS(c) && <Typography variant="caption" color="text.secondary" sx={{ width: 80, textAlign: "right", textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5 }}>TC</Typography>}
+                        {esARS(c) && <Typography variant="caption" color="text.secondary" sx={{ width: 110, textAlign: "right", textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5 }}>USD</Typography>}
                       </Stack>
                       <Stack>
                         {ant.map((a) => (
@@ -631,6 +735,8 @@ export default function MaterialesPage() {
                             sx={{ px: 0.5, py: 0.5, borderTop: "1px solid", borderColor: "rgba(15,42,74,0.06)" }}>
                             <Typography variant="body2" sx={{ width: 120, whiteSpace: "nowrap" }}>{a.fecha ? fmtDate(a.fecha) : "—"}</Typography>
                             <Typography variant="body2" sx={{ flex: 1, fontWeight: 600, color: "#1E8E3E" }}>{fmtMoney(a.monto, c.moneda)}</Typography>
+                            {esARS(c) && <Typography variant="body2" sx={{ width: 80, textAlign: "right", color: "text.secondary" }}>{Number(a.tipo_cambio || 0) > 0 ? fmtNum0(a.tipo_cambio) : "—"}</Typography>}
+                            {esARS(c) && <Typography variant="body2" sx={{ width: 110, textAlign: "right", color: "text.secondary" }}>{Number(a.tipo_cambio || 0) > 0 ? fmtMoney(Number(a.monto || 0) / Number(a.tipo_cambio), "USD") : "—"}</Typography>}
                             <Tooltip title="Eliminar anticipo"><span>
                               <IconButton size="small" disabled={ant.length === 1} onClick={() => delAnticipo(a)}>
                                 <DeleteOutlineIcon fontSize="small" />
@@ -685,6 +791,56 @@ export default function MaterialesPage() {
                         disabled={subiendo === c.id} onClick={() => addRetiro(c.id)}>
                         {subiendo === c.id ? "…" : "Agregar"}
                       </Button>
+                    </Grid>
+                    {/* Segunda fila: etapa de consumo + TC + neto USD imputado */}
+                    <Grid item xs={12} sm={esARS(c) ? 4 : 5}>
+                      <TextField select label="Etapa (a qué se imputa)" fullWidth size="small"
+                        value={nr.etapa ?? ""} onChange={(e) => setRet(c.id, { etapa: e.target.value })}
+                        helperText="Etapa donde se consume este material">
+                        <MenuItem value="">(Sin etapa)</MenuItem>
+                        {(hitos.length ? hitos : ETAPAS_DEFAULT).map(et => <MenuItem key={et} value={et}>{et}</MenuItem>)}
+                      </TextField>
+                    </Grid>
+                    {esARS(c) && (
+                      <Grid item xs={6} sm={3}>
+                        <TextField label="TC del retiro (ARS/USD)" fullWidth size="small"
+                          inputProps={{ inputMode: "decimal" }}
+                          value={fmtMiles(nr.tc ?? (ultimoTcDe(c.id) ? String(ultimoTcDe(c.id)) : ""))}
+                          onChange={(e) => setRet(c.id, { tc: parseMiles(e.target.value) })}
+                          helperText="Dólar del acopio del que sale" />
+                      </Grid>
+                    )}
+                    <Grid item xs={esARS(c) ? 6 : 12} sm={esARS(c) ? 5 : 7}>
+                      {(() => {
+                        const m = Number(parseMiles(nr.monto ?? "")) || 0;
+                        const recForm = !!nr.recupero
+                          ? recItemsDe(c.id).reduce((s, it) => s + (Number(parseMiles(it.cantidad ?? "")) || 0) * (Number(it.precio ?? 0) || 0), 0)
+                          : 0;
+                        const neto = m - recForm;
+                        const tcUse = esARS(c) ? (Number(parseMiles(nr.tc ?? "")) || ultimoTcDe(c.id) || tcDe(c)) : null;
+                        const netoUSD = usdDe(c, neto, tcUse);
+                        const recUSD = usdDe(c, recForm, tcUse);
+                        return (
+                          <Box sx={{ px: 1, py: 0.5 }}>
+                            <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5, display: "block" }}>
+                              Imputa a la etapa (USD neto)
+                            </Typography>
+                            <Stack direction="row" spacing={1} alignItems="baseline" sx={{ flexWrap: "wrap" }}>
+                              <Typography fontWeight={700} sx={{ color: "#0F2A4A", fontVariantNumeric: "tabular-nums" }}>
+                                {m > 0 ? fmtMoney(netoUSD, "USD") : "—"}
+                              </Typography>
+                              {recForm > 0 && (
+                                <Typography variant="caption" color="warning.main">
+                                  ({fmtMoney(recUSD, "USD")} a recuperar)
+                                </Typography>
+                              )}
+                              {esARS(c) && !tcUse && m > 0 && (
+                                <Typography variant="caption" color="error.main">Cargá el TC</Typography>
+                              )}
+                            </Stack>
+                          </Box>
+                        );
+                      })()}
                     </Grid>
                   </Grid>
 
@@ -784,22 +940,32 @@ export default function MaterialesPage() {
                         <TableRow>
                           <TableCell sx={{ width: 110 }}>Fecha</TableCell>
                           <TableCell sx={{ width: 100 }}>Remito Nº</TableCell>
+                          <TableCell sx={{ width: 130 }}>Etapa</TableCell>
                           <TableCell>Detalle</TableCell>
                           <TableCell align="right">Monto</TableCell>
+                          <TableCell align="right">Neto USD</TableCell>
                           <TableCell align="center" sx={{ width: 80 }}>Remito</TableCell>
                           <TableCell align="right" sx={{ width: 56 }}></TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
                         {rs.length === 0 && (
-                          <TableRow><TableCell colSpan={6}>
+                          <TableRow><TableCell colSpan={8}>
                             <Typography variant="body2" color="text.secondary">Todavía no hay retiros en esta cuenta.</Typography>
                           </TableCell></TableRow>
                         )}
-                        {rs.map((r) => (
+                        {rs.map((r) => {
+                          const neto = netoRetiro(r);
+                          const netoUSD = usdDe(c, neto, r.tipo_cambio);
+                          return (
                           <TableRow key={r.id} hover>
                             <TableCell sx={{ whiteSpace: "nowrap" }}>{fmtDate(r.fecha)}</TableCell>
                             <TableCell sx={{ whiteSpace: "nowrap" }}>{r.remito_nro || "—"}</TableCell>
+                            <TableCell>
+                              {r.etapa
+                                ? <Chip size="small" variant="outlined" color="primary" label={r.etapa} />
+                                : <Typography variant="body2" color="text.disabled">—</Typography>}
+                            </TableCell>
                             <TableCell>
                               {r.descripcion || "—"}
                               {r.recupero && itemsRecupero(r).map((it, i) => (
@@ -811,6 +977,9 @@ export default function MaterialesPage() {
                             <TableCell align="right" sx={{ whiteSpace: "nowrap", color: "error.main", fontWeight: 600 }}>
                               −{fmtMoney(r.monto, c.moneda)}
                             </TableCell>
+                            <TableCell align="right" sx={{ whiteSpace: "nowrap", fontWeight: 600, color: "#0F2A4A" }}>
+                              {fmtMoney(netoUSD, "USD")}
+                            </TableCell>
                             <TableCell align="center">
                               {r.remito_url
                                 ? <Tooltip title="Ver remito"><IconButton size="small" component={Link} href={r.remito_url} target="_blank"><ReceiptLongIcon fontSize="small" /></IconButton></Tooltip>
@@ -820,7 +989,8 @@ export default function MaterialesPage() {
                               <Tooltip title="Eliminar retiro"><IconButton size="small" onClick={() => delRetiro(r)}><DeleteOutlineIcon fontSize="small" /></IconButton></Tooltip>
                             </TableCell>
                           </TableRow>
-                        ))}
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </Box>
@@ -1072,6 +1242,77 @@ export default function MaterialesPage() {
         );
       })()}
 
+      {tab === 2 && (
+        <Stack spacing={2}>
+          <Card><CardContent>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2} justifyContent="space-between">
+              <Box>
+                <Typography variant="subtitle2" fontWeight={800} sx={{ textTransform: "uppercase", letterSpacing: 0.6 }}>
+                  Gasto real de materiales por etapa
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Neto en USD (retiro − recupero) valuado al dólar congelado de cada acopio. El recupero queda aparte como “a recuperar”.
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={3}>
+                <Box sx={{ textAlign: "right" }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", textTransform: "uppercase", fontSize: 10 }}>Total neto</Typography>
+                  <Typography fontWeight={700} sx={{ color: "#0F2A4A" }}>{fmtMoney(totalNetoUSD, "USD")}</Typography>
+                </Box>
+                <Box sx={{ textAlign: "right" }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", textTransform: "uppercase", fontSize: 10 }}>A recuperar</Typography>
+                  <Typography fontWeight={700} color="warning.main">{fmtMoney(totalARecuperarUSD, "USD")}</Typography>
+                </Box>
+              </Stack>
+            </Stack>
+          </CardContent></Card>
+
+          <Card><CardContent sx={{ p: { xs: 1, sm: 2 } }}>
+            <Box sx={{ overflowX: "auto" }}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Etapa</TableCell>
+                    <TableCell align="right">Retiros</TableCell>
+                    <TableCell align="right">Neto imputado (USD)</TableCell>
+                    <TableCell align="right">A recuperar (USD)</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {gastoPorEtapa.length === 0 && (
+                    <TableRow><TableCell colSpan={4}>
+                      <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
+                        Todavía no hay retiros imputados a etapas.
+                      </Typography>
+                    </TableCell></TableRow>
+                  )}
+                  {gastoPorEtapa.map((f) => (
+                    <TableRow key={f.etapa} hover>
+                      <TableCell>
+                        {f.etapa === "(Sin etapa)"
+                          ? <Typography variant="body2" color="text.disabled">(Sin etapa)</Typography>
+                          : <Chip size="small" variant="outlined" color="primary" label={f.etapa} />}
+                      </TableCell>
+                      <TableCell align="right">{f.n}</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 700, color: "#0F2A4A", fontVariantNumeric: "tabular-nums" }}>
+                        {fmtMoney(f.netoUSD, "USD")}
+                      </TableCell>
+                      <TableCell align="right" sx={{ color: f.aRecuperarUSD > 0 ? "warning.main" : "text.disabled", fontVariantNumeric: "tabular-nums" }}>
+                        {f.aRecuperarUSD > 0 ? fmtMoney(f.aRecuperarUSD, "USD") : "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Box>
+          </CardContent></Card>
+
+          <Alert severity="info">
+            Este es el insumo para comparar “plan vs real” por etapa en dólares. La integración con Económico (sumar esto al real por etapa y excluir el egreso de acopio de la Caja) queda como próximo paso.
+          </Alert>
+        </Stack>
+      )}
+
       {/* Dialog nueva/editar cuenta */}
       <Dialog open={openCuenta} onClose={() => setOpenCuenta(false)} fullWidth maxWidth="sm" fullScreen={fullScreen}>
         <DialogTitle>{editCuentaId ? "Editar cuenta" : "Nueva cuenta de materiales"}</DialogTitle>
@@ -1099,12 +1340,25 @@ export default function MaterialesPage() {
               </ToggleButtonGroup>
             </Grid>
             {!editCuentaId && (
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12} sm={formCuenta.moneda === "ARS" ? 4 : 6}>
                 <TextField label={`Anticipo inicial (${formCuenta.moneda})`} fullWidth
                   inputProps={{ inputMode: "decimal" }}
                   value={fmtMiles(formCuenta.monto_inicial)}
                   helperText="Primer acopio; después podés sumar más anticipos"
                   onChange={(e) => setFormCuenta({ ...formCuenta, monto_inicial: parseMiles(e.target.value) })} />
+              </Grid>
+            )}
+            {!editCuentaId && formCuenta.moneda === "ARS" && (
+              <Grid item xs={12} sm={2}>
+                <TextField label="TC (ARS/USD)" fullWidth
+                  inputProps={{ inputMode: "decimal" }}
+                  value={fmtMiles(formCuenta.tipo_cambio)}
+                  helperText={(() => {
+                    const m = Number(parseMiles(formCuenta.monto_inicial)) || 0;
+                    const t = Number(parseMiles(formCuenta.tipo_cambio)) || 0;
+                    return m > 0 && t > 0 ? `= ${fmtMoney(m / t, "USD")}` : "Dólar del acopio";
+                  })()}
+                  onChange={(e) => setFormCuenta({ ...formCuenta, tipo_cambio: parseMiles(e.target.value) })} />
               </Grid>
             )}
           </Grid>
