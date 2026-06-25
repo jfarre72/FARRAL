@@ -293,6 +293,7 @@ export default function MaterialesPage() {
     const next = devItemsDe(cuentaId).filter((_, i) => i !== idx);
     setDev(cuentaId, { items: next.length ? next : [emptyRecItem()] });
   };
+  const [subiendoDev, setSubiendoDev] = useState(null); // cuentaId en curso
   const addDevolucion = async (cuentaId) => {
     const f = nuevaDevolucion[cuentaId] || {};
     const items = (f.items || []).map(it => ({
@@ -305,17 +306,33 @@ export default function MaterialesPage() {
     const total = items.reduce((s, it) => s + it.total, 0);
     const pallets = items.reduce((s, it) => s + (it.unidad === "pallet" ? it.cantidad : 0), 0);
     const bolsones = items.reduce((s, it) => s + (it.unidad === "bolson" ? it.cantidad : 0), 0);
-    const { error } = await supabase.from("anticipos_materiales").insert({
-      cuenta_id: cuentaId, monto: total, fecha: f.fecha || hoyISO(),
-      descripcion: "Devolución de material a saldo",
-      es_devolucion: true, rec_items: items, rec_pallets: pallets, rec_bolsones: bolsones,
-    });
-    if (error) { alert(error.message); return; }
-    setNuevaDevolucion(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), items: [emptyRecItem()] } }));
-    reload();
+    setSubiendoDev(cuentaId);
+    try {
+      let comprobante_url = null, comprobante_path = null;
+      if (f.file) {
+        const ext = (f.file.name.split(".").pop() || "jpg").toLowerCase();
+        const path = `${proyecto.id}/materiales/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+        const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, f.file, { upsert: false });
+        if (upErr) { alert(upErr.message); return; }
+        const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
+        comprobante_url = pub.publicUrl; comprobante_path = path;
+      }
+      const { error } = await supabase.from("anticipos_materiales").insert({
+        cuenta_id: cuentaId, monto: total, fecha: f.fecha || hoyISO(),
+        descripcion: "Devolución de material a saldo",
+        es_devolucion: true, rec_items: items, rec_pallets: pallets, rec_bolsones: bolsones,
+        comprobante_url, comprobante_path,
+      });
+      if (error) { alert(error.message); return; }
+      setNuevaDevolucion(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), items: [emptyRecItem()], file: null } }));
+      reload();
+    } finally {
+      setSubiendoDev(null);
+    }
   };
   const delDevolucion = async (a) => {
     if (!confirm("¿Eliminar esta devolución a saldo?")) return;
+    if (a.comprobante_path) await supabase.storage.from(BUCKET).remove([a.comprobante_path]);
     const { error } = await supabase.from("anticipos_materiales").delete().eq("id", a.id);
     if (error) alert(error.message); else reload();
   };
@@ -778,6 +795,13 @@ export default function MaterialesPage() {
                               <TextField type="date" label="Fecha" InputLabelProps={{ shrink: true }} fullWidth size="small"
                                 value={nd.fecha ?? hoyISO()} onChange={(e) => setDev(c.id, { fecha: e.target.value })} />
                             </Grid>
+                            <Grid item xs={6} sm={4}>
+                              <Button component="label" variant="outlined" startIcon={<AttachFileIcon />} fullWidth size="small" sx={{ overflow: "hidden" }}>
+                                {nd.file ? nd.file.name : "Comprobante"}
+                                <input hidden type="file" accept="image/*,application/pdf"
+                                  onChange={(e) => setDev(c.id, { file: e.target.files?.[0] ?? null })} />
+                              </Button>
+                            </Grid>
                           </Grid>
                           {items.map((it, idx) => {
                             const cant = Number(parseMiles(it.cantidad ?? "")) || 0;
@@ -837,8 +861,8 @@ export default function MaterialesPage() {
                                 </Typography>
                               </Typography>
                               <Button variant="contained" size="small" sx={{ bgcolor: "#8E44AD", "&:hover": { bgcolor: "#763a92" } }}
-                                onClick={() => addDevolucion(c.id)}>
-                                Registrar devolución
+                                disabled={subiendoDev === c.id} onClick={() => addDevolucion(c.id)}>
+                                {subiendoDev === c.id ? "…" : "Registrar devolución"}
                               </Button>
                             </Stack>
                           </Stack>
@@ -856,6 +880,7 @@ export default function MaterialesPage() {
                             <TableCell sx={{ width: 110 }}>Fecha</TableCell>
                             <TableCell>Detalle</TableCell>
                             <TableCell align="right">Suma al saldo</TableCell>
+                            <TableCell align="center" sx={{ width: 80 }}>Comprob.</TableCell>
                             <TableCell align="right" sx={{ width: 56 }}></TableCell>
                           </TableRow>
                         </TableHead>
@@ -873,6 +898,11 @@ export default function MaterialesPage() {
                               </TableCell>
                               <TableCell align="right" sx={{ whiteSpace: "nowrap", color: "#8E44AD", fontWeight: 600 }}>
                                 +{fmtMoney(a.monto, c.moneda)}
+                              </TableCell>
+                              <TableCell align="center">
+                                {a.comprobante_url
+                                  ? <Tooltip title="Ver comprobante"><IconButton size="small" component={Link} href={a.comprobante_url} target="_blank"><ReceiptLongIcon fontSize="small" /></IconButton></Tooltip>
+                                  : <Typography variant="body2" color="text.disabled">—</Typography>}
                               </TableCell>
                               <TableCell align="right">
                                 <Tooltip title="Eliminar devolución"><IconButton size="small" onClick={() => delDevolucion(a)}><DeleteOutlineIcon fontSize="small" /></IconButton></Tooltip>

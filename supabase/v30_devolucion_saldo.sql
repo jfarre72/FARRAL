@@ -14,8 +14,11 @@
 -- detalle del recupero (ítems, pallets y bolsones devueltos), para que también
 -- descuente del "pendiente a recuperar" y cuente las cantidades devueltas.
 alter table public.anticipos_materiales
-  add column if not exists es_devolucion boolean not null default false,
+  add column if not exists es_devolucion   boolean not null default false,
   -- [{ "unidad": "pallet", "cantidad": 1, "precio": 25000, "total": 25000 }, ...]
-  add column if not exists rec_items     jsonb,
-  add column if not exists rec_pallets   numeric(16,2),
-  add column if not exists rec_bolsones  numeric(16,2);
+  add column if not exists rec_items       jsonb,
+  add column if not exists rec_pallets     numeric(16,2),
+  add column if not exists rec_bolsones    numeric(16,2),
+  -- Comprobante de la devolución (remito), guardado en el bucket 'galeria'.
+  add column if not exists comprobante_url  text,
+  add column if not exists comprobante_path text;

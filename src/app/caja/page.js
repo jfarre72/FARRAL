@@ -411,8 +411,8 @@ export default function CajaPage() {
       ...emptyMov, tipo,
       moneda: tipo === "cambio" ? "USD" : "ARS",
       moneda_destino: tipo === "cambio" ? "ARS" : "ARS",
-      titular: tipo === "traspaso" ? "Rodrigo" : "",
-      titular_destino: tipo === "traspaso" ? "Juan" : "",
+      titular: (tipo === "traspaso" || tipo === "cambio") ? "Rodrigo" : "",
+      titular_destino: (tipo === "traspaso" || tipo === "cambio") ? "Juan" : "",
     });
     setEditId(null); setKeepCompPath(null); setFile(null); setErr(null);
     setImputarA(false); setImpContratistaId(""); setImpPresupuestoId(""); setImpMontos({}); setImpAvances({});
@@ -1100,13 +1100,11 @@ export default function CajaPage() {
                 <Stack direction="row" spacing={1} alignItems="center">
                   <TextField select size="small" sx={{ flex: 1 }} value={form.titular}
                     onChange={e => setForm({ ...form, titular: e.target.value })}>
-                    <MenuItem value="">(Sin asignar)</MenuItem>
                     {TITULARES.map(t => <MenuItem key={t} value={t}>{t}</MenuItem>)}
                   </TextField>
                   <SyncAltIcon color="primary" />
                   <TextField select size="small" sx={{ flex: 1 }} value={form.titular_destino}
                     onChange={e => setForm({ ...form, titular_destino: e.target.value })}>
-                    <MenuItem value="">(Igual al origen)</MenuItem>
                     {TITULARES.map(t => <MenuItem key={t} value={t}>{t}</MenuItem>)}
                   </TextField>
                 </Stack>
