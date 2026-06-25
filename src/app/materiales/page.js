@@ -4,7 +4,7 @@ import {
   Button, IconButton, Tooltip, LinearProgress, Dialog, DialogTitle, DialogContent,
   DialogActions, Accordion, AccordionSummary, AccordionDetails, Table, TableHead,
   TableBody, TableRow, TableCell, Chip, Link, ToggleButton, ToggleButtonGroup,
-  Divider, FormControlLabel, Switch, useMediaQuery,
+  Divider, FormControlLabel, Switch, useMediaQuery, Tabs, Tab,
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
@@ -91,6 +91,8 @@ export default function MaterialesPage() {
   const [retiros, setRetiros] = useState([]);
   const [recuperos, setRecuperos] = useState([]); // ingresos de caja marcados como recupero
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState(0); // 0 = Cuentas, 1 = Cuenta corriente
+  const [cuentaSel, setCuentaSel] = useState(""); // cuenta elegida en la solapa de cuenta corriente
 
   // Dialog cuenta
   const [openCuenta, setOpenCuenta] = useState(false);
@@ -320,11 +322,12 @@ export default function MaterialesPage() {
       const { error } = await supabase.from("anticipos_materiales").insert({
         cuenta_id: cuentaId, monto: total, fecha: f.fecha || hoyISO(),
         descripcion: "Devolución de material a saldo",
+        remito_nro: (f.remito_nro || "").trim() || null,
         es_devolucion: true, rec_items: items, rec_pallets: pallets, rec_bolsones: bolsones,
         comprobante_url, comprobante_path,
       });
       if (error) { alert(error.message); return; }
-      setNuevaDevolucion(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), items: [emptyRecItem()], file: null } }));
+      setNuevaDevolucion(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), items: [emptyRecItem()], remito_nro: "", file: null } }));
       reload();
     } finally {
       setSubiendoDev(null);
@@ -392,6 +395,7 @@ export default function MaterialesPage() {
         cuenta_id: cuentaId,
         fecha: f.fecha || hoyISO(),
         descripcion: (f.descripcion || "").trim() || null,
+        remito_nro: (f.remito_nro || "").trim() || null,
         monto, remito_url, remito_path,
         recupero: recupero && items.length > 0,
         recupero_items: recupero && items.length > 0 ? items : null,
@@ -400,7 +404,7 @@ export default function MaterialesPage() {
         recupero_unidad: null, recupero_cantidad: null, recupero_precio: null,
       });
       if (error) { alert(error.message); setSubiendo(null); return; }
-      setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", file: null, recupero: false, recupero_items: [emptyRecItem()] } }));
+      setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", remito_nro: "", file: null, recupero: false, recupero_items: [emptyRecItem()] } }));
       reload();
     } finally {
       setSubiendo(null);
@@ -412,6 +416,42 @@ export default function MaterialesPage() {
     if (r.remito_path) await supabase.storage.from(BUCKET).remove([r.remito_path]);
     const { error } = await supabase.from("retiros_materiales").delete().eq("id", r.id);
     if (error) alert(error.message); else reload();
+  };
+
+  // Cuenta corriente de una cuenta: anticipos / devoluciones (+) y retiros (−)
+  // en orden cronológico, con saldo acumulado fila por fila.
+  const ledgerDe = (cuentaId) => {
+    const ents = [];
+    for (const a of anticiposDe(cuentaId)) {
+      ents.push({
+        id: "a_" + a.id, fecha: a.fecha, created_at: a.created_at,
+        tipo: a.es_devolucion ? "Devolución" : "Anticipo",
+        remito_nro: a.remito_nro || "",
+        detalle: a.es_devolucion
+          ? (Array.isArray(a.rec_items) && a.rec_items.length
+              ? a.rec_items.map(it => `${fmtNum0(it.cantidad)} ${it.unidad === "bolson" ? "bolsón/es" : "pallet/s"}`).join(", ")
+              : "Devolución a saldo")
+          : "Acopio / anticipo",
+        url: a.comprobante_url || null,
+        delta: Number(a.monto || 0),
+      });
+    }
+    for (const r of retirosDe(cuentaId)) {
+      ents.push({
+        id: "r_" + r.id, fecha: r.fecha, created_at: r.created_at,
+        tipo: "Retiro", remito_nro: r.remito_nro || "",
+        detalle: r.descripcion || "Retiro",
+        url: r.remito_url || null,
+        delta: -Number(r.monto || 0),
+      });
+    }
+    ents.sort((x, y) => {
+      const fx = x.fecha || "", fy = y.fecha || "";
+      if (fx !== fy) return fx < fy ? -1 : 1;
+      return (x.created_at || "") < (y.created_at || "") ? -1 : 1;
+    });
+    let saldo = 0;
+    return ents.map(e => { saldo += e.delta; return { ...e, saldo }; });
   };
 
   if (!proyecto) return <Alert severity="info">Seleccioná un proyecto.</Alert>;
@@ -433,6 +473,14 @@ export default function MaterialesPage() {
 
       {loading && <LinearProgress />}
 
+      {cuentas.length > 0 && (
+        <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: "divider" }}>
+          <Tab label="Cuentas" />
+          <Tab label="Cuenta corriente" />
+        </Tabs>
+      )}
+
+      {tab === 0 && (<>
       {/* Resumen */}
       {cuentas.length > 0 && (
         <Card>
@@ -607,23 +655,27 @@ export default function MaterialesPage() {
                   <Box sx={{ p: 1.5, borderRadius: 2, border: "1px dashed", borderColor: "divider", bgcolor: "rgba(255,255,255,0.6)" }}>
                   <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5, display: "block", mb: 1 }}>Nuevo retiro</Typography>
                   <Grid container spacing={1.5} alignItems="center">
-                    <Grid item xs={6} sm={2.5}>
+                    <Grid item xs={6} sm={2}>
                       <TextField type="date" label="Fecha" InputLabelProps={{ shrink: true }} fullWidth size="small"
                         value={nr.fecha ?? hoyISO()} onChange={(e) => setRet(c.id, { fecha: e.target.value })} />
                     </Grid>
-                    <Grid item xs={6} sm={2.5}>
+                    <Grid item xs={6} sm={2}>
                       <TextField label={`Monto (${c.moneda})`} fullWidth size="small"
                         inputProps={{ inputMode: "decimal" }}
                         value={fmtMiles(nr.monto ?? "")}
                         onChange={(e) => setRet(c.id, { monto: parseMiles(e.target.value) })} />
                     </Grid>
-                    <Grid item xs={12} sm={3}>
+                    <Grid item xs={6} sm={2}>
+                      <TextField label="Remito Nº" fullWidth size="small"
+                        value={nr.remito_nro ?? ""} onChange={(e) => setRet(c.id, { remito_nro: e.target.value })} />
+                    </Grid>
+                    <Grid item xs={6} sm={2.5}>
                       <TextField label="Detalle" fullWidth size="small"
                         value={nr.descripcion ?? ""} onChange={(e) => setRet(c.id, { descripcion: e.target.value })} />
                     </Grid>
-                    <Grid item xs={8} sm={2.5}>
+                    <Grid item xs={8} sm={2}>
                       <Button component="label" variant="outlined" startIcon={<AttachFileIcon />} fullWidth size="small" sx={{ overflow: "hidden" }}>
-                        {nr.file ? nr.file.name : "Remito"}
+                        {nr.file ? nr.file.name : "Foto remito"}
                         <input hidden type="file" accept="image/*,application/pdf"
                           onChange={(e) => setRet(c.id, { file: e.target.files?.[0] ?? null })} />
                       </Button>
@@ -731,6 +783,7 @@ export default function MaterialesPage() {
                       <TableHead>
                         <TableRow>
                           <TableCell sx={{ width: 110 }}>Fecha</TableCell>
+                          <TableCell sx={{ width: 100 }}>Remito Nº</TableCell>
                           <TableCell>Detalle</TableCell>
                           <TableCell align="right">Monto</TableCell>
                           <TableCell align="center" sx={{ width: 80 }}>Remito</TableCell>
@@ -739,13 +792,14 @@ export default function MaterialesPage() {
                       </TableHead>
                       <TableBody>
                         {rs.length === 0 && (
-                          <TableRow><TableCell colSpan={5}>
+                          <TableRow><TableCell colSpan={6}>
                             <Typography variant="body2" color="text.secondary">Todavía no hay retiros en esta cuenta.</Typography>
                           </TableCell></TableRow>
                         )}
                         {rs.map((r) => (
                           <TableRow key={r.id} hover>
                             <TableCell sx={{ whiteSpace: "nowrap" }}>{fmtDate(r.fecha)}</TableCell>
+                            <TableCell sx={{ whiteSpace: "nowrap" }}>{r.remito_nro || "—"}</TableCell>
                             <TableCell>
                               {r.descripcion || "—"}
                               {r.recupero && itemsRecupero(r).map((it, i) => (
@@ -794,6 +848,10 @@ export default function MaterialesPage() {
                             <Grid item xs={6} sm={3}>
                               <TextField type="date" label="Fecha" InputLabelProps={{ shrink: true }} fullWidth size="small"
                                 value={nd.fecha ?? hoyISO()} onChange={(e) => setDev(c.id, { fecha: e.target.value })} />
+                            </Grid>
+                            <Grid item xs={6} sm={3}>
+                              <TextField label="Remito Nº" fullWidth size="small"
+                                value={nd.remito_nro ?? ""} onChange={(e) => setDev(c.id, { remito_nro: e.target.value })} />
                             </Grid>
                             <Grid item xs={6} sm={4}>
                               <Button component="label" variant="outlined" startIcon={<AttachFileIcon />} fullWidth size="small" sx={{ overflow: "hidden" }}>
@@ -878,6 +936,7 @@ export default function MaterialesPage() {
                         <TableHead>
                           <TableRow>
                             <TableCell sx={{ width: 110 }}>Fecha</TableCell>
+                            <TableCell sx={{ width: 100 }}>Remito Nº</TableCell>
                             <TableCell>Detalle</TableCell>
                             <TableCell align="right">Suma al saldo</TableCell>
                             <TableCell align="center" sx={{ width: 80 }}>Comprob.</TableCell>
@@ -888,6 +947,7 @@ export default function MaterialesPage() {
                           {devs.map((a) => (
                             <TableRow key={a.id} hover>
                               <TableCell sx={{ whiteSpace: "nowrap" }}>{a.fecha ? fmtDate(a.fecha) : "—"}</TableCell>
+                              <TableCell sx={{ whiteSpace: "nowrap" }}>{a.remito_nro || "—"}</TableCell>
                               <TableCell>
                                 {(Array.isArray(a.rec_items) ? a.rec_items : []).map((it, i) => (
                                   <Typography key={i} variant="caption" sx={{ display: "block", color: "#8E44AD" }}>
@@ -924,6 +984,93 @@ export default function MaterialesPage() {
           );
         })
       )}
+      </>)}
+
+      {tab === 1 && (() => {
+        const selId = cuentaSel || cuentas[0]?.id || "";
+        const cSel = cuentas.find(c => c.id === selId);
+        if (!cSel) return <Card><CardContent><Typography color="text.secondary">No hay cuentas para mostrar.</Typography></CardContent></Card>;
+        const k = calc(cSel);
+        const filas = ledgerDe(selId);
+        return (
+          <Stack spacing={2}>
+            <Card><CardContent>
+              <Grid container spacing={2} alignItems="center">
+                <Grid item xs={12} sm={3}>
+                  <TextField select fullWidth size="small" label="Cuenta"
+                    value={selId} onChange={(e) => setCuentaSel(e.target.value)}>
+                    {cuentas.map(c => (
+                      <MenuItem key={c.id} value={c.id}>{c.proveedor} ({c.moneda})</MenuItem>
+                    ))}
+                  </TextField>
+                </Grid>
+                <Resumen sm={3} label="Anticipado" value={fmtMoney(k.anticipado, cSel.moneda)} />
+                <Resumen sm={3} label="Retirado" value={fmtMoney(k.retirado, cSel.moneda)} color="error.main" />
+                <Resumen sm={3} label="Saldo disponible" value={fmtMoney(k.saldo, cSel.moneda)}
+                  color={k.saldo < -0.005 ? "error.main" : Math.abs(k.saldo) <= 0.005 ? "text.secondary" : "success.main"} />
+              </Grid>
+            </CardContent></Card>
+
+            <Card><CardContent sx={{ p: { xs: 1, sm: 2 } }}>
+              <Box sx={{ overflowX: "auto" }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ width: 110 }}>Fecha</TableCell>
+                      <TableCell sx={{ width: 120 }}>Tipo</TableCell>
+                      <TableCell sx={{ width: 100 }}>Remito Nº</TableCell>
+                      <TableCell>Detalle</TableCell>
+                      <TableCell align="right">Ingreso</TableCell>
+                      <TableCell align="right">Egreso</TableCell>
+                      <TableCell align="right">Saldo</TableCell>
+                      <TableCell align="center" sx={{ width: 60 }}>Comp.</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {filas.length === 0 && (
+                      <TableRow><TableCell colSpan={8}>
+                        <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
+                          Esta cuenta todavía no tiene movimientos.
+                        </Typography>
+                      </TableCell></TableRow>
+                    )}
+                    {filas.map((f) => {
+                      const esIngreso = f.delta >= 0;
+                      const color = f.tipo === "Retiro" ? "#C0392B" : f.tipo === "Devolución" ? "#8E44AD" : "#1E8E3E";
+                      return (
+                        <TableRow key={f.id} hover sx={{ bgcolor: esIngreso ? "rgba(30,142,62,0.04)" : "rgba(192,57,43,0.04)" }}>
+                          <TableCell sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{f.fecha ? fmtDate(f.fecha) : "—"}</TableCell>
+                          <TableCell>
+                            <Chip size="small" variant="outlined" label={f.tipo}
+                              sx={{ borderColor: color, color }} />
+                          </TableCell>
+                          <TableCell sx={{ whiteSpace: "nowrap" }}>{f.remito_nro || "—"}</TableCell>
+                          <TableCell>{f.detalle}</TableCell>
+                          <TableCell align="right" sx={{ whiteSpace: "nowrap", color: "#1E8E3E", fontWeight: 600 }}>
+                            {esIngreso ? fmtMoney(f.delta, cSel.moneda) : ""}
+                          </TableCell>
+                          <TableCell align="right" sx={{ whiteSpace: "nowrap", color: "error.main", fontWeight: 600 }}>
+                            {!esIngreso ? fmtMoney(Math.abs(f.delta), cSel.moneda) : ""}
+                          </TableCell>
+                          <TableCell align="right" sx={{ whiteSpace: "nowrap", fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                            color: f.saldo < -0.005 ? "error.main" : "text.primary" }}>
+                            {fmtMoney(f.saldo, cSel.moneda)}
+                          </TableCell>
+                          <TableCell align="center">
+                            {f.url
+                              ? <Tooltip title="Ver comprobante"><IconButton size="small" component={Link} href={f.url} target="_blank"><ReceiptLongIcon fontSize="small" /></IconButton></Tooltip>
+                              : <Typography variant="body2" color="text.disabled">—</Typography>}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </Box>
+            </CardContent></Card>
+          </Stack>
+        );
+      })()}
 
       {/* Dialog nueva/editar cuenta */}
       <Dialog open={openCuenta} onClose={() => setOpenCuenta(false)} fullWidth maxWidth="sm" fullScreen={fullScreen}>
