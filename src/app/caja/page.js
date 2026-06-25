@@ -195,8 +195,11 @@ export default function CajaPage() {
         }
       } else if (mv.tipo === "cambio") {
         const md = Number(mv.monto_destino || 0);
+        // La caja destino puede ser de otro titular (cambio con traspaso): el
+        // origen "vende" su divisa y el destino recibe la conversión.
+        const tDest = mv.titular_destino || t;
         if (mv.moneda === "USD") { usd -= m; egrUSD += m; addTit(usdTit, t, -m); } else { ars -= m; egrARS += m; addTit(arsTit, t, -m); }
-        if (mv.moneda_destino === "USD") { usd += md; ingUSD += md; addTit(usdTit, t, md); } else { ars += md; ingARS += md; addTit(arsTit, t, md); }
+        if (mv.moneda_destino === "USD") { usd += md; ingUSD += md; addTit(usdTit, tDest, md); } else { ars += md; ingARS += md; addTit(arsTit, tDest, md); }
       } else if (mv.tipo === "traspaso") {
         // Movimiento interno entre cajas personales: no cambia el total de la
         // moneda ni ingresos/egresos, sólo reasigna entre titulares.
@@ -264,7 +267,7 @@ export default function CajaPage() {
       id: "mv_" + mv.id, kind: "mov", fecha: mv.fecha, tipo: mv.tipo,
       moneda: mv.moneda, monto: Number(mv.monto || 0),
       detalle: mv.tipo === "cambio"
-        ? `Cambio ${mv.moneda} → ${mv.moneda_destino} @ ${fmtNum(mv.tipo_cambio, 2)}`
+        ? `Cambio ${mv.moneda} → ${mv.moneda_destino} @ ${fmtNum(mv.tipo_cambio, 2)}${mv.titular_destino && mv.titular_destino !== mv.titular ? ` · ${mv.titular || "?"} → ${mv.titular_destino}` : ""}`
         : mv.tipo === "traspaso"
           ? `Traspaso ${mv.titular || "?"} → ${mv.titular_destino || "?"}`
           : mv.recupero_materiales
@@ -323,8 +326,9 @@ export default function CajaPage() {
       if (caja !== "all" && deltaPara(row, caja) === 0) return false;
       // Filtro de titular
       if (filtroTitular !== "all") {
-        // Para traspasos, mostrar si titular es origen o destino
-        if (row.tipo === "traspaso") {
+        // Para traspasos y cambios con traspaso, mostrar si el titular es
+        // origen o destino del movimiento.
+        if (row.tipo === "traspaso" || row.tipo === "cambio") {
           return row.titular === filtroTitular || row.titular_destino === filtroTitular;
         }
         // Para otros, mostrar si titular coincide
@@ -564,6 +568,9 @@ export default function CajaPage() {
         fecha: form.fecha,
         tipo: "cambio",
         titular: form.titular || null,
+        // Caja destino de otro titular (cambio con traspaso). Si queda vacía,
+        // la conversión vuelve a la misma caja personal del origen.
+        titular_destino: form.titular_destino || null,
         moneda: form.moneda,
         monto: monto,
         categoria: null,
@@ -967,6 +974,10 @@ export default function CajaPage() {
                   <Divider />
                   <Typography variant="caption" color="text.secondary">CAMBIO ENTRE CAJAS</Typography>
                   <DetailRow label="Caja destino" value={detail.moneda_destino} />
+                  {detail.titular_destino && detail.titular_destino !== detail.titular && (
+                    <DetailRow label="Caja personal"
+                      value={`${detail.titular || "?"} → ${detail.titular_destino}`} />
+                  )}
                   <DetailRow label="Tipo de cambio" value={fmtNum(detail.raw?.tipo_cambio, 2)} />
                   <DetailRow label="Monto destino" value={fmtMoney(detail.monto_destino, detail.moneda_destino)} />
                 </>
@@ -1084,15 +1095,21 @@ export default function CajaPage() {
               </Grid>
               <Grid item xs={12} sm={6}>
                 <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
-                  Titular de la caja
+                  Caja personal (origen → destino)
                 </Typography>
-                <ToggleButtonGroup
-                  exclusive size="small" color="primary" fullWidth
-                  value={form.titular}
-                  onChange={(_, v) => setForm({ ...form, titular: v ?? "" })}
-                >
-                  {TITULARES.map(t => <ToggleButton key={t} value={t}>{t}</ToggleButton>)}
-                </ToggleButtonGroup>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <TextField select size="small" sx={{ flex: 1 }} value={form.titular}
+                    onChange={e => setForm({ ...form, titular: e.target.value })}>
+                    <MenuItem value="">(Sin asignar)</MenuItem>
+                    {TITULARES.map(t => <MenuItem key={t} value={t}>{t}</MenuItem>)}
+                  </TextField>
+                  <SyncAltIcon color="primary" />
+                  <TextField select size="small" sx={{ flex: 1 }} value={form.titular_destino}
+                    onChange={e => setForm({ ...form, titular_destino: e.target.value })}>
+                    <MenuItem value="">(Igual al origen)</MenuItem>
+                    {TITULARES.map(t => <MenuItem key={t} value={t}>{t}</MenuItem>)}
+                  </TextField>
+                </Stack>
               </Grid>
               <Grid item xs={12} sm={6}>
                 <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
@@ -1127,9 +1144,14 @@ export default function CajaPage() {
                     Este registro impacta en <b>2 movimientos</b>:
                   </Typography>
                   <Stack component="ol" sx={{ pl: 2.5, m: 0 }} spacing={0.25}>
-                    <li>Caja {form.moneda}: <b style={{ color: "#C0392B" }}>−{fmtMoney(monto, form.moneda)}</b></li>
-                    <li>Caja {form.moneda_destino}: <b style={{ color: "#1E8E3E" }}>+{fmtMoney(montoDestinoCambioPuro, form.moneda_destino)}</b></li>
+                    <li>Caja {form.moneda}{form.titular ? ` (${form.titular})` : ""}: <b style={{ color: "#C0392B" }}>−{fmtMoney(monto, form.moneda)}</b></li>
+                    <li>Caja {form.moneda_destino}{(form.titular_destino || form.titular) ? ` (${form.titular_destino || form.titular})` : ""}: <b style={{ color: "#1E8E3E" }}>+{fmtMoney(montoDestinoCambioPuro, form.moneda_destino)}</b></li>
                   </Stack>
+                  {(form.titular_destino && form.titular_destino !== form.titular) && (
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
+                      Cambio con traspaso: la divisa sale de la caja de {form.titular || "?"} y la conversión queda en la de {form.titular_destino}.
+                    </Typography>
+                  )}
                 </Alert>
               </Grid>
               <Grid item xs={12}>

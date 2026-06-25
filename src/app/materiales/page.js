@@ -140,6 +140,11 @@ export default function MaterialesPage() {
   const retirosDe = (cuentaId) => retiros.filter(r => r.cuenta_id === cuentaId);
   const recuperosDe = (cuentaId) => recuperos.filter(r => r.cuenta_materiales_id === cuentaId);
   const anticiposDe = (cuentaId) => anticipos.filter(a => a.cuenta_id === cuentaId);
+  // Anticipos "reales" (acopios) vs devoluciones a saldo (recupero acreditado en
+  // la cuenta). Ambos suman al anticipo total / saldo, pero se muestran y cuentan
+  // por separado.
+  const anticiposReales = (cuentaId) => anticiposDe(cuentaId).filter(a => !a.es_devolucion);
+  const devolucionesDe = (cuentaId) => anticiposDe(cuentaId).filter(a => a.es_devolucion);
   // Anticipo total de la cuenta: suma de sus anticipos; si todavía no tiene
   // (migración no corrida), cae al monto_inicial heredado.
   const totalAnticipoDe = (c) => {
@@ -151,16 +156,24 @@ export default function MaterialesPage() {
     const anticipado = totalAnticipoDe(c);
     const retirado = rs.reduce((s, r) => s + Number(r.monto || 0), 0);
     const saldo = anticipado - retirado;
-    // Recupero: total a recuperar (de los retiros con recupero) vs ya recuperado (ingresos de caja)
+    // Recupero: total a recuperar (de los retiros con recupero) vs ya recuperado.
+    // El recupero puede cobrarse en efectivo (ingresos de caja) o acreditarse al
+    // saldo de la cuenta (devoluciones a saldo). Ambos descuentan lo pendiente.
     const rec = recuperosDe(c.id);
+    const dev = devolucionesDe(c.id);
     const aRecuperar = rs.reduce((s, r) => s + itemsRecupero(r).reduce((a, it) => a + it.total, 0), 0);
-    const recuperado = rec.reduce((s, r) => s + Number(r.monto || 0), 0);
+    const recuperadoCaja = rec.reduce((s, r) => s + Number(r.monto || 0), 0);
+    const recuperadoSaldo = dev.reduce((s, a) => s + Number(a.monto || 0), 0);
+    const recuperado = recuperadoCaja + recuperadoSaldo;
     const pendienteRecupero = aRecuperar - recuperado;
-    // Cantidades de pallets / bolsones a devolver (de los retiros) vs devueltos (de los recuperos)
+    // Cantidades de pallets / bolsones a devolver (de los retiros) vs devueltos
+    // (sumando los recuperos de caja y las devoluciones a saldo).
     const palletsADevolver = rs.reduce((s, r) => s + itemsRecupero(r).reduce((a, it) => a + (it.unidad === "pallet" ? it.cantidad : 0), 0), 0);
     const bolsonesADevolver = rs.reduce((s, r) => s + itemsRecupero(r).reduce((a, it) => a + (it.unidad === "bolson" ? it.cantidad : 0), 0), 0);
-    const palletsDevueltos = rec.reduce((s, r) => s + Number(r.recupero_pallets || 0), 0);
-    const bolsonesDevueltos = rec.reduce((s, r) => s + Number(r.recupero_bolsones || 0), 0);
+    const palletsDevueltos = rec.reduce((s, r) => s + Number(r.recupero_pallets || 0), 0)
+      + dev.reduce((s, a) => s + Number(a.rec_pallets || 0), 0);
+    const bolsonesDevueltos = rec.reduce((s, r) => s + Number(r.recupero_bolsones || 0), 0)
+      + dev.reduce((s, a) => s + Number(a.rec_bolsones || 0), 0);
     return { anticipado, retirado, saldo, n: rs.length, aRecuperar, recuperado, pendienteRecupero,
       palletsADevolver, bolsonesADevolver, palletsDevueltos, bolsonesDevueltos };
   };
@@ -258,6 +271,51 @@ export default function MaterialesPage() {
   };
   const delAnticipo = async (a) => {
     if (!confirm("¿Eliminar este anticipo?")) return;
+    const { error } = await supabase.from("anticipos_materiales").delete().eq("id", a.id);
+    if (error) alert(error.message); else reload();
+  };
+
+  // ---- Devoluciones a saldo (recupero acreditado en la cuenta) ----
+  // Se guarda como un anticipo más (suma al saldo) marcado es_devolucion, con el
+  // detalle de pallets / bolsones devueltos para descontar el pendiente a recuperar.
+  const [nuevaDevolucion, setNuevaDevolucion] = useState({}); // { [cuentaId]: { fecha, items: [...] } }
+  const setDev = (cuentaId, patch) =>
+    setNuevaDevolucion(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), items: [emptyRecItem()], ...prev[cuentaId], ...patch } }));
+  const devItemsDe = (cuentaId) => {
+    const its = nuevaDevolucion[cuentaId]?.items;
+    return Array.isArray(its) && its.length ? its : [emptyRecItem()];
+  };
+  const addDevItem = (cuentaId) =>
+    setDev(cuentaId, { items: [...devItemsDe(cuentaId), emptyRecItem()] });
+  const setDevItem = (cuentaId, idx, patch) =>
+    setDev(cuentaId, { items: devItemsDe(cuentaId).map((it, i) => i === idx ? { ...it, ...patch } : it) });
+  const delDevItem = (cuentaId, idx) => {
+    const next = devItemsDe(cuentaId).filter((_, i) => i !== idx);
+    setDev(cuentaId, { items: next.length ? next : [emptyRecItem()] });
+  };
+  const addDevolucion = async (cuentaId) => {
+    const f = nuevaDevolucion[cuentaId] || {};
+    const items = (f.items || []).map(it => ({
+      unidad: it.unidad === "bolson" ? "bolson" : "pallet",
+      cantidad: Number(parseMiles(it.cantidad ?? "")) || 0,
+      precio: Number(it.precio ?? 0) || 0,
+    })).filter(it => it.cantidad > 0 || it.precio > 0)
+      .map(it => ({ ...it, total: it.cantidad * it.precio }));
+    if (!items.length) { alert("Cargá al menos un ítem de devolución (cantidad y precio)."); return; }
+    const total = items.reduce((s, it) => s + it.total, 0);
+    const pallets = items.reduce((s, it) => s + (it.unidad === "pallet" ? it.cantidad : 0), 0);
+    const bolsones = items.reduce((s, it) => s + (it.unidad === "bolson" ? it.cantidad : 0), 0);
+    const { error } = await supabase.from("anticipos_materiales").insert({
+      cuenta_id: cuentaId, monto: total, fecha: f.fecha || hoyISO(),
+      descripcion: "Devolución de material a saldo",
+      es_devolucion: true, rec_items: items, rec_pallets: pallets, rec_bolsones: bolsones,
+    });
+    if (error) { alert(error.message); return; }
+    setNuevaDevolucion(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), items: [emptyRecItem()] } }));
+    reload();
+  };
+  const delDevolucion = async (a) => {
+    if (!confirm("¿Eliminar esta devolución a saldo?")) return;
     const { error } = await supabase.from("anticipos_materiales").delete().eq("id", a.id);
     if (error) alert(error.message); else reload();
   };
@@ -419,7 +477,8 @@ export default function MaterialesPage() {
         cuentas.map((c) => {
           const k = calc(c);
           const rs = retirosDe(c.id);
-          const ant = anticiposDe(c.id);
+          const ant = anticiposReales(c.id);
+          const devs = devolucionesDe(c.id);
           const na = nuevoAnticipo[c.id] || {};
           const nr = nuevoRetiro[c.id] || {};
           const pct = k.anticipado > 0 ? Math.min(100, (k.retirado / k.anticipado) * 100) : 0;
@@ -694,6 +753,136 @@ export default function MaterialesPage() {
                       </TableBody>
                     </Table>
                   </Box>
+                </Section>
+
+                {/* ============== SECCIÓN 3: DEVOLUCIÓN A SALDO ============== */}
+                <Section title="Devolución a saldo" accent="#8E44AD"
+                  right={<Typography variant="caption" color="text.secondary">Recuperado a saldo: <b style={{ color: "#8E44AD" }}>{fmtMoney(devs.reduce((s, a) => s + Number(a.monto || 0), 0), c.moneda)}</b></Typography>}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                    En vez de cobrarse en efectivo (que entra a Caja), la devolución de pallets / bolsones se acredita acá y suma al saldo disponible de la cuenta.
+                  </Typography>
+                  {/* Input arriba: nueva devolución */}
+                  <Box sx={{ p: 1.5, borderRadius: 2, border: "1px dashed", borderColor: "divider", bgcolor: "rgba(255,255,255,0.6)" }}>
+                    {(() => {
+                      const nd = nuevaDevolucion[c.id] || {};
+                      const items = devItemsDe(c.id);
+                      const granTotal = items.reduce((s, it) => {
+                        const cant = Number(parseMiles(it.cantidad ?? "")) || 0;
+                        const prec = Number(it.precio ?? 0) || 0;
+                        return s + cant * prec;
+                      }, 0);
+                      return (
+                        <Stack spacing={1.5}>
+                          <Grid container spacing={1.5} alignItems="center">
+                            <Grid item xs={6} sm={3}>
+                              <TextField type="date" label="Fecha" InputLabelProps={{ shrink: true }} fullWidth size="small"
+                                value={nd.fecha ?? hoyISO()} onChange={(e) => setDev(c.id, { fecha: e.target.value })} />
+                            </Grid>
+                          </Grid>
+                          {items.map((it, idx) => {
+                            const cant = Number(parseMiles(it.cantidad ?? "")) || 0;
+                            const prec = Number(it.precio ?? 0) || 0;
+                            return (
+                              <Grid container spacing={1.5} alignItems="center" key={idx}>
+                                <Grid item xs={12} sm={3}>
+                                  <ToggleButtonGroup exclusive size="small" fullWidth
+                                    value={it.unidad ?? "pallet"}
+                                    onChange={(_, v) => v && setDevItem(c.id, idx, { unidad: v })}>
+                                    <ToggleButton value="pallet">Pallet</ToggleButton>
+                                    <ToggleButton value="bolson">Bolsón</ToggleButton>
+                                  </ToggleButtonGroup>
+                                </Grid>
+                                <Grid item xs={6} sm={2}>
+                                  <TextField label="Cantidad" fullWidth size="small"
+                                    inputProps={{ inputMode: "decimal" }}
+                                    value={it.cantidad ?? ""}
+                                    onChange={(e) => setDevItem(c.id, idx, { cantidad: e.target.value.replace(/[^\d.,]/g, "") })} />
+                                </Grid>
+                                <Grid item xs={6} sm={3}>
+                                  <TextField label={`Precio unitario (${c.moneda})`} fullWidth size="small"
+                                    inputProps={{ inputMode: "decimal" }}
+                                    value={fmtMiles(it.precio ?? "")}
+                                    onChange={(e) => setDevItem(c.id, idx, { precio: parseMiles(e.target.value) })} />
+                                </Grid>
+                                <Grid item xs={10} sm={3}>
+                                  <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5, display: "block" }}>
+                                    Subtotal
+                                  </Typography>
+                                  <Typography fontWeight={700} sx={{ color: "#8E44AD", fontVariantNumeric: "tabular-nums" }}>
+                                    {fmtMoney(cant * prec, c.moneda)}
+                                  </Typography>
+                                </Grid>
+                                <Grid item xs={2} sm={1} sx={{ textAlign: "right" }}>
+                                  <Tooltip title="Quitar ítem">
+                                    <span>
+                                      <IconButton size="small" disabled={items.length === 1}
+                                        onClick={() => delDevItem(c.id, idx)}>
+                                        <DeleteOutlineIcon fontSize="small" />
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
+                                </Grid>
+                              </Grid>
+                            );
+                          })}
+                          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ flexWrap: "wrap", gap: 1 }}>
+                            <Button size="small" startIcon={<AddIcon />} onClick={() => addDevItem(c.id)}>
+                              Agregar ítem
+                            </Button>
+                            <Stack direction="row" spacing={2} alignItems="center" sx={{ flexWrap: "wrap" }}>
+                              <Typography variant="body2">
+                                Suma al saldo:{" "}
+                                <Typography component="span" fontWeight={700} sx={{ color: "#8E44AD", fontVariantNumeric: "tabular-nums" }}>
+                                  {fmtMoney(granTotal, c.moneda)}
+                                </Typography>
+                              </Typography>
+                              <Button variant="contained" size="small" sx={{ bgcolor: "#8E44AD", "&:hover": { bgcolor: "#763a92" } }}
+                                onClick={() => addDevolucion(c.id)}>
+                                Registrar devolución
+                              </Button>
+                            </Stack>
+                          </Stack>
+                        </Stack>
+                      );
+                    })()}
+                  </Box>
+
+                  {/* Detalle de devoluciones */}
+                  {devs.length > 0 && (
+                    <Box sx={{ overflowX: "auto", mt: 1.5 }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell sx={{ width: 110 }}>Fecha</TableCell>
+                            <TableCell>Detalle</TableCell>
+                            <TableCell align="right">Suma al saldo</TableCell>
+                            <TableCell align="right" sx={{ width: 56 }}></TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {devs.map((a) => (
+                            <TableRow key={a.id} hover>
+                              <TableCell sx={{ whiteSpace: "nowrap" }}>{a.fecha ? fmtDate(a.fecha) : "—"}</TableCell>
+                              <TableCell>
+                                {(Array.isArray(a.rec_items) ? a.rec_items : []).map((it, i) => (
+                                  <Typography key={i} variant="caption" sx={{ display: "block", color: "#8E44AD" }}>
+                                    {fmtNum0(it.cantidad)} {it.unidad === "bolson" ? "bolsón/es" : "pallet/s"} · {fmtMoney(Number(it.total || 0), c.moneda)}
+                                  </Typography>
+                                ))}
+                                {!Array.isArray(a.rec_items) && <Typography variant="caption" color="text.secondary">Devolución a saldo</Typography>}
+                              </TableCell>
+                              <TableCell align="right" sx={{ whiteSpace: "nowrap", color: "#8E44AD", fontWeight: 600 }}>
+                                +{fmtMoney(a.monto, c.moneda)}
+                              </TableCell>
+                              <TableCell align="right">
+                                <Tooltip title="Eliminar devolución"><IconButton size="small" onClick={() => delDevolucion(a)}><DeleteOutlineIcon fontSize="small" /></IconButton></Tooltip>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </Box>
+                  )}
                 </Section>
 
                 <Stack direction="row" spacing={1} sx={{ mt: 2 }} justifyContent="flex-end">

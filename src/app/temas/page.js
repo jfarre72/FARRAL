@@ -60,7 +60,8 @@ export default function TemasPage() {
 
   const [temas, setTemas] = useState(() => getCache("temas", proyecto?.id) ?? []);
   const [loading, setLoading] = useState(true);
-  const [filtro, setFiltro] = useState("todos"); // todos | pendientes | hechos | vencidos
+  // Por defecto se abre mostrando lo que requiere acción: pendientes + vencidas.
+  const [filtro, setFiltro] = useState("abiertas"); // abiertas | todos | pendientes | hechos | vencidos
   const [busqueda, setBusqueda] = useState("");
   const [nuevo, setNuevo] = useState("");
 
@@ -97,7 +98,8 @@ export default function TemasPage() {
 
   const visibles = useMemo(() => {
     let r = ordenados;
-    if (filtro === "pendientes") r = r.filter(t => estadoDe(t) === "pendiente");
+    if (filtro === "abiertas") r = r.filter(t => estadoDe(t) !== "hecho");
+    else if (filtro === "pendientes") r = r.filter(t => estadoDe(t) === "pendiente");
     else if (filtro === "hechos") r = r.filter(t => estadoDe(t) === "hecho");
     else if (filtro === "vencidos") r = r.filter(t => estadoDe(t) === "vencido");
     const q = busqueda.trim().toLowerCase();
@@ -244,10 +246,11 @@ export default function TemasPage() {
               size="small" exclusive value={filtro}
               onChange={(e, v) => { if (v) setFiltro(v); }}
             >
-              <ToggleButton value="todos">Todos</ToggleButton>
+              <ToggleButton value="abiertas">Abiertas</ToggleButton>
               <ToggleButton value="pendientes">Pendientes</ToggleButton>
               <ToggleButton value="vencidos">Vencidos</ToggleButton>
               <ToggleButton value="hechos">Hechos</ToggleButton>
+              <ToggleButton value="todos">Todos</ToggleButton>
             </ToggleButtonGroup>
           </Stack>
 
