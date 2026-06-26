@@ -159,6 +159,7 @@ export default function EquipamientosPage() {
   const [drag, setDrag] = useState(null); // { grupo, fromId, overId }
   const fileRef = useRef(null);
   const attachTo = useRef(null); // equipamiento al que se adjunta
+  const initColapso = useRef(false); // grupos ya colapsados al entrar (una vez por proyecto)
 
   const reload = async () => {
     if (!proyecto) return;
@@ -173,7 +174,7 @@ export default function EquipamientosPage() {
     setRepos(rp ?? []);
     setLoading(false);
   };
-  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
+  useEffect(() => { initColapso.current = false; reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
 
   const grupoDe = (it) => it.etapa || GENERAL;
   const itemsDe = (g) => items.filter(i => grupoDe(i) === g).sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
@@ -199,6 +200,16 @@ export default function EquipamientosPage() {
   ];
   // Etapas que todavía no son grupo visible (para el selector "Agregar grupo").
   const etapasDisponibles = [...etapas, GENERAL].filter(e => !grupos.includes(e));
+
+  // Al entrar (una vez por proyecto) mostramos los grupos colapsados, para ver
+  // la estructura agrupada de un vistazo y desplegar sólo lo que haga falta.
+  useEffect(() => {
+    if (!initColapso.current && grupos.length > 0) {
+      initColapso.current = true;
+      setColapsado(Object.fromEntries(grupos.map(g => [g, true])));
+    }
+    /* eslint-disable-next-line */
+  }, [grupos.length]);
 
   const agregarGrupo = (g) => {
     const nombre = (g || "").trim();

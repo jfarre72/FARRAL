@@ -41,7 +41,7 @@ const NAV = [
   ]},
   { section: "Obra", items: [
     { label: "Planificación",   href: "/linea-tiempo",  icon: <TimelineIcon /> },
-    { label: "Cronograma",      href: "/cronograma",    icon: <StackedBarChartIcon /> },
+    { label: "Plan vs Real",    href: "/cronograma",    icon: <StackedBarChartIcon /> },
     { label: "Diario",          href: "/seguimiento-diario", icon: <CalendarMonthIcon /> },
     { label: "Tareas",          href: "/temas",         icon: <ChecklistIcon /> },
     { label: "Equipamientos",   href: "/equipamientos", icon: <HandymanIcon /> },
@@ -50,7 +50,7 @@ const NAV = [
     { label: "Caja",            href: "/caja",          icon: <PointOfSaleIcon /> },
     { label: "Presupuestos",    href: "/presupuestos",  icon: <RequestQuoteIcon /> },
     { label: "Materiales",      href: "/materiales",    icon: <Inventory2Icon /> },
-    { label: "Económico",       href: "/economico",     icon: <AccountTreeIcon /> },
+    { label: "Plan vs Real",    href: "/economico",     icon: <AccountTreeIcon /> },
   ]},
   { section: "Documentación", items: [
     { label: "Galería",         href: "/galeria",       icon: <PhotoLibraryIcon /> },

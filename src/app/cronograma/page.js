@@ -171,7 +171,7 @@ export default function CronogramaPage() {
   return (
     <Stack spacing={3}>
       <Box>
-        <Typography variant="h5">Cronograma · Plan vs Real</Typography>
+        <Typography variant="h5">Plan vs Real · Obra</Typography>
         <Typography variant="body2" color="text.secondary">
           La barra clara es el <b>plan</b> de cada etapa; la barra de color es el <b>real</b> (según las fechas de sus tareas).
           El desfase de la etapa en curso se proyecta sobre las siguientes para anticipar el impacto en la fecha de fin.

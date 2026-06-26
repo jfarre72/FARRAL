@@ -60,16 +60,29 @@ function toISODate(d) {
   const da = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${da}`;
 }
-// Etiqueta de duración en días hábiles; si supera 5, la expresa en semanas (5 días háb. = 1 semana).
-function duracionLabel(sIso, eIso) {
+// Etiqueta de duración de una ETAPA: en semanas (5 días háb. = 1 sem.) y, a partir
+// de 4 semanas, en meses (4 sem. = 1 mes). Las tareas siguen mostrándose en días hábiles.
+function duracionEtapaLabel(sIso, eIso) {
   const dh = diasHabiles(sIso, eIso);
   if (dh == null) return "";
-  if (dh > 5) {
-    const sem = dh / 5;
-    const txt = Number.isInteger(sem) ? String(sem) : sem.toFixed(1).replace(".", ",");
-    return `${txt} sem.`;
+  const neg = dh < 0;
+  const semanas = Math.abs(dh) / 5;
+  let txt;
+  if (semanas < 1) {
+    const d = Math.abs(dh);
+    txt = `${d} día${d === 1 ? "" : "s"} háb.`;
+  } else if (semanas < 4) {
+    const s = Math.round(semanas * 10) / 10;
+    const st = Number.isInteger(s) ? String(s) : s.toFixed(1).replace(".", ",");
+    txt = `${st} sem.`;
+  } else {
+    const meses = Math.floor(semanas / 4);
+    const restoSem = Math.round(semanas - meses * 4);
+    if (restoSem === 0) txt = `${meses} ${meses === 1 ? "mes" : "meses"}`;
+    else if (restoSem === 4) txt = `${meses + 1} ${meses + 1 === 1 ? "mes" : "meses"}`;
+    else txt = `${meses} ${meses === 1 ? "mes" : "meses"} ${restoSem} sem.`;
   }
-  return `${dh} día${dh === 1 ? "" : "s"} háb.`;
+  return neg ? `−${txt}` : txt;
 }
 // Convierte un color hex (#RRGGBB) a rgba con la opacidad dada.
 function fade(hex, a) {
@@ -182,7 +195,7 @@ function GanttEtapas({ etapas, inicioReal, finReal, onUpdate, getFraccion }) {
           const has = s && e && !isNaN(s) && !isNaN(e) && e >= s;
           const leftPct = has ? Math.max(0, (s - ini) / 86400000 / span * 100) : 0;
           const widthPct = has ? Math.max(2, (e - s) / 86400000 / span * 100) : 0;
-          const durTxt = has ? duracionLabel(toISODate(s), toISODate(e)) : "";
+          const durTxt = has ? duracionEtapaLabel(toISODate(s), toISODate(e)) : "";
           const color = GANTT_COLORS[i % GANTT_COLORS.length];
           const isDragging = drag?.hitoId === h.id;
           const frac = Math.max(0, Math.min(1, getFraccion ? getFraccion(h) : 0));
@@ -680,7 +693,7 @@ export default function LineaTiempoPage() {
                               <Box sx={{ width: CHIP_W, display: "flex", justifyContent: "center" }}>
                                 {d != null && (
                                   <Chip size="small" variant="outlined"
-                                    label={`${d} día${Math.abs(d) === 1 ? "" : "s"} háb.`}
+                                    label={duracionEtapaLabel(h.fecha_estimada, h.fecha_real)}
                                     color={d < 0 ? "error" : "default"} />
                                 )}
                               </Box>
@@ -727,7 +740,7 @@ export default function LineaTiempoPage() {
                               return d != null ? (
                                 <Grid item xs={12}>
                                   <Chip size="small" variant="outlined"
-                                    label={`${d} día${Math.abs(d) === 1 ? "" : "s"} hábiles (lun–vie)`}
+                                    label={duracionEtapaLabel(h.fecha_estimada, h.fecha_real)}
                                     color={d < 0 ? "error" : "default"} />
                                 </Grid>
                               ) : null;
