@@ -1005,6 +1005,7 @@ export default function MaterialesPage() {
                           <TableCell>Detalle</TableCell>
                           <TableCell align="right">Monto</TableCell>
                           <TableCell align="right">Bruto USD</TableCell>
+                          <TableCell align="right">A recuperar USD</TableCell>
                           <TableCell align="right">Neto USD</TableCell>
                           <TableCell align="center" sx={{ width: 80 }}>Remito</TableCell>
                           <TableCell align="right" sx={{ width: 56 }}></TableCell>
@@ -1012,7 +1013,7 @@ export default function MaterialesPage() {
                       </TableHead>
                       <TableBody>
                         {rs.length === 0 && (
-                          <TableRow><TableCell colSpan={9}>
+                          <TableRow><TableCell colSpan={10}>
                             <Typography variant="body2" color="text.secondary">Todavía no hay retiros en esta cuenta.</Typography>
                           </TableCell></TableRow>
                         )}
@@ -1020,6 +1021,7 @@ export default function MaterialesPage() {
                           const neto = netoRetiro(r);
                           const netoUSD = usdDe(c, neto, r.tipo_cambio);
                           const brutoUSD = usdDe(c, Number(r.monto || 0), r.tipo_cambio);
+                          const recUSD = usdDe(c, Number(r.monto || 0) - neto, r.tipo_cambio);
                           return (
                           <TableRow key={r.id} hover>
                             <TableCell sx={{ whiteSpace: "nowrap" }}>{fmtDate(r.fecha)}</TableCell>
@@ -1042,6 +1044,9 @@ export default function MaterialesPage() {
                             </TableCell>
                             <TableCell align="right" sx={{ whiteSpace: "nowrap", color: "text.secondary" }}>
                               {fmtMoney(brutoUSD, "USD")}
+                            </TableCell>
+                            <TableCell align="right" sx={{ whiteSpace: "nowrap", color: recUSD > 0 ? "warning.main" : "text.disabled" }}>
+                              {recUSD > 0 ? fmtMoney(recUSD, "USD") : "—"}
                             </TableCell>
                             <TableCell align="right" sx={{ whiteSpace: "nowrap", fontWeight: 600, color: "#0F2A4A" }}>
                               {fmtMoney(netoUSD, "USD")}
