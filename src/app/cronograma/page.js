@@ -95,16 +95,13 @@ export default function CronogramaPage() {
       // Fin proyectado de la etapa.
       let projEnd = null, projStart = null;
       if (finalizado && realEnd) {
+        // Terminada: usá las fechas reales de sus tareas.
         projStart = realStart || effPlanStart;
         projEnd = realEnd;
-      } else if (avance > 0 && realStart) {
-        projStart = realStart;
-        const transcurridos = Math.max(1, diffDays(realStart, hoy));
-        const totalDur = transcurridos / (avance / 100);
-        projEnd = addDays(realStart, totalDur);
-        if (projEnd < hoy) projEnd = hoy;
       } else if (realStart && realEnd) {
-        // Planificada (tareas con fechas reales cargadas, todavía sin avance).
+        // En curso o planificada con fechas de tareas cargadas: respetá esas fechas.
+        // No extrapolamos por "velocidad": las fechas de las tareas son el plan real.
+        // Si ya venció el fin y todavía no terminó, proyectamos al menos a hoy.
         projStart = realStart;
         projEnd = realEnd < hoy ? hoy : realEnd;
       } else if (planDur != null) {
@@ -116,8 +113,10 @@ export default function CronogramaPage() {
         projEnd = start ? addDays(start, planDur) : null;
       }
 
-      const desfase = (planEnd && projEnd) ? diffDays(planEnd, projEnd) : null;
-      // Sólo los atrasos empujan a las siguientes (los adelantos no aceleran).
+      // Desfase medido contra el plan YA corrido por el atraso de arriba (effPlanEnd).
+      // Así una etapa que sólo hereda el atraso aguas arriba marca 0 (no lo vuelve a sumar).
+      const desfase = (effPlanEnd && projEnd) ? diffDays(effPlanEnd, projEnd) : null;
+      // Sólo el atraso propio de esta etapa empuja a las siguientes (los adelantos no aceleran).
       if (desfase != null && desfase > 0) cascada += desfase;
 
       // Tareas vencidas (alerta temprana): fin pasado y no finalizada.

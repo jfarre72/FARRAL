@@ -27,6 +27,13 @@ export function fmtNum(value, digits = 2) {
  */
 export function fmtDate(iso) {
   if (!iso) return "—";
+  // Objeto Date (p. ej. fechas proyectadas del cronograma) → dd/mm/aaaa.
+  if (iso instanceof Date) {
+    if (isNaN(iso)) return "—";
+    const dd = String(iso.getDate()).padStart(2, "0");
+    const mm = String(iso.getMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}/${iso.getFullYear()}`;
+  }
   const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return String(iso);
   return `${m[3]}/${m[2]}/${m[1]}`;
