@@ -1004,6 +1004,7 @@ export default function MaterialesPage() {
                           <TableCell sx={{ width: 130 }}>Etapa</TableCell>
                           <TableCell>Detalle</TableCell>
                           <TableCell align="right">Monto</TableCell>
+                          <TableCell align="right">Bruto USD</TableCell>
                           <TableCell align="right">Neto USD</TableCell>
                           <TableCell align="center" sx={{ width: 80 }}>Remito</TableCell>
                           <TableCell align="right" sx={{ width: 56 }}></TableCell>
@@ -1011,13 +1012,14 @@ export default function MaterialesPage() {
                       </TableHead>
                       <TableBody>
                         {rs.length === 0 && (
-                          <TableRow><TableCell colSpan={8}>
+                          <TableRow><TableCell colSpan={9}>
                             <Typography variant="body2" color="text.secondary">Todavía no hay retiros en esta cuenta.</Typography>
                           </TableCell></TableRow>
                         )}
                         {rs.map((r) => {
                           const neto = netoRetiro(r);
                           const netoUSD = usdDe(c, neto, r.tipo_cambio);
+                          const brutoUSD = usdDe(c, Number(r.monto || 0), r.tipo_cambio);
                           return (
                           <TableRow key={r.id} hover>
                             <TableCell sx={{ whiteSpace: "nowrap" }}>{fmtDate(r.fecha)}</TableCell>
@@ -1037,6 +1039,9 @@ export default function MaterialesPage() {
                             </TableCell>
                             <TableCell align="right" sx={{ whiteSpace: "nowrap", color: "error.main", fontWeight: 600 }}>
                               −{fmtMoney(r.monto, c.moneda)}
+                            </TableCell>
+                            <TableCell align="right" sx={{ whiteSpace: "nowrap", color: "text.secondary" }}>
+                              {fmtMoney(brutoUSD, "USD")}
                             </TableCell>
                             <TableCell align="right" sx={{ whiteSpace: "nowrap", fontWeight: 600, color: "#0F2A4A" }}>
                               {fmtMoney(netoUSD, "USD")}

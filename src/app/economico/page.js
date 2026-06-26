@@ -222,16 +222,19 @@ export default function EconomicoPage() {
     for (const r of retirosMat) {
       const c = byCuenta[r.cuenta_id];
       if (!c) continue;
-      const neto = Number(r.monto || 0) - recOf(r);
+      const rec = recOf(r);
+      const neto = Number(r.monto || 0) - rec;
       const usd = usdDe(c, neto, r.tipo_cambio);
-      if (!usd) continue;
+      const usdRec = usdDe(c, rec, r.tipo_cambio);
+      const usdGross = usdDe(c, Number(r.monto || 0), r.tipo_cambio);
+      if (!usd && !usdRec) continue;
       if (r.etapa) real[r.etapa] = (real[r.etapa] || 0) + usd;
       det.push({
         id: "ret_" + (r.id ?? `${r.cuenta_id}_${r.fecha}_${r.monto}`),
         fecha: r.fecha, etapa: r.etapa || null,
         descripcion: `Materiales · ${c.proveedor}${r.descripcion ? ` · ${r.descripcion}` : ""}`,
         categoria: "Materiales", monto: neto, moneda: c.moneda,
-        tc: Number(r.tipo_cambio || 0), usd,
+        tc: Number(r.tipo_cambio || 0), usd, usdRec, usdGross,
       });
     }
     return { realMatPorEtapa: real, retirosMatDetalle: det };
@@ -272,8 +275,11 @@ export default function EconomicoPage() {
         acopioUSD += tc > 0 ? m / tc : 0;
       } else acopioUSD += m;
     }
-    const retiroUSD = retirosMatDetalle.reduce((s, d) => s + d.usd, 0);
-    return { acopioUSD, retiroUSD, sinConsumir: acopioUSD - retiroUSD };
+    const retiroNetoUSD = retirosMatDetalle.reduce((s, d) => s + (d.usd || 0), 0);
+    const aRecuperarUSD = retirosMatDetalle.reduce((s, d) => s + (d.usdRec || 0), 0);
+    const retiroBrutoUSD = retirosMatDetalle.reduce((s, d) => s + (d.usdGross || 0), 0);
+    const sinConsumirUSD = acopioUSD - retiroBrutoUSD; // acopio que todavía no se retiró
+    return { acopioUSD, retiroNetoUSD, aRecuperarUSD, sinConsumirUSD };
   }, [cuentasMat, anticiposMat, retirosMatDetalle]);
 
   const { filasConcepto, totPlanC, totRealC, filasEtapa, totPlanE, totRealE } = useMemo(() => {
@@ -438,9 +444,10 @@ export default function EconomicoPage() {
             {acopioInfo.acopioUSD > 0 && (
               <Typography variant="body2" color="text.secondary">
                 Acopio total: <b>{fmtMoney(acopioInfo.acopioUSD, "USD")}</b> ·
-                {" "}ya retirado (computado): <b>{fmtMoney(acopioInfo.retiroUSD, "USD")}</b> ·
-                {" "}acopio sin consumir: <b>{fmtMoney(acopioInfo.sinConsumir, "USD")}</b>.
-                {" "}Esa diferencia explica por qué lo gastado en Caja (que incluye el acopio) es mayor al real del económico.
+                {" "}computado en el real (neto): <b>{fmtMoney(acopioInfo.retiroNetoUSD, "USD")}</b> ·
+                {" "}a recuperar: <b>{fmtMoney(acopioInfo.aRecuperarUSD, "USD")}</b> ·
+                {" "}sin consumir (sin retirar): <b>{fmtMoney(acopioInfo.sinConsumirUSD, "USD")}</b>.
+                {" "}Lo gastado en Caja (acopio) supera al real del económico justamente por lo <b>a recuperar</b> + lo <b>sin consumir</b>.
               </Typography>
             )}
           </Alert>
