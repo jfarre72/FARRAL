@@ -290,11 +290,6 @@ export default function MaterialesPage() {
   const saveCuenta = async () => {
     setErrCuenta(null);
     if (!formCuenta.proveedor.trim()) { setErrCuenta("El proveedor es obligatorio."); return; }
-    const montoIni = Math.max(0, Number(parseMiles(formCuenta.monto_inicial)) || 0);
-    const tcIni = Number(parseMiles(formCuenta.tipo_cambio)) || 0;
-    if (!editCuentaId && formCuenta.moneda === "ARS" && montoIni > 0 && tcIni <= 0) {
-      setErrCuenta("Ingresá el tipo de cambio del acopio inicial (ARS por 1 USD)."); return;
-    }
     setSaving(true);
     if (editCuentaId) {
       // En edición no se toca el anticipo: los anticipos se gestionan dentro
@@ -310,24 +305,16 @@ export default function MaterialesPage() {
       setOpenCuenta(false); reload();
       return;
     }
-    // Alta: creo la cuenta y su primer anticipo.
-    const montoInicial = Math.max(0, Number(parseMiles(formCuenta.monto_inicial)) || 0);
+    // Alta: sólo creo la cuenta. Los acopios (anticipos) se cargan desde Caja.
     const ins = await supabase.from("cuentas_materiales").insert({
       proyecto_id: proyecto.id,
       proveedor: formCuenta.proveedor.trim(),
       descripcion: formCuenta.descripcion || null,
       moneda: formCuenta.moneda,
-      monto_inicial: montoInicial, // legado; el anticipo real va en anticipos_materiales
+      monto_inicial: 0, // legado; los anticipos van en anticipos_materiales
       fecha: formCuenta.fecha || null,
     }).select("id").single();
     if (ins.error) { setSaving(false); setErrCuenta(ins.error.message); return; }
-    if (montoInicial > 0) {
-      const insA = await supabase.from("anticipos_materiales").insert({
-        cuenta_id: ins.data.id, monto: montoInicial, fecha: formCuenta.fecha || null,
-        tipo_cambio: formCuenta.moneda === "ARS" ? (tcIni > 0 ? tcIni : null) : null,
-      });
-      if (insA.error) { setSaving(false); setErrCuenta(insA.error.message); return; }
-    }
     setSaving(false);
     setOpenCuenta(false); reload();
   };
@@ -377,6 +364,12 @@ export default function MaterialesPage() {
   // detalle de pallets / bolsones devueltos para descontar el pendiente a recuperar.
   const [nuevaDevolucion, setNuevaDevolucion] = useState({}); // { [cuentaId]: { fecha, items: [...] } }
   const [editDev, setEditDev] = useState(null); // devolución en edición
+  const [devOpen, setDevOpen] = useState(null); // cuentaId del diálogo de recupero
+  const openNuevoDev = (cuentaId) => {
+    setEditDev(null);
+    setNuevaDevolucion(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), items: [emptyRecItem()], remito_nro: "", file: null } }));
+    setDevOpen(cuentaId);
+  };
   const setDev = (cuentaId, patch) =>
     setNuevaDevolucion(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), items: [emptyRecItem()], ...prev[cuentaId], ...patch } }));
   const devItemsDe = (cuentaId) => {
@@ -433,7 +426,7 @@ export default function MaterialesPage() {
         ({ error } = await supabase.from("anticipos_materiales").insert({ cuenta_id: cuentaId, comprobante_url, comprobante_path, ...datos }));
       }
       if (error) { alert(error.message); return; }
-      setEditDev(null);
+      setEditDev(null); setDevOpen(null);
       setNuevaDevolucion(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), items: [emptyRecItem()], remito_nro: "", file: null } }));
       reload();
     } finally {
@@ -442,6 +435,7 @@ export default function MaterialesPage() {
   };
   const startEditDevolucion = (a) => {
     setEditDev(a);
+    setDevOpen(a.cuenta_id);
     const its = Array.isArray(a.rec_items) && a.rec_items.length ? a.rec_items : [emptyRecItem()];
     setNuevaDevolucion(prev => ({ ...prev, [a.cuenta_id]: {
       fecha: a.fecha || hoyISO(),
@@ -451,7 +445,7 @@ export default function MaterialesPage() {
     } }));
   };
   const cancelEditDevolucion = (cuentaId) => {
-    setEditDev(null);
+    setEditDev(null); setDevOpen(null);
     setNuevaDevolucion(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), items: [emptyRecItem()], remito_nro: "", file: null } }));
   };
   const delDevolucion = async (a) => {
@@ -470,10 +464,17 @@ export default function MaterialesPage() {
 
   // ---- Retiro ----
   const [editRet, setEditRet] = useState(null); // retiro en edición
+  const [retiroOpen, setRetiroOpen] = useState(null); // cuentaId del diálogo de retiro
+  const openNuevoRetiro = (cuentaId) => {
+    setEditRet(null);
+    setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", remito_nro: "", etapa: "", tc: "", file: null, recupero: false, recupero_items: [emptyRecItem()] } }));
+    setRetiroOpen(cuentaId);
+  };
   const setRet = (cuentaId, patch) =>
     setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", file: null, recupero_items: [emptyRecItem()], ...prev[cuentaId], ...patch } }));
   const startEditRetiro = (r) => {
     setEditRet(r);
+    setRetiroOpen(r.cuenta_id);
     const its = itemsRecupero(r);
     setNuevoRetiro(prev => ({ ...prev, [r.cuenta_id]: {
       fecha: r.fecha || hoyISO(),
@@ -490,7 +491,7 @@ export default function MaterialesPage() {
     } }));
   };
   const cancelEditRetiro = (cuentaId) => {
-    setEditRet(null);
+    setEditRet(null); setRetiroOpen(null);
     setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", remito_nro: "", etapa: "", tc: "", file: null, recupero: false, recupero_items: [emptyRecItem()] } }));
   };
 
@@ -565,7 +566,7 @@ export default function MaterialesPage() {
         ({ error } = await supabase.from("retiros_materiales").insert({ cuenta_id: cuentaId, remito_url, remito_path, ...datos }));
       }
       if (error) { alert(error.message); setSubiendo(null); return; }
-      setEditRet(null);
+      setEditRet(null); setRetiroOpen(null);
       setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", remito_nro: "", etapa: "", tc: "", file: null, recupero: false, recupero_items: [emptyRecItem()] } }));
       reload();
     } finally {
@@ -763,44 +764,10 @@ export default function MaterialesPage() {
                 {/* ===================== SECCIÓN 1: ANTICIPOS ===================== */}
                 <Section title="Anticipos / acopios" accent="#1E8E3E"
                   right={<Typography variant="caption" color="text.secondary">Total anticipado: <b>{fmtMoney(k.anticipado, c.moneda)}</b></Typography>}>
-                  {/* Input arriba */}
-                  <Grid container spacing={1.5} alignItems="center">
-                    <Grid item xs={6} sm={3}>
-                      <TextField type="date" label="Fecha" InputLabelProps={{ shrink: true }} fullWidth size="small"
-                        value={na.fecha ?? hoyISO()} onChange={(e) => setAnt(c.id, { fecha: e.target.value })} />
-                    </Grid>
-                    <Grid item xs={6} sm={esARS(c) ? 3 : 5}>
-                      <TextField label={`Nuevo anticipo (${c.moneda})`} fullWidth size="small"
-                        inputProps={{ inputMode: "decimal" }}
-                        value={fmtMiles(na.monto ?? "")}
-                        onChange={(e) => setAnt(c.id, { monto: parseMiles(e.target.value) })} />
-                    </Grid>
-                    {esARS(c) && (
-                      <Grid item xs={6} sm={2}>
-                        <TextField label="TC (ARS/USD)" fullWidth size="small"
-                          inputProps={{ inputMode: "decimal" }}
-                          value={fmtMiles(na.tc ?? "")}
-                          helperText={(() => {
-                            const m = Number(parseMiles(na.monto ?? "")) || 0;
-                            const t = Number(parseMiles(na.tc ?? "")) || 0;
-                            return m > 0 && t > 0 ? `= ${fmtMoney(m / t, "USD")}` : "Dólar del acopio";
-                          })()}
-                          onChange={(e) => setAnt(c.id, { tc: parseMiles(e.target.value) })} />
-                      </Grid>
-                    )}
-                    <Grid item xs={esARS(c) ? 6 : 12} sm={esARS(c) ? 4 : 4}>
-                      <Stack direction="row" spacing={1}>
-                        <Button variant="outlined" color="secondary" fullWidth size="small"
-                          startIcon={editAnt && editAnt.cuenta_id === c.id ? <EditIcon /> : <AddIcon />}
-                          onClick={() => addAnticipo(c.id)}>
-                          {editAnt && editAnt.cuenta_id === c.id ? "Guardar" : "Sumar anticipo"}
-                        </Button>
-                        {editAnt && editAnt.cuenta_id === c.id && (
-                          <Button size="small" onClick={() => cancelEditAnticipo(c.id)}>Cancelar</Button>
-                        )}
-                      </Stack>
-                    </Grid>
-                  </Grid>
+                  {/* Los acopios se cargan desde Caja (egreso marcado como acopio). */}
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                    Los acopios se registran desde <b>Caja</b> (egreso marcado como “acopio de materiales”). Acá ves los anticipos cargados.
+                  </Typography>
                   {/* Detalle de anticipos abajo (por fecha) */}
                   {ant.length > 0 && (
                     <Box sx={{ mt: 1.5 }}>
@@ -823,18 +790,11 @@ export default function MaterialesPage() {
                                 <Chip size="small" variant="outlined" label="Caja" sx={{ height: 22 }} />
                               </Tooltip>
                             ) : (
-                              <>
-                                <Tooltip title="Editar anticipo">
-                                  <IconButton size="small" onClick={() => startEditAnticipo(a)}>
-                                    <EditIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                                <Tooltip title="Eliminar anticipo"><span>
-                                  <IconButton size="small" disabled={ant.length === 1} onClick={() => delAnticipo(a)}>
-                                    <DeleteOutlineIcon fontSize="small" />
-                                  </IconButton>
-                                </span></Tooltip>
-                              </>
+                              <Tooltip title="Eliminar anticipo"><span>
+                                <IconButton size="small" onClick={() => delAnticipo(a)}>
+                                  <DeleteOutlineIcon fontSize="small" />
+                                </IconButton>
+                              </span></Tooltip>
                             )}
                           </Stack>
                         ))}
@@ -851,17 +811,15 @@ export default function MaterialesPage() {
                     <Box sx={{ height: "100%", width: `${pct}%`, bgcolor: pct >= 100 ? "error.main" : "secondary.main", transition: "width .4s" }} />
                   </Box>
 
-                  {/* Input arriba: nuevo retiro */}
-                  <Box sx={{ p: 1.5, borderRadius: 2, border: "1px dashed", borderColor: "divider", bgcolor: "rgba(255,255,255,0.6)" }}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                    <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5 }}>
-                      {editRet && editRet.cuenta_id === c.id ? "Editar retiro" : "Nuevo retiro"}
-                    </Typography>
-                    {editRet && editRet.cuenta_id === c.id && (
-                      <Button size="small" onClick={() => cancelEditRetiro(c.id)}>Cancelar edición</Button>
-                    )}
-                  </Stack>
-                  <Grid container spacing={1.5} alignItems="center">
+                  {/* Botón que abre el diálogo de nuevo retiro */}
+                  <Button variant="contained" color="secondary" size="small" startIcon={<AddIcon />}
+                    onClick={() => openNuevoRetiro(c.id)} sx={{ mb: 1.5 }}>
+                    Nuevo retiro
+                  </Button>
+                  <Dialog open={retiroOpen === c.id} onClose={() => cancelEditRetiro(c.id)} fullWidth maxWidth="md" fullScreen={fullScreen}>
+                  <DialogTitle>{editRet && editRet.cuenta_id === c.id ? "Editar retiro" : "Nuevo retiro"} · {c.proveedor}</DialogTitle>
+                  <DialogContent dividers>
+                  <Grid container spacing={1.5} alignItems="center" sx={{ mt: 0 }}>
                     <Grid item xs={6} sm={2}>
                       <TextField type="date" label="Fecha" InputLabelProps={{ shrink: true }} fullWidth size="small"
                         value={nr.fecha ?? hoyISO()} onChange={(e) => setRet(c.id, { fecha: e.target.value })} />
@@ -885,12 +843,6 @@ export default function MaterialesPage() {
                         {nr.file ? nr.file.name : "Foto remito"}
                         <input hidden type="file" accept="image/*,application/pdf"
                           onChange={(e) => setRet(c.id, { file: e.target.files?.[0] ?? null })} />
-                      </Button>
-                    </Grid>
-                    <Grid item xs={4} sm={1.5}>
-                      <Button variant="contained" color="secondary" fullWidth size="small"
-                        disabled={subiendo === c.id} onClick={() => addRetiro(c.id)}>
-                        {subiendo === c.id ? "…" : (editRet && editRet.cuenta_id === c.id ? "Guardar" : "Agregar")}
                       </Button>
                     </Grid>
                     {/* Segunda fila: etapa de consumo + TC + neto USD imputado */}
@@ -1032,7 +984,15 @@ export default function MaterialesPage() {
                       );
                     })()}
                   </Box>
-                  </Box>
+                  </DialogContent>
+                  <DialogActions sx={{ px: 3, py: 2 }}>
+                    <Button onClick={() => cancelEditRetiro(c.id)}>Cancelar</Button>
+                    <Button variant="contained" color="secondary" disabled={subiendo === c.id}
+                      onClick={() => addRetiro(c.id)}>
+                      {subiendo === c.id ? "…" : (editRet && editRet.cuenta_id === c.id ? "Guardar cambios" : "Agregar retiro")}
+                    </Button>
+                  </DialogActions>
+                  </Dialog>
 
                   {/* Detalle de retiros abajo (por fecha) */}
                   <Box sx={{ overflowX: "auto", mt: 1.5 }}>
@@ -1104,8 +1064,15 @@ export default function MaterialesPage() {
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
                     En vez de cobrarse en efectivo (que entra a Caja), la devolución de pallets / bolsones se acredita acá y suma al saldo disponible de la cuenta.
                   </Typography>
-                  {/* Input arriba: nueva devolución */}
-                  <Box sx={{ p: 1.5, borderRadius: 2, border: "1px dashed", borderColor: "divider", bgcolor: "rgba(255,255,255,0.6)" }}>
+                  {/* Botón que abre el diálogo de nuevo recupero */}
+                  <Button variant="contained" size="small" startIcon={<AddIcon />}
+                    sx={{ bgcolor: "#8E44AD", "&:hover": { bgcolor: "#763a92" }, mb: 1 }}
+                    onClick={() => openNuevoDev(c.id)}>
+                    Nuevo recupero
+                  </Button>
+                  <Dialog open={devOpen === c.id} onClose={() => cancelEditDevolucion(c.id)} fullWidth maxWidth="md" fullScreen={fullScreen}>
+                  <DialogTitle>{editDev && editDev.cuenta_id === c.id ? "Editar recupero" : "Nuevo recupero a saldo"} · {c.proveedor}</DialogTitle>
+                  <DialogContent dividers>
                     {(() => {
                       const nd = nuevaDevolucion[c.id] || {};
                       const items = devItemsDe(c.id);
@@ -1190,19 +1157,18 @@ export default function MaterialesPage() {
                                   {fmtMoney(granTotal, c.moneda)}
                                 </Typography>
                               </Typography>
-                              {editDev && editDev.cuenta_id === c.id && (
-                                <Button size="small" onClick={() => cancelEditDevolucion(c.id)}>Cancelar</Button>
-                              )}
+                              <Button size="small" onClick={() => cancelEditDevolucion(c.id)}>Cancelar</Button>
                               <Button variant="contained" size="small" sx={{ bgcolor: "#8E44AD", "&:hover": { bgcolor: "#763a92" } }}
                                 disabled={subiendoDev === c.id} onClick={() => addDevolucion(c.id)}>
-                                {subiendoDev === c.id ? "…" : (editDev && editDev.cuenta_id === c.id ? "Guardar" : "Registrar devolución")}
+                                {subiendoDev === c.id ? "…" : (editDev && editDev.cuenta_id === c.id ? "Guardar" : "Registrar")}
                               </Button>
                             </Stack>
                           </Stack>
                         </Stack>
                       );
                     })()}
-                  </Box>
+                  </DialogContent>
+                  </Dialog>
 
                   {/* Detalle de devoluciones */}
                   {devs.length > 0 && (
@@ -1446,25 +1412,10 @@ export default function MaterialesPage() {
               </ToggleButtonGroup>
             </Grid>
             {!editCuentaId && (
-              <Grid item xs={12} sm={formCuenta.moneda === "ARS" ? 4 : 6}>
-                <TextField label={`Anticipo inicial (${formCuenta.moneda})`} fullWidth
-                  inputProps={{ inputMode: "decimal" }}
-                  value={fmtMiles(formCuenta.monto_inicial)}
-                  helperText="Primer acopio; después podés sumar más anticipos"
-                  onChange={(e) => setFormCuenta({ ...formCuenta, monto_inicial: parseMiles(e.target.value) })} />
-              </Grid>
-            )}
-            {!editCuentaId && formCuenta.moneda === "ARS" && (
-              <Grid item xs={12} sm={2}>
-                <TextField label="TC (ARS/USD)" fullWidth
-                  inputProps={{ inputMode: "decimal" }}
-                  value={fmtMiles(formCuenta.tipo_cambio)}
-                  helperText={(() => {
-                    const m = Number(parseMiles(formCuenta.monto_inicial)) || 0;
-                    const t = Number(parseMiles(formCuenta.tipo_cambio)) || 0;
-                    return m > 0 && t > 0 ? `= ${fmtMoney(m / t, "USD")}` : "Dólar del acopio";
-                  })()}
-                  onChange={(e) => setFormCuenta({ ...formCuenta, tipo_cambio: parseMiles(e.target.value) })} />
+              <Grid item xs={12}>
+                <Alert severity="info" sx={{ py: 0.5 }}>
+                  Los acopios (anticipos) se cargan desde <b>Caja</b>, marcando el egreso como “acopio de materiales”.
+                </Alert>
               </Grid>
             )}
           </Grid>

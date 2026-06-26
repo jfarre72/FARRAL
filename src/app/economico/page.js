@@ -19,6 +19,9 @@ import { getCache, setCache } from "@/lib/dataCache";
 // Un cambio puro de divisa (sin gasto) no imputa nada.
 function gastoUSD(mv) {
   if (mv.tipo !== "egreso") return 0;
+  // El egreso de acopio es financiero (no consumo): el gasto real se imputa en
+  // los retiros de materiales, no acá. Lo excluimos para no duplicar.
+  if (mv.anticipo_materiales) return 0;
   const m = Number(mv.monto || 0);
   if (m <= 0) return 0;
   if (mv.moneda === "USD") return m;
@@ -234,12 +237,31 @@ export default function EconomicoPage() {
     return { realMatPorEtapa: real, retirosMatDetalle: det };
   }, [cuentasMat, anticiposMat, retirosMat]);
 
+  // El concepto de "Obra" (el que usa etapas) recibe el consumo de materiales.
+  const obraConcepto = useMemo(() => {
+    const obra = conceptos.filter(c => c.usa_etapas).map(c => c.nombre);
+    return obra.length === 1 ? obra[0] : null;
+  }, [conceptos]);
+
+  // Gastos reales unificados: egresos de Caja (sin acopio) + retiros de
+  // materiales representados como gasto en USD (neto, imputado a su etapa).
+  const movsReal = useMemo(() => {
+    const mat = retirosMatDetalle.map(d => ({
+      id: d.id, tipo: "egreso", fecha: d.fecha,
+      moneda: d.moneda, monto: d.monto, tipo_cambio_gasto: d.tc > 0 ? d.tc : null,
+      concepto: obraConcepto || null, etapa: d.etapa || null,
+      tipo_costo: "Materiales", rubro: null, categoria: "Materiales",
+      descripcion: d.descripcion, _material: true,
+    }));
+    return [...movs, ...mat];
+  }, [movs, retirosMatDetalle, obraConcepto]);
+
   const { filasConcepto, totPlanC, totRealC, filasEtapa, totPlanE, totRealE } = useMemo(() => {
     // Real por concepto / etapa (USD)
     const realPorConcepto = {};
     const realPorEtapa = {};
     let totalReal = 0;
-    for (const mv of movs) {
+    for (const mv of movsReal) {
       const g = gastoUSD(mv);
       if (g <= 0) continue;
       totalReal += g;
@@ -261,38 +283,30 @@ export default function EconomicoPage() {
     const totPlanC = filasConcepto.reduce((s, f) => s + f.plan, 0);
     const totRealC = filasConcepto.reduce((s, f) => s + f.real, 0);
 
-    // El real por etapa suma los egresos de Caja imputados a la etapa MÁS el
-    // consumo neto de materiales de acopio (retiros) imputado a esa etapa.
+    // El real por etapa ya incluye el consumo de materiales (vía movsReal).
     const filasEtapa = hitos.map(h => ({
-      nombre: h.nombre, plan: Number(h.valor_plan || 0),
-      real: (realPorEtapa[h.nombre] || 0) + (realMatPorEtapa[h.nombre] || 0),
+      nombre: h.nombre, plan: Number(h.valor_plan || 0), real: realPorEtapa[h.nombre] || 0,
     }));
     const totPlanE = filasEtapa.reduce((s, f) => s + f.plan, 0);
     const totRealE = filasEtapa.reduce((s, f) => s + f.real, 0);
 
     return { filasConcepto, totPlanC, totRealC, filasEtapa, totPlanE, totRealE };
-  }, [conceptos, hitos, movs, realMatPorEtapa]);
+  }, [conceptos, hitos, movsReal]);
 
   // Egresos que componen la fila seleccionada, con su USD imputado.
   const detalleGastos = useMemo(() => {
     if (!detalle) return [];
     const nombresC = new Set(conceptos.map(c => c.nombre));
-    const deCaja = movs
+    return movsReal
       .map(mv => ({ mv, usd: gastoUSD(mv) }))
       .filter(({ mv, usd }) => {
         if (usd <= 0) return false;
         if (detalle.otros) return !mv.concepto || !nombresC.has(mv.concepto);
         if (detalle.valor == null) return !mv[detalle.campo];
         return mv[detalle.campo] === detalle.valor;
-      });
-    // En la dimensión "etapa", sumo también los retiros de materiales (neto USD).
-    const deMateriales = (detalle.campo === "etapa" && detalle.valor != null)
-      ? retirosMatDetalle
-          .filter(d => d.etapa === detalle.valor)
-          .map(d => ({ mv: { id: d.id, fecha: d.fecha, descripcion: d.descripcion, categoria: d.categoria, monto: d.monto, moneda: d.moneda, tipo_cambio_gasto: d.tc }, usd: d.usd }))
-      : [];
-    return [...deCaja, ...deMateriales].sort((a, b) => (a.mv.fecha < b.mv.fecha ? 1 : -1));
-  }, [detalle, movs, conceptos, retirosMatDetalle]);
+      })
+      .sort((a, b) => (a.mv.fecha < b.mv.fecha ? 1 : -1));
+  }, [detalle, movsReal, conceptos]);
 
   const totalDetalle = detalleGastos.reduce((s, d) => s + d.usd, 0);
 
@@ -337,10 +351,10 @@ export default function EconomicoPage() {
   // Rubro y Tipo de costo solo aplican a la Obra (conceptos con usa_etapas).
   // Para esas dimensiones, ignoramos los gastos que no son de Obra.
   const movsAnalisis = useMemo(() => {
-    if (dim !== "rubro" && dim !== "tipo_costo") return movs;
+    if (dim !== "rubro" && dim !== "tipo_costo") return movsReal;
     const obra = new Set(conceptos.filter(c => c.usa_etapas).map(c => c.nombre));
-    return movs.filter(mv => mv.concepto && obra.has(mv.concepto));
-  }, [movs, conceptos, dim]);
+    return movsReal.filter(mv => mv.concepto && obra.has(mv.concepto));
+  }, [movsReal, conceptos, dim]);
 
   // Análisis de gastos por la dimensión elegida.
   const filasAnalisis = useMemo(() => agruparPor(movsAnalisis, dim), [movsAnalisis, dim]);

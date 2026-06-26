@@ -286,6 +286,7 @@ export default function CajaPage() {
       tipo_costo: mv.tipo_costo, rubro: mv.rubro, comprobante_url: mv.comprobante_url, raw: mv,
       moneda_destino: mv.moneda_destino, monto_destino: mv.monto_destino,
       recupero_materiales: mv.recupero_materiales, cuenta_materiales_id: mv.cuenta_materiales_id,
+      anticipo_materiales: mv.anticipo_materiales,
       con_cambio: mv.con_cambio,
       cambio_moneda_origen: mv.cambio_moneda_origen,
       cambio_monto_origen: mv.cambio_monto_origen,
@@ -735,6 +736,11 @@ export default function CajaPage() {
       return (
         <Stack direction="row" spacing={0.5} alignItems="center">
           <Chip size="small" color="error" variant="outlined" icon={<ArrowDownwardIcon />} label="Egreso" />
+          {m.anticipo_materiales && (
+            <Tooltip title="Acopio de materiales (financiero; no cuenta como gasto por etapa)">
+              <Chip size="small" color="success" label="Acopio" sx={{ height: 20, "& .MuiChip-label": { px: 0.75, fontSize: 11 } }} />
+            </Tooltip>
+          )}
           {m.con_cambio && (
             <Tooltip title="Pago con cambio de moneda">
               <Box sx={{
