@@ -37,8 +37,21 @@ const desfaseTxt = (n) => {
   return n > 0 ? `+${abs} día${abs === 1 ? "" : "s"} (atraso)` : `−${abs} día${abs === 1 ? "" : "s"} (adelanto)`;
 };
 
-// Texto de una duración en días.
-const durTxt = (n) => (n == null ? "—" : `${n} día${n === 1 ? "" : "s"}`);
+// Texto de una duración en meses y semanas (1 semana = 7 días corridos, 4 semanas = 1 mes).
+// Ej.: 308 días → "11 meses"; 303 días → "10 meses y 3 semanas".
+const durTxt = (dias) => {
+  if (dias == null) return "—";
+  const neg = dias < 0;
+  const totalSem = Math.round(Math.abs(dias) / 7);
+  const meses = Math.floor(totalSem / 4);
+  const semanas = totalSem - meses * 4;
+  const partes = [];
+  if (meses > 0) partes.push(`${meses} ${meses === 1 ? "mes" : "meses"}`);
+  if (semanas > 0) partes.push(`${semanas} ${semanas === 1 ? "semana" : "semanas"}`);
+  if (!partes.length) partes.push(`${Math.abs(dias)} día${Math.abs(dias) === 1 ? "" : "s"}`);
+  const txt = partes.join(" y ");
+  return neg ? `−${txt}` : txt;
+};
 
 export default function CronogramaPage() {
   const { proyecto } = useProjects();
