@@ -37,6 +37,9 @@ const desfaseTxt = (n) => {
   return n > 0 ? `+${abs} día${abs === 1 ? "" : "s"} (atraso)` : `−${abs} día${abs === 1 ? "" : "s"} (adelanto)`;
 };
 
+// Texto de una duración en días.
+const durTxt = (n) => (n == null ? "—" : `${n} día${n === 1 ? "" : "s"}`);
+
 export default function CronogramaPage() {
   const { proyecto } = useProjects();
   const theme = useTheme();
@@ -116,8 +119,9 @@ export default function CronogramaPage() {
       // Desfase medido contra el plan YA corrido por el atraso de arriba (effPlanEnd).
       // Así una etapa que sólo hereda el atraso aguas arriba marca 0 (no lo vuelve a sumar).
       const desfase = (effPlanEnd && projEnd) ? diffDays(effPlanEnd, projEnd) : null;
-      // Sólo el atraso propio de esta etapa empuja a las siguientes (los adelantos no aceleran).
-      if (desfase != null && desfase > 0) cascada += desfase;
+      // El desfase propio de esta etapa corre a las siguientes: el atraso las empuja a la
+      // derecha y el adelanto las trae a la izquierda (las que no arrancaron pueden empezar antes).
+      if (desfase != null) cascada += desfase;
 
       // Tareas vencidas (alerta temprana): fin pasado y no finalizada.
       const vencidas = ts.filter(t => {
@@ -146,10 +150,14 @@ export default function CronogramaPage() {
     }
 
     // Proyección global de fin de obra.
+    const planIni = filas.map(f => f.planStart).filter(Boolean).reduce((m, d) => (!m || d < m ? d : m), null);
+    const projIni = filas.map(f => f.projStart).filter(Boolean).reduce((m, d) => (!m || d < m ? d : m), null);
     const planFin = filas.map(f => f.planEnd).filter(Boolean).reduce((m, d) => (!m || d > m ? d : m), null);
     const projFin = filas.map(f => f.projEnd).filter(Boolean).reduce((m, d) => (!m || d > m ? d : m), null);
+    const planDur = (planIni && planFin) ? diffDays(planIni, planFin) : null;
+    const projDur = (projIni && projFin) ? diffDays(projIni, projFin) : null;
     const atrasoTotal = (planFin && projFin) ? diffDays(planFin, projFin) : null;
-    const proyeccion = { planFin, projFin, atrasoTotal };
+    const proyeccion = { planIni, projIni, planFin, projFin, planDur, projDur, atrasoTotal };
 
     return { filas, dominio, proyeccion };
   }, [hitos, tareas]);
@@ -178,8 +186,13 @@ export default function CronogramaPage() {
           <CardContent>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2} divider={<Divider orientation={isSm ? "horizontal" : "vertical"} flexItem />}>
               <Indicador label="Fin planificado" value={fmtDate(proyeccion.planFin)} />
+              <Indicador label="Duración planificada" value={durTxt(proyeccion.planDur)} />
               <Indicador label="Fin proyectado" value={proyeccion.projFin ? fmtDate(proyeccion.projFin) : "—"}
                 color={proyeccion.atrasoTotal > 0 ? "error.main" : "success.main"} />
+              <Indicador label="Duración proyectada" value={durTxt(proyeccion.projDur)}
+                color={(proyeccion.projDur != null && proyeccion.planDur != null)
+                  ? (proyeccion.projDur > proyeccion.planDur ? "error.main" : proyeccion.projDur < proyeccion.planDur ? "success.main" : "text.primary")
+                  : "text.primary"} />
               <Indicador label="Atraso proyectado"
                 value={proyeccion.atrasoTotal != null ? desfaseTxt(proyeccion.atrasoTotal) : "—"}
                 color={proyeccion.atrasoTotal > 0 ? "error.main" : proyeccion.atrasoTotal < 0 ? "success.main" : "text.primary"} />
@@ -269,52 +282,58 @@ export default function CronogramaPage() {
                       </Box>
                     </Box>
 
-                    {/* Detalle de tareas */}
+                    {/* Detalle de tareas: una fila por tarea, nombre alineado a la izquierda
+                        y la barra pintada en la misma fila sobre el mismo eje de tiempo. */}
                     <Collapse in={abierto} unmountOnExit>
-                      <Box sx={{ pl: `${LABEL_W}px` }}>
-                        {f.ts.map((t) => {
-                          const s = pd(t.fecha_inicio), e = pd(t.fecha_fin);
-                          const est = estadoT(t);
-                          const venc = e && e < hoy0() && est !== "finalizado";
-                          return (
-                            <Box key={t.id} sx={{ display: "flex", alignItems: "center", height: 26 }}>
-                              <Box sx={{ position: "relative", flexGrow: 1, height: "100%" }}>
-                                {s && e && (
-                                  <Tooltip title={`${t.nombre}: ${fmtDate(s)} → ${fmtDate(e)}`}>
-                                    <Box sx={{
-                                      position: "absolute", left: `${pct(s)}%`, width: `${Math.max(0.7, pct(e) - pct(s))}%`,
-                                      top: 7, height: 11, borderRadius: 3,
-                                      bgcolor: fadeColor(COLOR[est] || COLOR.no_iniciado, 0.85),
-                                      outline: venc ? "2px solid #C0392B" : "none",
-                                    }} />
-                                  </Tooltip>
-                                )}
-                              </Box>
-                              <Box sx={{ width: 96, flexShrink: 0 }} />
-                            </Box>
-                          );
-                        })}
-                        <Box sx={{ display: "flex" }}>
-                          <Stack sx={{ flexGrow: 1, py: 0.5 }} spacing={0.25}>
-                            {f.ts.map((t) => {
-                              const est = estadoT(t);
-                              const venc = pd(t.fecha_fin) && pd(t.fecha_fin) < hoy0() && est !== "finalizado";
-                              return (
-                                <Stack key={t.id} direction="row" spacing={1} alignItems="center">
-                                  <Box sx={{ width: 9, height: 9, borderRadius: "50%", bgcolor: COLOR[est] || COLOR.no_iniciado, flexShrink: 0 }} />
-                                  <Typography variant="caption" sx={{ minWidth: 0 }} noWrap>{t.nombre}</Typography>
-                                  <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+                      {f.ts.map((t) => {
+                        const s = pd(t.fecha_inicio), e = pd(t.fecha_fin);
+                        const est = estadoT(t);
+                        const venc = e && e < hoy0() && est !== "finalizado";
+                        const c = COLOR[est] || COLOR.no_iniciado;
+                        return (
+                          <Box key={t.id} sx={{ display: "flex", alignItems: "center", py: 0.25 }}>
+                            {/* Etiqueta de la tarea (alineada bajo la etapa, con sangría) */}
+                            <Box sx={{ width: LABEL_W, flexShrink: 0, pl: 3, pr: 1, minWidth: 0 }}>
+                              <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
+                                <Box sx={{ width: 9, height: 9, borderRadius: "50%", bgcolor: c, flexShrink: 0 }} />
+                                <Box sx={{ minWidth: 0 }}>
+                                  <Typography variant="caption" noWrap sx={{ display: "block", fontWeight: 500, lineHeight: 1.3 }}>{t.nombre}</Typography>
+                                  <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block", fontSize: 10, lineHeight: 1.2 }}>
                                     {t.fecha_inicio ? fmtDate(t.fecha_inicio) : "—"} → {t.fecha_fin ? fmtDate(t.fecha_fin) : "—"}
                                   </Typography>
-                                  {venc && <Chip size="small" color="error" variant="outlined" label="Vencida" sx={{ height: 18 }} />}
-                                </Stack>
-                              );
-                            })}
-                            {f.ts.length === 0 && <Typography variant="caption" color="text.secondary">Sin tareas cargadas.</Typography>}
-                          </Stack>
-                          <Box sx={{ width: 96, flexShrink: 0 }} />
+                                </Box>
+                              </Stack>
+                            </Box>
+                            {/* Track con la barra de la tarea, sobre el mismo eje que la etapa */}
+                            <Box sx={{ position: "relative", flexGrow: 1, height: 24 }}>
+                              {hoyPct != null && (
+                                <Box sx={{ position: "absolute", left: `${hoyPct}%`, top: 0, bottom: 0, width: "2px", bgcolor: "rgba(192,57,43,0.4)", zIndex: 2 }} />
+                              )}
+                              {s && e && (
+                                <Tooltip title={`${t.nombre}: ${fmtDate(s)} → ${fmtDate(e)}`}>
+                                  <Box sx={{
+                                    position: "absolute", left: `${pct(s)}%`, width: `${Math.max(0.7, pct(e) - pct(s))}%`,
+                                    top: 7, height: 10, borderRadius: 3,
+                                    bgcolor: fadeColor(c, 0.85),
+                                    outline: venc ? "2px solid #C0392B" : "none",
+                                  }} />
+                                </Tooltip>
+                              )}
+                            </Box>
+                            {/* Estado / vencida */}
+                            <Box sx={{ width: 96, flexShrink: 0, display: "flex", justifyContent: "flex-end", pl: 1 }}>
+                              {venc && <Chip size="small" color="error" variant="outlined" label="Vencida" sx={{ height: 18 }} />}
+                            </Box>
+                          </Box>
+                        );
+                      })}
+                      {f.ts.length === 0 && (
+                        <Box sx={{ display: "flex", py: 0.5 }}>
+                          <Box sx={{ width: LABEL_W, flexShrink: 0, pl: 3 }}>
+                            <Typography variant="caption" color="text.secondary">Sin tareas cargadas.</Typography>
+                          </Box>
                         </Box>
-                      </Box>
+                      )}
                     </Collapse>
                   </Box>
                 );
