@@ -16,7 +16,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTheme, alpha } from "@mui/material/styles";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
-import { fmtDate } from "@/components/Money";
+import { fmtDate, fmtDuracion } from "@/components/Money";
 import { getCache, setCache } from "@/lib/dataCache";
 import { printDocument, esc } from "@/lib/printPdf";
 
@@ -386,12 +386,12 @@ export default function LineaTiempoPage() {
 
   // Fechas reales del proyecto a partir de las cargadas en cada etapa:
   // inicio real = primera fecha de inicio; fin real = última fecha de fin.
-  const { inicioReal, finReal, mesesReal } = useMemo(() => {
+  const { inicioReal, finReal } = useMemo(() => {
     const inicios = hitos.map(h => h.fecha_estimada).filter(Boolean);
     const fines = hitos.map(h => h.fecha_real).filter(Boolean);
     const inicioReal = inicios.length ? inicios.reduce((m, d) => (d < m ? d : m)) : null;
     const finReal = fines.length ? fines.reduce((m, d) => (d > m ? d : m)) : null;
-    return { inicioReal, finReal, mesesReal: mesesEntre(inicioReal, finReal) };
+    return { inicioReal, finReal };
   }, [hitos]);
 
   const seedDefault = async () => {
@@ -581,11 +581,11 @@ export default function LineaTiempoPage() {
                   <Typography variant="caption" color="text.secondary">Fin real</Typography>
                   <Typography variant="h6" sx={{ fontVariantNumeric: "tabular-nums" }}>{fmtDate(finReal)}</Typography>
                 </Box>
-                {mesesReal != null && (
+                {(inicioReal && finReal) && (
                   <Box>
                     <Typography variant="caption" color="text.secondary">Duración</Typography>
                     <Typography variant="h6" color="secondary.main" fontWeight={700}>
-                      {mesesReal} {mesesReal === 1 ? "mes" : "meses"}
+                      {fmtDuracion(inicioReal, finReal)}
                     </Typography>
                   </Box>
                 )}

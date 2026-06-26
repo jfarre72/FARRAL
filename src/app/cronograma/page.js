@@ -8,7 +8,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
-import { fmtDate } from "@/components/Money";
+import { fmtDate, fmtDuracion } from "@/components/Money";
 
 // ---- Utilidades de fecha ----
 const MS_DAY = 86400000;
@@ -37,21 +37,6 @@ const desfaseTxt = (n) => {
   return n > 0 ? `+${abs} día${abs === 1 ? "" : "s"} (atraso)` : `−${abs} día${abs === 1 ? "" : "s"} (adelanto)`;
 };
 
-// Texto de una duración en meses y semanas (1 semana = 7 días corridos, 4 semanas = 1 mes).
-// Ej.: 308 días → "11 meses"; 303 días → "10 meses y 3 semanas".
-const durTxt = (dias) => {
-  if (dias == null) return "—";
-  const neg = dias < 0;
-  const totalSem = Math.round(Math.abs(dias) / 7);
-  const meses = Math.floor(totalSem / 4);
-  const semanas = totalSem - meses * 4;
-  const partes = [];
-  if (meses > 0) partes.push(`${meses} ${meses === 1 ? "mes" : "meses"}`);
-  if (semanas > 0) partes.push(`${semanas} ${semanas === 1 ? "semana" : "semanas"}`);
-  if (!partes.length) partes.push(`${Math.abs(dias)} día${Math.abs(dias) === 1 ? "" : "s"}`);
-  const txt = partes.join(" y ");
-  return neg ? `−${txt}` : txt;
-};
 
 export default function CronogramaPage() {
   const { proyecto } = useProjects();
@@ -199,10 +184,10 @@ export default function CronogramaPage() {
           <CardContent>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2} divider={<Divider orientation={isSm ? "horizontal" : "vertical"} flexItem />}>
               <Indicador label="Fin planificado" value={fmtDate(proyeccion.planFin)} />
-              <Indicador label="Duración planificada" value={durTxt(proyeccion.planDur)} />
+              <Indicador label="Duración planificada" value={fmtDuracion(proyeccion.planIni, proyeccion.planFin)} />
               <Indicador label="Fin proyectado" value={proyeccion.projFin ? fmtDate(proyeccion.projFin) : "—"}
                 color={proyeccion.atrasoTotal > 0 ? "error.main" : "success.main"} />
-              <Indicador label="Duración proyectada" value={durTxt(proyeccion.projDur)}
+              <Indicador label="Duración proyectada" value={fmtDuracion(proyeccion.projIni, proyeccion.projFin)}
                 color={(proyeccion.projDur != null && proyeccion.planDur != null)
                   ? (proyeccion.projDur > proyeccion.planDur ? "error.main" : proyeccion.projDur < proyeccion.planDur ? "success.main" : "text.primary")
                   : "text.primary"} />
