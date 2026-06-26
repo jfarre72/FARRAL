@@ -16,6 +16,7 @@ import InsightsIcon from "@mui/icons-material/Insights";
 import AccountTreeIcon from "@mui/icons-material/AccountTree";
 import HandymanIcon from "@mui/icons-material/Handyman";
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
+import StackedBarChartIcon from "@mui/icons-material/StackedBarChart";
 import PhotoLibraryIcon from "@mui/icons-material/PhotoLibrary";
 import DescriptionIcon from "@mui/icons-material/Description";
 import FolderOpenIcon from "@mui/icons-material/FolderOpen";
@@ -40,6 +41,7 @@ const NAV = [
   ]},
   { section: "Obra", items: [
     { label: "Planificación",   href: "/linea-tiempo",  icon: <TimelineIcon /> },
+    { label: "Cronograma",      href: "/cronograma",    icon: <StackedBarChartIcon /> },
     { label: "Diario",          href: "/seguimiento-diario", icon: <CalendarMonthIcon /> },
     { label: "Tareas",          href: "/temas",         icon: <ChecklistIcon /> },
     { label: "Equipamientos",   href: "/equipamientos", icon: <HandymanIcon /> },

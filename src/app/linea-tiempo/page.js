@@ -80,6 +80,7 @@ function fade(hex, a) {
 // Estados de una tarea (reemplazan al simple "completado").
 const ESTADOS = [
   { value: "no_iniciado", label: "No iniciado", color: "default" },
+  { value: "planificado", label: "Planificado", color: "info" },
   { value: "en_curso",    label: "En curso",    color: "warning" },
   { value: "finalizado",  label: "Finalizado",  color: "success" },
 ];
@@ -423,6 +424,11 @@ export default function LineaTiempoPage() {
     const patch = { estado };
     if (estado === "no_iniciado") {
       patch.completado = false; patch.avance = 0; patch.completado_at = null;
+    } else if (estado === "planificado") {
+      // Habilita planificar las fechas reales (inicio y fin) antes de arrancar.
+      patch.completado = false; patch.avance = 0; patch.completado_at = null;
+      if (!t.fecha_inicio) patch.fecha_inicio = hoy;
+      if (!t.fecha_fin) patch.fecha_fin = hoy;
     } else if (estado === "en_curso") {
       patch.completado = false;
       if ((t.avance ?? 0) >= 100) patch.avance = 50;
@@ -810,7 +816,7 @@ export default function LineaTiempoPage() {
                                   )}
                                 </Box>
                                 <Box sx={{ width: DATE_W }}>
-                                  {est === "finalizado" && (
+                                  {est !== "no_iniciado" && (
                                     <DateField
                                       label="Fin" size="small" fullWidth
                                       value={t.fecha_fin ?? ""}
