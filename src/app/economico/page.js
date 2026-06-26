@@ -90,6 +90,7 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick }) {
                 <TableCell align="right">% del plan</TableCell>
                 <TableCell align="right">Real (USD)</TableCell>
                 <TableCell align="right">% del real</TableCell>
+                <TableCell align="right">Diferencia (USD)</TableCell>
                 <TableCell align="right">%</TableCell>
                 <TableCell sx={{ width: 140 }}>Avance</TableCell>
               </TableRow>
@@ -121,6 +122,11 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick }) {
                       <Typography variant="body2" color="text.secondary">{pctReal != null ? fmtPct(pctReal, 0) : "—"}</Typography>
                     </TableCell>
                     <TableCell align="right">
+                      <Typography variant="body2" color={(f.plan - f.real) < 0 ? "error.main" : "success.main"}>
+                        {fmtMoney(f.plan - f.real, "USD")}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right">
                       <Typography variant="body2" color={pct != null && pct > 100 ? "error.main" : "text.primary"}>
                         {pct != null ? fmtPct(pct, 0) : "—"}
                       </Typography>
@@ -135,6 +141,7 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick }) {
                 <TableCell align="right"><Typography fontWeight={700}>{totalPlan > 0 ? "100%" : "—"}</Typography></TableCell>
                 <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totalReal, "USD")}</Typography></TableCell>
                 <TableCell align="right"><Typography fontWeight={700}>{totalReal > 0 ? "100%" : "—"}</Typography></TableCell>
+                <TableCell align="right"><Typography fontWeight={700} color={(totalPlan - totalReal) < 0 ? "error.main" : "success.main"}>{fmtMoney(totalPlan - totalReal, "USD")}</Typography></TableCell>
                 <TableCell align="right"><Typography fontWeight={700}>{pctTot != null ? fmtPct(pctTot, 0) : "—"}</Typography></TableCell>
                 <TableCell><Barra pct={pctTot ?? 0} /></TableCell>
               </TableRow>
