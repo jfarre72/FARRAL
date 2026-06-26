@@ -334,6 +334,7 @@ export default function MaterialesPage() {
 
   // ---- Anticipos (acopios sucesivos de una cuenta) ----
   const [nuevoAnticipo, setNuevoAnticipo] = useState({}); // { [cuentaId]: { monto, fecha } }
+  const [editAnt, setEditAnt] = useState(null); // anticipo en edición
   const setAnt = (cuentaId, patch) =>
     setNuevoAnticipo(prev => ({ ...prev, [cuentaId]: { monto: "", tc: "", fecha: hoyISO(), ...prev[cuentaId], ...patch } }));
   const addAnticipo = async (cuentaId) => {
@@ -343,13 +344,27 @@ export default function MaterialesPage() {
     const c = cuentas.find(x => x.id === cuentaId);
     const tc = Number(parseMiles(f.tc ?? "")) || 0;
     if (esARS(c) && tc <= 0) { alert("Ingresá el tipo de cambio del acopio (ARS por 1 USD)."); return; }
-    const { error } = await supabase.from("anticipos_materiales").insert({
-      cuenta_id: cuentaId, monto, fecha: f.fecha || hoyISO(),
-      tipo_cambio: esARS(c) ? tc : null,
-    });
+    const datos = { monto, fecha: f.fecha || hoyISO(), tipo_cambio: esARS(c) ? tc : null };
+    const editing = editAnt && editAnt.cuenta_id === cuentaId;
+    const { error } = editing
+      ? await supabase.from("anticipos_materiales").update(datos).eq("id", editAnt.id)
+      : await supabase.from("anticipos_materiales").insert({ cuenta_id: cuentaId, ...datos });
     if (error) { alert(error.message); return; }
+    setEditAnt(null);
     setNuevoAnticipo(prev => ({ ...prev, [cuentaId]: { monto: "", tc: "", fecha: hoyISO() } }));
     reload();
+  };
+  const startEditAnticipo = (a) => {
+    setEditAnt(a);
+    setNuevoAnticipo(prev => ({ ...prev, [a.cuenta_id]: {
+      monto: a.monto != null ? String(a.monto) : "",
+      tc: a.tipo_cambio != null ? String(a.tipo_cambio) : "",
+      fecha: a.fecha || hoyISO(),
+    } }));
+  };
+  const cancelEditAnticipo = (cuentaId) => {
+    setEditAnt(null);
+    setNuevoAnticipo(prev => ({ ...prev, [cuentaId]: { monto: "", tc: "", fecha: hoyISO() } }));
   };
   const delAnticipo = async (a) => {
     if (!confirm("¿Eliminar este anticipo?")) return;
@@ -361,6 +376,7 @@ export default function MaterialesPage() {
   // Se guarda como un anticipo más (suma al saldo) marcado es_devolucion, con el
   // detalle de pallets / bolsones devueltos para descontar el pendiente a recuperar.
   const [nuevaDevolucion, setNuevaDevolucion] = useState({}); // { [cuentaId]: { fecha, items: [...] } }
+  const [editDev, setEditDev] = useState(null); // devolución en edición
   const setDev = (cuentaId, patch) =>
     setNuevaDevolucion(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), items: [emptyRecItem()], ...prev[cuentaId], ...patch } }));
   const devItemsDe = (cuentaId) => {
@@ -399,19 +415,44 @@ export default function MaterialesPage() {
         const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
         comprobante_url = pub.publicUrl; comprobante_path = path;
       }
-      const { error } = await supabase.from("anticipos_materiales").insert({
-        cuenta_id: cuentaId, monto: total, fecha: f.fecha || hoyISO(),
+      const datos = {
+        monto: total, fecha: f.fecha || hoyISO(),
         descripcion: "Devolución de material a saldo",
         remito_nro: (f.remito_nro || "").trim() || null,
         es_devolucion: true, rec_items: items, rec_pallets: pallets, rec_bolsones: bolsones,
-        comprobante_url, comprobante_path,
-      });
+      };
+      const editing = editDev && editDev.cuenta_id === cuentaId;
+      let error;
+      if (editing) {
+        if (f.file) {
+          if (editDev.comprobante_path) await supabase.storage.from(BUCKET).remove([editDev.comprobante_path]);
+          datos.comprobante_url = comprobante_url; datos.comprobante_path = comprobante_path;
+        }
+        ({ error } = await supabase.from("anticipos_materiales").update(datos).eq("id", editDev.id));
+      } else {
+        ({ error } = await supabase.from("anticipos_materiales").insert({ cuenta_id: cuentaId, comprobante_url, comprobante_path, ...datos }));
+      }
       if (error) { alert(error.message); return; }
+      setEditDev(null);
       setNuevaDevolucion(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), items: [emptyRecItem()], remito_nro: "", file: null } }));
       reload();
     } finally {
       setSubiendoDev(null);
     }
+  };
+  const startEditDevolucion = (a) => {
+    setEditDev(a);
+    const its = Array.isArray(a.rec_items) && a.rec_items.length ? a.rec_items : [emptyRecItem()];
+    setNuevaDevolucion(prev => ({ ...prev, [a.cuenta_id]: {
+      fecha: a.fecha || hoyISO(),
+      remito_nro: a.remito_nro || "",
+      file: null,
+      items: its.map(it => ({ unidad: it.unidad || "pallet", cantidad: String(it.cantidad ?? ""), precio: it.precio != null ? String(it.precio) : "" })),
+    } }));
+  };
+  const cancelEditDevolucion = (cuentaId) => {
+    setEditDev(null);
+    setNuevaDevolucion(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), items: [emptyRecItem()], remito_nro: "", file: null } }));
   };
   const delDevolucion = async (a) => {
     if (!confirm("¿Eliminar esta devolución a saldo?")) return;
@@ -428,8 +469,30 @@ export default function MaterialesPage() {
   };
 
   // ---- Retiro ----
+  const [editRet, setEditRet] = useState(null); // retiro en edición
   const setRet = (cuentaId, patch) =>
     setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", file: null, recupero_items: [emptyRecItem()], ...prev[cuentaId], ...patch } }));
+  const startEditRetiro = (r) => {
+    setEditRet(r);
+    const its = itemsRecupero(r);
+    setNuevoRetiro(prev => ({ ...prev, [r.cuenta_id]: {
+      fecha: r.fecha || hoyISO(),
+      descripcion: r.descripcion || "",
+      monto: r.monto != null ? String(r.monto) : "",
+      remito_nro: r.remito_nro || "",
+      etapa: r.etapa || "",
+      tc: r.tipo_cambio != null ? String(r.tipo_cambio) : "",
+      file: null,
+      recupero: !!r.recupero,
+      recupero_items: r.recupero && its.length
+        ? its.map(it => ({ unidad: it.unidad, cantidad: String(it.cantidad ?? ""), precio: it.precio != null ? String(it.precio) : "" }))
+        : [emptyRecItem()],
+    } }));
+  };
+  const cancelEditRetiro = (cuentaId) => {
+    setEditRet(null);
+    setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", remito_nro: "", etapa: "", tc: "", file: null, recupero: false, recupero_items: [emptyRecItem()] } }));
+  };
 
   // ---- Ítems de recupero del retiro en curso ----
   const recItemsDe = (cuentaId) => {
@@ -476,21 +539,33 @@ export default function MaterialesPage() {
       const tcRet = esARS(c)
         ? (Number(parseMiles(f.tc ?? "")) || ultimoTcDe(cuentaId) || tcDe(c) || null)
         : null;
-      const { error } = await supabase.from("retiros_materiales").insert({
-        cuenta_id: cuentaId,
+      const datos = {
         fecha: f.fecha || hoyISO(),
         descripcion: (f.descripcion || "").trim() || null,
         remito_nro: (f.remito_nro || "").trim() || null,
         etapa: f.etapa || null,
         tipo_cambio: tcRet,
-        monto, remito_url, remito_path,
+        monto,
         recupero: recupero && items.length > 0,
         recupero_items: recupero && items.length > 0 ? items : null,
         recupero_total: recupero && items.length > 0 ? recuperoTotal : null,
         // columnas planas V27 en null: ya se usa recupero_items
         recupero_unidad: null, recupero_cantidad: null, recupero_precio: null,
-      });
+      };
+      const editing = editRet && editRet.cuenta_id === cuentaId;
+      let error;
+      if (editing) {
+        // Si subí un remito nuevo, reemplazo (y borro el anterior); si no, lo conservo.
+        if (f.file) {
+          if (editRet.remito_path) await supabase.storage.from(BUCKET).remove([editRet.remito_path]);
+          datos.remito_url = remito_url; datos.remito_path = remito_path;
+        }
+        ({ error } = await supabase.from("retiros_materiales").update(datos).eq("id", editRet.id));
+      } else {
+        ({ error } = await supabase.from("retiros_materiales").insert({ cuenta_id: cuentaId, remito_url, remito_path, ...datos }));
+      }
       if (error) { alert(error.message); setSubiendo(null); return; }
+      setEditRet(null);
       setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", remito_nro: "", etapa: "", tc: "", file: null, recupero: false, recupero_items: [emptyRecItem()] } }));
       reload();
     } finally {
@@ -714,10 +789,16 @@ export default function MaterialesPage() {
                       </Grid>
                     )}
                     <Grid item xs={esARS(c) ? 6 : 12} sm={esARS(c) ? 4 : 4}>
-                      <Button variant="outlined" color="secondary" fullWidth size="small" startIcon={<AddIcon />}
-                        onClick={() => addAnticipo(c.id)}>
-                        Sumar anticipo
-                      </Button>
+                      <Stack direction="row" spacing={1}>
+                        <Button variant="outlined" color="secondary" fullWidth size="small"
+                          startIcon={editAnt && editAnt.cuenta_id === c.id ? <EditIcon /> : <AddIcon />}
+                          onClick={() => addAnticipo(c.id)}>
+                          {editAnt && editAnt.cuenta_id === c.id ? "Guardar" : "Sumar anticipo"}
+                        </Button>
+                        {editAnt && editAnt.cuenta_id === c.id && (
+                          <Button size="small" onClick={() => cancelEditAnticipo(c.id)}>Cancelar</Button>
+                        )}
+                      </Stack>
                     </Grid>
                   </Grid>
                   {/* Detalle de anticipos abajo (por fecha) */}
@@ -737,11 +818,24 @@ export default function MaterialesPage() {
                             <Typography variant="body2" sx={{ flex: 1, fontWeight: 600, color: "#1E8E3E" }}>{fmtMoney(a.monto, c.moneda)}</Typography>
                             {esARS(c) && <Typography variant="body2" sx={{ width: 80, textAlign: "right", color: "text.secondary" }}>{Number(a.tipo_cambio || 0) > 0 ? fmtNum0(a.tipo_cambio) : "—"}</Typography>}
                             {esARS(c) && <Typography variant="body2" sx={{ width: 110, textAlign: "right", color: "text.secondary" }}>{Number(a.tipo_cambio || 0) > 0 ? fmtMoney(Number(a.monto || 0) / Number(a.tipo_cambio), "USD") : "—"}</Typography>}
-                            <Tooltip title="Eliminar anticipo"><span>
-                              <IconButton size="small" disabled={ant.length === 1} onClick={() => delAnticipo(a)}>
-                                <DeleteOutlineIcon fontSize="small" />
-                              </IconButton>
-                            </span></Tooltip>
+                            {a.movimiento_id ? (
+                              <Tooltip title="Acopio generado desde Caja; editalo o eliminalo desde el movimiento de Caja">
+                                <Chip size="small" variant="outlined" label="Caja" sx={{ height: 22 }} />
+                              </Tooltip>
+                            ) : (
+                              <>
+                                <Tooltip title="Editar anticipo">
+                                  <IconButton size="small" onClick={() => startEditAnticipo(a)}>
+                                    <EditIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                                <Tooltip title="Eliminar anticipo"><span>
+                                  <IconButton size="small" disabled={ant.length === 1} onClick={() => delAnticipo(a)}>
+                                    <DeleteOutlineIcon fontSize="small" />
+                                  </IconButton>
+                                </span></Tooltip>
+                              </>
+                            )}
                           </Stack>
                         ))}
                       </Stack>
@@ -759,7 +853,14 @@ export default function MaterialesPage() {
 
                   {/* Input arriba: nuevo retiro */}
                   <Box sx={{ p: 1.5, borderRadius: 2, border: "1px dashed", borderColor: "divider", bgcolor: "rgba(255,255,255,0.6)" }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5, display: "block", mb: 1 }}>Nuevo retiro</Typography>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5 }}>
+                      {editRet && editRet.cuenta_id === c.id ? "Editar retiro" : "Nuevo retiro"}
+                    </Typography>
+                    {editRet && editRet.cuenta_id === c.id && (
+                      <Button size="small" onClick={() => cancelEditRetiro(c.id)}>Cancelar edición</Button>
+                    )}
+                  </Stack>
                   <Grid container spacing={1.5} alignItems="center">
                     <Grid item xs={6} sm={2}>
                       <TextField type="date" label="Fecha" InputLabelProps={{ shrink: true }} fullWidth size="small"
@@ -789,7 +890,7 @@ export default function MaterialesPage() {
                     <Grid item xs={4} sm={1.5}>
                       <Button variant="contained" color="secondary" fullWidth size="small"
                         disabled={subiendo === c.id} onClick={() => addRetiro(c.id)}>
-                        {subiendo === c.id ? "…" : "Agregar"}
+                        {subiendo === c.id ? "…" : (editRet && editRet.cuenta_id === c.id ? "Guardar" : "Agregar")}
                       </Button>
                     </Grid>
                     {/* Segunda fila: etapa de consumo + TC + neto USD imputado */}
@@ -986,6 +1087,7 @@ export default function MaterialesPage() {
                                 : <Typography variant="body2" color="text.disabled">—</Typography>}
                             </TableCell>
                             <TableCell align="right">
+                              <Tooltip title="Editar retiro"><IconButton size="small" onClick={() => startEditRetiro(r)}><EditIcon fontSize="small" /></IconButton></Tooltip>
                               <Tooltip title="Eliminar retiro"><IconButton size="small" onClick={() => delRetiro(r)}><DeleteOutlineIcon fontSize="small" /></IconButton></Tooltip>
                             </TableCell>
                           </TableRow>
@@ -1088,9 +1190,12 @@ export default function MaterialesPage() {
                                   {fmtMoney(granTotal, c.moneda)}
                                 </Typography>
                               </Typography>
+                              {editDev && editDev.cuenta_id === c.id && (
+                                <Button size="small" onClick={() => cancelEditDevolucion(c.id)}>Cancelar</Button>
+                              )}
                               <Button variant="contained" size="small" sx={{ bgcolor: "#8E44AD", "&:hover": { bgcolor: "#763a92" } }}
                                 disabled={subiendoDev === c.id} onClick={() => addDevolucion(c.id)}>
-                                {subiendoDev === c.id ? "…" : "Registrar devolución"}
+                                {subiendoDev === c.id ? "…" : (editDev && editDev.cuenta_id === c.id ? "Guardar" : "Registrar devolución")}
                               </Button>
                             </Stack>
                           </Stack>
@@ -1135,6 +1240,7 @@ export default function MaterialesPage() {
                                   : <Typography variant="body2" color="text.disabled">—</Typography>}
                               </TableCell>
                               <TableCell align="right">
+                                <Tooltip title="Editar devolución"><IconButton size="small" onClick={() => startEditDevolucion(a)}><EditIcon fontSize="small" /></IconButton></Tooltip>
                                 <Tooltip title="Eliminar devolución"><IconButton size="small" onClick={() => delDevolucion(a)}><DeleteOutlineIcon fontSize="small" /></IconButton></Tooltip>
                               </TableCell>
                             </TableRow>
