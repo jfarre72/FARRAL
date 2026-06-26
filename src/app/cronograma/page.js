@@ -116,7 +116,7 @@ export default function CronogramaPage() {
         projEnd = start ? addDays(start, planDur) : null;
       }
 
-      const desfase = (effPlanEnd && projEnd) ? diffDays(effPlanEnd, projEnd) : null;
+      const desfase = (planEnd && projEnd) ? diffDays(planEnd, projEnd) : null;
       // Sólo los atrasos empujan a las siguientes (los adelantos no aceleran).
       if (desfase != null && desfase > 0) cascada += desfase;
 
