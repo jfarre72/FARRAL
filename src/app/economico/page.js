@@ -149,6 +149,10 @@ export default function EconomicoPage() {
   const [conceptos, setConceptos] = useState(cacheInit?.conceptos ?? []);
   const [hitos, setHitos] = useState(cacheInit?.hitos ?? []);
   const [movs, setMovs] = useState(cacheInit?.movs ?? []);
+  // Materiales de acopio: el consumo se imputa por etapa en los retiros (neto en USD).
+  const [cuentasMat, setCuentasMat] = useState(cacheInit?.cuentasMat ?? []);
+  const [anticiposMat, setAnticiposMat] = useState(cacheInit?.anticiposMat ?? []);
+  const [retirosMat, setRetirosMat] = useState(cacheInit?.retirosMat ?? []);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState(0);
   const [dim, setDim] = useState("tipo_costo"); // dimensión del análisis de gastos
@@ -160,16 +164,75 @@ export default function EconomicoPage() {
     if (!proyecto) return;
     const cached = getCache("economico", proyecto.id);
     setLoading(!cached);
-    const [{ data: cs }, { data: hs }, { data: mv }] = await Promise.all([
+    const [{ data: cs }, { data: hs }, { data: mv }, { data: cm }] = await Promise.all([
       supabase.from("conceptos").select("*").eq("proyecto_id", proyecto.id).order("orden"),
       supabase.from("hitos").select("*").eq("proyecto_id", proyecto.id).order("orden"),
       supabase.from("movimientos_caja").select("*").eq("proyecto_id", proyecto.id),
+      supabase.from("cuentas_materiales").select("id,proveedor,moneda").eq("proyecto_id", proyecto.id),
     ]);
-    setCache("economico", proyecto.id, { conceptos: cs ?? [], hitos: hs ?? [], movs: mv ?? [] });
+    const matIds = (cm ?? []).map(c => c.id);
+    let am = [], rm = [];
+    if (matIds.length) {
+      const [{ data: a }, { data: r }] = await Promise.all([
+        supabase.from("anticipos_materiales").select("cuenta_id,monto,tipo_cambio,es_devolucion").in("cuenta_id", matIds),
+        supabase.from("retiros_materiales").select("cuenta_id,fecha,descripcion,monto,etapa,tipo_cambio,recupero,recupero_items,recupero_total").in("cuenta_id", matIds),
+      ]);
+      am = a ?? []; rm = r ?? [];
+    }
+    setCache("economico", proyecto.id, { conceptos: cs ?? [], hitos: hs ?? [], movs: mv ?? [], cuentasMat: cm ?? [], anticiposMat: am, retirosMat: rm });
     setConceptos(cs ?? []); setHitos(hs ?? []); setMovs(mv ?? []);
+    setCuentasMat(cm ?? []); setAnticiposMat(am); setRetirosMat(rm);
     setLoading(false);
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
+
+  // Gasto real de materiales de acopio por etapa (USD neto). Cada anticipo
+  // congela su TC; el dólar de la cuenta es el promedio ponderado de sus
+  // anticipos reales. Cada retiro imputa su neto (monto − recupero) a su etapa.
+  const { realMatPorEtapa, retirosMatDetalle } = useMemo(() => {
+    const byCuenta = {};
+    for (const c of cuentasMat) byCuenta[c.id] = c;
+    const arsAcc = {}, usdAcc = {};
+    for (const a of anticiposMat) {
+      if (a.es_devolucion) continue;
+      const c = byCuenta[a.cuenta_id];
+      if (!c || (c.moneda || "ARS") !== "ARS") continue;
+      const tc = Number(a.tipo_cambio || 0), m = Number(a.monto || 0);
+      if (tc > 0 && m > 0) { arsAcc[a.cuenta_id] = (arsAcc[a.cuenta_id] || 0) + m; usdAcc[a.cuenta_id] = (usdAcc[a.cuenta_id] || 0) + m / tc; }
+    }
+    const tcByCuenta = {};
+    for (const id in arsAcc) tcByCuenta[id] = usdAcc[id] > 0 ? arsAcc[id] / usdAcc[id] : null;
+    const usdDe = (c, monto, tc) => {
+      if (!c || (c.moneda || "ARS") !== "ARS") return Number(monto || 0);
+      const t = Number(tc || 0) > 0 ? Number(tc) : tcByCuenta[c.id];
+      return t > 0 ? Number(monto || 0) / t : 0;
+    };
+    const recOf = (r) => {
+      if (!r.recupero) return 0;
+      if (Array.isArray(r.recupero_items) && r.recupero_items.length) {
+        return r.recupero_items.reduce((s, it) => s + Number(it.total != null ? it.total : Number(it.cantidad || 0) * Number(it.precio || 0)), 0);
+      }
+      return Number(r.recupero_total || 0);
+    };
+    const real = {};
+    const det = [];
+    for (const r of retirosMat) {
+      const c = byCuenta[r.cuenta_id];
+      if (!c) continue;
+      const neto = Number(r.monto || 0) - recOf(r);
+      const usd = usdDe(c, neto, r.tipo_cambio);
+      if (!usd) continue;
+      if (r.etapa) real[r.etapa] = (real[r.etapa] || 0) + usd;
+      det.push({
+        id: "ret_" + (r.id ?? `${r.cuenta_id}_${r.fecha}_${r.monto}`),
+        fecha: r.fecha, etapa: r.etapa || null,
+        descripcion: `Materiales · ${c.proveedor}${r.descripcion ? ` · ${r.descripcion}` : ""}`,
+        categoria: "Materiales", monto: neto, moneda: c.moneda,
+        tc: Number(r.tipo_cambio || 0), usd,
+      });
+    }
+    return { realMatPorEtapa: real, retirosMatDetalle: det };
+  }, [cuentasMat, anticiposMat, retirosMat]);
 
   const { filasConcepto, totPlanC, totRealC, filasEtapa, totPlanE, totRealE } = useMemo(() => {
     // Real por concepto / etapa (USD)
@@ -198,29 +261,38 @@ export default function EconomicoPage() {
     const totPlanC = filasConcepto.reduce((s, f) => s + f.plan, 0);
     const totRealC = filasConcepto.reduce((s, f) => s + f.real, 0);
 
+    // El real por etapa suma los egresos de Caja imputados a la etapa MÁS el
+    // consumo neto de materiales de acopio (retiros) imputado a esa etapa.
     const filasEtapa = hitos.map(h => ({
-      nombre: h.nombre, plan: Number(h.valor_plan || 0), real: realPorEtapa[h.nombre] || 0,
+      nombre: h.nombre, plan: Number(h.valor_plan || 0),
+      real: (realPorEtapa[h.nombre] || 0) + (realMatPorEtapa[h.nombre] || 0),
     }));
     const totPlanE = filasEtapa.reduce((s, f) => s + f.plan, 0);
     const totRealE = filasEtapa.reduce((s, f) => s + f.real, 0);
 
     return { filasConcepto, totPlanC, totRealC, filasEtapa, totPlanE, totRealE };
-  }, [conceptos, hitos, movs]);
+  }, [conceptos, hitos, movs, realMatPorEtapa]);
 
   // Egresos que componen la fila seleccionada, con su USD imputado.
   const detalleGastos = useMemo(() => {
     if (!detalle) return [];
     const nombresC = new Set(conceptos.map(c => c.nombre));
-    return movs
+    const deCaja = movs
       .map(mv => ({ mv, usd: gastoUSD(mv) }))
       .filter(({ mv, usd }) => {
         if (usd <= 0) return false;
         if (detalle.otros) return !mv.concepto || !nombresC.has(mv.concepto);
         if (detalle.valor == null) return !mv[detalle.campo];
         return mv[detalle.campo] === detalle.valor;
-      })
-      .sort((a, b) => (a.mv.fecha < b.mv.fecha ? 1 : -1));
-  }, [detalle, movs, conceptos]);
+      });
+    // En la dimensión "etapa", sumo también los retiros de materiales (neto USD).
+    const deMateriales = (detalle.campo === "etapa" && detalle.valor != null)
+      ? retirosMatDetalle
+          .filter(d => d.etapa === detalle.valor)
+          .map(d => ({ mv: { id: d.id, fecha: d.fecha, descripcion: d.descripcion, categoria: d.categoria, monto: d.monto, moneda: d.moneda, tipo_cambio_gasto: d.tc }, usd: d.usd }))
+      : [];
+    return [...deCaja, ...deMateriales].sort((a, b) => (a.mv.fecha < b.mv.fecha ? 1 : -1));
+  }, [detalle, movs, conceptos, retirosMatDetalle]);
 
   const totalDetalle = detalleGastos.reduce((s, d) => s + d.usd, 0);
 
@@ -333,6 +405,9 @@ export default function EconomicoPage() {
             El “real” se imputa siempre en USD: los gastos en USD por su monto, y los gastos en ARS convertidos por el
             tipo de cambio (el del cambio integrado, o el tipo de cambio cargado al registrar el pago en pesos).
             Un gasto en ARS sin tipo de cambio cargado no se puede valuar y no impacta en el total.
+            En “Por etapa”, el real suma además el consumo de materiales de acopio: cada retiro imputa su neto
+            (monto − recupero) en USD al dólar congelado del acopio. El egreso de acopio en Caja no lleva etapa
+            para no duplicar.
           </Typography>
         </Stack>
       )}
