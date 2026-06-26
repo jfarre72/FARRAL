@@ -256,6 +256,26 @@ export default function EconomicoPage() {
     return [...movs, ...mat];
   }, [movs, retirosMatDetalle, obraConcepto]);
 
+  // Acopio total (USD) vs lo ya retirado (USD): el acopio sale de Caja pero no
+  // se cuenta como gasto; la diferencia con lo retirado es acopio sin consumir.
+  const acopioInfo = useMemo(() => {
+    const byCuenta = {};
+    for (const c of cuentasMat) byCuenta[c.id] = c;
+    let acopioUSD = 0;
+    for (const a of anticiposMat) {
+      if (a.es_devolucion) continue;
+      const c = byCuenta[a.cuenta_id];
+      if (!c) continue;
+      const m = Number(a.monto || 0);
+      if ((c.moneda || "ARS") === "ARS") {
+        const tc = Number(a.tipo_cambio || 0);
+        acopioUSD += tc > 0 ? m / tc : 0;
+      } else acopioUSD += m;
+    }
+    const retiroUSD = retirosMatDetalle.reduce((s, d) => s + d.usd, 0);
+    return { acopioUSD, retiroUSD, sinConsumir: acopioUSD - retiroUSD };
+  }, [cuentasMat, anticiposMat, retirosMatDetalle]);
+
   const { filasConcepto, totPlanC, totRealC, filasEtapa, totPlanE, totRealE } = useMemo(() => {
     // Real por concepto / etapa (USD)
     const realPorConcepto = {};
@@ -411,8 +431,18 @@ export default function EconomicoPage() {
 
       {tab === 0 && (
         <Stack spacing={3}>
-          <Alert severity="info" sx={{ fontWeight: 600 }}>
-            No se consideran los egresos de acopio. Se consideran los retiros de materiales.
+          <Alert severity="info">
+            <Typography variant="body2" fontWeight={700} sx={{ mb: acopioInfo.acopioUSD > 0 ? 0.5 : 0 }}>
+              No se consideran los egresos de acopio. Se consideran los retiros de materiales.
+            </Typography>
+            {acopioInfo.acopioUSD > 0 && (
+              <Typography variant="body2" color="text.secondary">
+                Acopio total: <b>{fmtMoney(acopioInfo.acopioUSD, "USD")}</b> ·
+                {" "}ya retirado (computado): <b>{fmtMoney(acopioInfo.retiroUSD, "USD")}</b> ·
+                {" "}acopio sin consumir: <b>{fmtMoney(acopioInfo.sinConsumir, "USD")}</b>.
+                {" "}Esa diferencia explica por qué lo gastado en Caja (que incluye el acopio) es mayor al real del económico.
+              </Typography>
+            )}
           </Alert>
           <TablaSeguimiento titulo="Por concepto" filas={filasConcepto} totalPlan={totPlanC} totalReal={totRealC}
             onRowClick={(f) => setDetalle({ campo: "concepto", valor: f.nombre, otros: !!f.otros })} />

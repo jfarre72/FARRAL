@@ -845,26 +845,26 @@ export default function CajaPage() {
               <EmptyState text="No hay movimientos en esta vista." />
             ) : (
               <Box sx={{ width: "100%" }}>
-                <Table size="small" sx={{ width: "100%", tableLayout: "fixed", "& tbody tr": { height: 56 }, "& td, & th": { px: 1, overflow: "hidden", textOverflow: "ellipsis" } }}>
+                <Table size="small" sx={{ width: "100%", "& tbody tr": { height: 56 }, "& td, & th": { px: 1 } }}>
                   <TableHead>
                     <TableRow>
                       <TableCell sx={{ width: 92 }}>Fecha</TableCell>
                       <TableCell sx={{ width: 96 }}>Tipo</TableCell>
-                      <TableCell>Detalle</TableCell>
-                      <TableCell align="center" sx={{ width: 96 }}>Concepto</TableCell>
-                      <TableCell align="center" sx={{ width: 96 }}>Categoría</TableCell>
-                      <TableCell align="center" sx={{ width: 84 }}>Etapa</TableCell>
-                      <TableCell align="right" sx={{ width: 104 }}>Monto</TableCell>
+                      <TableCell sx={{ width: 240 }}>Detalle</TableCell>
+                      <TableCell align="center">Concepto</TableCell>
+                      <TableCell align="center">Categoría</TableCell>
+                      <TableCell align="center">Etapa</TableCell>
+                      <TableCell align="right">Monto</TableCell>
                       {filtroMoneda === "all" ? (
                         <>
-                          <TableCell align="right" sx={{ width: 104 }}>Saldo USD</TableCell>
-                          <TableCell align="right" sx={{ width: 104 }}>Saldo ARS</TableCell>
+                          <TableCell align="right">Saldo USD</TableCell>
+                          <TableCell align="right">Saldo ARS</TableCell>
                         </>
                       ) : (
-                        <TableCell align="right" sx={{ width: 104 }}>Saldo</TableCell>
+                        <TableCell align="right">Saldo</TableCell>
                       )}
-                      <TableCell sx={{ width: 56 }}>Comprob.</TableCell>
-                      <TableCell align="right" sx={{ width: 76 }}></TableCell>
+                      <TableCell align="center" sx={{ width: 50 }}>Comp.</TableCell>
+                      <TableCell align="right" sx={{ width: 72 }}></TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -885,13 +885,13 @@ export default function CajaPage() {
                         <TableCell>{tipoChip(m)}</TableCell>
                         <TableCell>
                           <Typography variant="body2" fontWeight={500} color="text.primary" sx={{
-                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%",
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 232,
                           }}>
                             {m.detalle}
                           </Typography>
                           {(m.observacion || m.con_cambio || m.tipo === "cambio") && (
                             <Typography variant="caption" color="text.secondary" sx={{
-                              display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%",
+                              display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 232,
                             }}>
                               {m.observacion
                                 ? m.observacion
