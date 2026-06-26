@@ -411,6 +411,9 @@ export default function EconomicoPage() {
 
       {tab === 0 && (
         <Stack spacing={3}>
+          <Alert severity="info" sx={{ fontWeight: 600 }}>
+            No se consideran los egresos de acopio. Se consideran los retiros de materiales.
+          </Alert>
           <TablaSeguimiento titulo="Por concepto" filas={filasConcepto} totalPlan={totPlanC} totalReal={totRealC}
             onRowClick={(f) => setDetalle({ campo: "concepto", valor: f.nombre, otros: !!f.otros })} />
           <TablaSeguimiento titulo="Por etapa (Obra)" filas={filasEtapa} totalPlan={totPlanE} totalReal={totRealE}

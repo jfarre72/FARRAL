@@ -46,6 +46,17 @@ const ETAPAS_DEFAULT = [
 // Titulares de caja (cajas personales dentro de cada moneda).
 const TITULARES = ["Rodrigo", "Juan"];
 
+// Abreviatura genérica de una etapa para que la tabla no necesite scroll.
+// Toma las 3 primeras letras de cada palabra significativa: "Movimiento de
+// suelo" -> "MOV SUE", "Cimentación" -> "CIM".
+const STOP_ETAPA = new Set(["de", "del", "la", "las", "el", "los", "y", "+", "con", "a", "e"]);
+const abrevEtapa = (s) => {
+  if (!s) return s;
+  const parts = String(s).split(/\s+/).filter(w => w && !STOP_ETAPA.has(w.toLowerCase()));
+  if (!parts.length) return s;
+  return parts.map(w => w.slice(0, 3).toUpperCase()).join(" ");
+};
+
 const emptyMov = {
   tipo: "egreso",
   fecha: new Date().toISOString().slice(0, 10),
@@ -833,27 +844,27 @@ export default function CajaPage() {
             {visible.length === 0 ? (
               <EmptyState text="No hay movimientos en esta vista." />
             ) : (
-              <Box sx={{ overflowX: "auto" }}>
-                <Table size="small" sx={{ "& tbody tr": { height: 56 } }}>
+              <Box sx={{ width: "100%" }}>
+                <Table size="small" sx={{ width: "100%", tableLayout: "fixed", "& tbody tr": { height: 56 }, "& td, & th": { px: 1, overflow: "hidden", textOverflow: "ellipsis" } }}>
                   <TableHead>
                     <TableRow>
-                      <TableCell sx={{ width: 110 }}>Fecha</TableCell>
-                      <TableCell sx={{ width: 130 }}>Tipo</TableCell>
+                      <TableCell sx={{ width: 92 }}>Fecha</TableCell>
+                      <TableCell sx={{ width: 96 }}>Tipo</TableCell>
                       <TableCell>Detalle</TableCell>
-                      <TableCell align="center">Concepto</TableCell>
-                      <TableCell align="center">Categoría</TableCell>
-                      <TableCell align="center">Etapa</TableCell>
-                      <TableCell align="right">Monto</TableCell>
+                      <TableCell align="center" sx={{ width: 96 }}>Concepto</TableCell>
+                      <TableCell align="center" sx={{ width: 96 }}>Categoría</TableCell>
+                      <TableCell align="center" sx={{ width: 84 }}>Etapa</TableCell>
+                      <TableCell align="right" sx={{ width: 104 }}>Monto</TableCell>
                       {filtroMoneda === "all" ? (
                         <>
-                          <TableCell align="right">Saldo USD</TableCell>
-                          <TableCell align="right">Saldo ARS</TableCell>
+                          <TableCell align="right" sx={{ width: 104 }}>Saldo USD</TableCell>
+                          <TableCell align="right" sx={{ width: 104 }}>Saldo ARS</TableCell>
                         </>
                       ) : (
-                        <TableCell align="right">Saldo</TableCell>
+                        <TableCell align="right" sx={{ width: 104 }}>Saldo</TableCell>
                       )}
-                      <TableCell sx={{ width: 70 }}>Comprob.</TableCell>
-                      <TableCell align="right" sx={{ width: 90 }}></TableCell>
+                      <TableCell sx={{ width: 56 }}>Comprob.</TableCell>
+                      <TableCell align="right" sx={{ width: 76 }}></TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -874,13 +885,13 @@ export default function CajaPage() {
                         <TableCell>{tipoChip(m)}</TableCell>
                         <TableCell>
                           <Typography variant="body2" fontWeight={500} color="text.primary" sx={{
-                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 340,
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%",
                           }}>
                             {m.detalle}
                           </Typography>
                           {(m.observacion || m.con_cambio || m.tipo === "cambio") && (
                             <Typography variant="caption" color="text.secondary" sx={{
-                              display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 340,
+                              display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%",
                             }}>
                               {m.observacion
                                 ? m.observacion
@@ -902,7 +913,7 @@ export default function CajaPage() {
                         </TableCell>
                         <TableCell align="center">
                           {m.etapa
-                            ? <Chip size="small" label={m.etapa} variant="outlined" color="primary" />
+                            ? <Tooltip title={m.etapa}><Chip size="small" label={abrevEtapa(m.etapa)} variant="outlined" color="primary" /></Tooltip>
                             : <Typography variant="body2" color="text.disabled">—</Typography>}
                         </TableCell>
                         <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
