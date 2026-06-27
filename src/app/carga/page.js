@@ -116,6 +116,9 @@ export default function CargaPage() {
 
   const recRef = useRef(null);
   const fileRef = useRef(null);
+  const escuchandoRef = useRef(false); // intención de seguir escuchando (tocar para frenar)
+  const baseRef = useRef("");          // texto acumulado de sesiones previas
+  const sesionRef = useRef("");        // texto de la sesión de reconocimiento en curso
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -145,21 +148,57 @@ export default function CargaPage() {
     setError(null); setOk(null);
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
-    const rec = new SR();
-    rec.lang = "es-AR"; rec.interimResults = true; rec.maxAlternatives = 1; rec.continuous = false;
-    rec.onresult = (e) => {
-      let t = "";
-      for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
-      setTexto(t);
-    };
-    rec.onerror = () => setEscuchando(false);
-    rec.onend = () => setEscuchando(false);
-    recRef.current = rec;
+    // Arranca a partir de lo que ya hubiera en el campo (permite agregar dictando).
+    baseRef.current = texto ? texto.replace(/\s+$/, "") + " " : "";
+    sesionRef.current = "";
+    escuchandoRef.current = true;
     setEscuchando(true);
-    rec.start();
+    arrancarRec(SR);
   };
-  const parar = () => { try { recRef.current?.stop(); } catch {} setEscuchando(false); };
-  useEffect(() => () => { try { recRef.current?.stop(); } catch {} }, []);
+
+  // Crea y arranca una sesión de reconocimiento. Mientras el usuario no toque
+  // "frenar", se reinicia sola en cada corte (silencio / fin de móvil).
+  const arrancarRec = (SR) => {
+    const rec = new SR();
+    rec.lang = "es-AR";
+    rec.interimResults = true;
+    rec.maxAlternatives = 1;
+    rec.continuous = true;
+    rec.onresult = (e) => {
+      let s = "";
+      for (let i = 0; i < e.results.length; i++) s += e.results[i][0].transcript;
+      sesionRef.current = s;
+      setTexto(baseRef.current + s);
+    };
+    rec.onerror = (ev) => {
+      // Sin permiso de micrófono: cortamos de verdad.
+      if (ev?.error === "not-allowed" || ev?.error === "service-not-allowed") {
+        escuchandoRef.current = false;
+        setEscuchando(false);
+        setError("No hay permiso de micrófono. Habilitalo en el navegador o dictá con el teclado.");
+      }
+    };
+    rec.onend = () => {
+      // Acumulo lo dicho en esta sesión.
+      if (sesionRef.current) baseRef.current = (baseRef.current + sesionRef.current).replace(/\s+$/, "") + " ";
+      sesionRef.current = "";
+      // Si el usuario no frenó, reinicio para que no se corte en los silencios.
+      if (escuchandoRef.current) {
+        try { rec.start(); } catch { escuchandoRef.current = false; setEscuchando(false); }
+      } else {
+        setEscuchando(false);
+      }
+    };
+    recRef.current = rec;
+    try { rec.start(); } catch {}
+  };
+
+  const parar = () => {
+    escuchandoRef.current = false;
+    try { recRef.current?.stop(); } catch {}
+    setEscuchando(false);
+  };
+  useEffect(() => () => { escuchandoRef.current = false; try { recRef.current?.stop(); } catch {} }, []);
 
   const cambiarTipo = (t) => {
     if (!t) return;
