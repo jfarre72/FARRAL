@@ -7,10 +7,12 @@ import {
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
+import KeyboardVoiceIcon from "@mui/icons-material/KeyboardVoice";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtMoney } from "@/components/Money";
+import { vozEnabled, setVozEnabled } from "@/lib/vozConfig";
 
 // Campo que guarda al salir (blur/Enter), no en cada tecla.
 // money=true: muestra el valor formateado en USD (con separador de miles)
@@ -74,6 +76,8 @@ export default function ConfiguracionPage() {
   const [pct, setPct] = useState("");
   const [cNombre, setCNombre] = useState("");
   const [cValor, setCValor] = useState("");
+  const [vozOn, setVozOn] = useState(true);
+  useEffect(() => { setVozOn(vozEnabled()); }, []);
 
   const reload = async () => {
     if (!proyecto) return;
@@ -192,6 +196,22 @@ export default function ConfiguracionPage() {
       </Box>
 
       {loading && <LinearProgress />}
+
+      {/* Asistente · Carga rápida por voz */}
+      <Card>
+        <CardContent>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+            <KeyboardVoiceIcon color="secondary" />
+            <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>Carga rápida por voz</Typography>
+          </Stack>
+          <FormControlLabel
+            control={<Switch checked={vozOn} onChange={(e) => { const v = e.target.checked; setVozEnabled(v); setVozOn(v); }} />}
+            label={vozOn
+              ? "Activada — aparece en el menú y la app abre directo en esa pantalla al entrar."
+              : "Desactivada — oculta del menú."}
+          />
+        </CardContent>
+      </Card>
 
       {/* Conceptos */}
       <Card>

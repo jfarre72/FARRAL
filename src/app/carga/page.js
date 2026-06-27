@@ -1,8 +1,7 @@
 "use client";
 import {
   Card, CardContent, Stack, Typography, Box, Button, TextField, MenuItem,
-  Alert, IconButton, Chip, Switch, FormControlLabel, LinearProgress, Divider,
-  Tooltip, Grid,
+  Alert, IconButton, Chip, LinearProgress, Tooltip, Grid,
 } from "@mui/material";
 import KeyboardVoiceIcon from "@mui/icons-material/KeyboardVoice";
 import StopCircleIcon from "@mui/icons-material/StopCircle";
@@ -10,11 +9,9 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtMoney } from "@/components/Money";
-import { vozEnabled, setVozEnabled } from "@/lib/vozConfig";
 
 const TITULARES = ["Rodrigo", "Juan"];
 const MONEDAS = ["ARS", "USD"];
@@ -101,9 +98,7 @@ function buildPayload(d, proyectoId, categoriaFinal) {
 
 export default function CargaPage() {
   const { proyecto } = useProjects();
-  const router = useRouter();
 
-  const [activado, setActivado] = useState(true);
   const [soportaVoz, setSoportaVoz] = useState(false);
   const [escuchando, setEscuchando] = useState(false);
   const [texto, setTexto] = useState("");
@@ -119,8 +114,6 @@ export default function CargaPage() {
   const [gastoMesUSD, setGastoMesUSD] = useState(0);
 
   const recRef = useRef(null);
-
-  useEffect(() => { setActivado(vozEnabled()); }, []);
 
   // ¿El navegador soporta dictado por voz?
   useEffect(() => {
@@ -255,11 +248,6 @@ export default function CargaPage() {
   };
 
   const cancelar = () => { setDraft(null); setNota(null); setError(null); };
-
-  const apagar = () => {
-    setVozEnabled(false);
-    router.push("/"); // la página "desaparece" del menú y deja de abrirse al entrar
-  };
 
   const falta = useMemo(() => new Set(faltantes(draft)), [draft]);
   const upd = (campo, val) => setDraft((d) => ({ ...d, [campo]: val }));
@@ -442,13 +430,9 @@ export default function CargaPage() {
         </Card>
       )}
 
-      <Divider />
-      <FormControlLabel
-        control={<Switch checked={activado} onChange={(e) => {
-          if (!e.target.checked) { apagar(); } else { setVozEnabled(true); setActivado(true); }
-        }} />}
-        label="Carga por voz activada (al apagarla, desaparece del menú y la app deja de abrirse acá)"
-      />
+      <Typography variant="caption" color="text.secondary" sx={{ textAlign: "center" }}>
+        Podés activar o desactivar esta pantalla desde <b>Ajustes</b>.
+      </Typography>
     </Stack>
   );
 }
