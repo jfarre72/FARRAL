@@ -24,11 +24,13 @@ import FactCheckIcon from "@mui/icons-material/FactCheck";
 import GppMaybeIcon from "@mui/icons-material/GppMaybe";
 import SettingsIcon from "@mui/icons-material/Settings";
 import LogoutIcon from "@mui/icons-material/Logout";
-import { useState } from "react";
+import KeyboardVoiceIcon from "@mui/icons-material/KeyboardVoice";
+import { useState, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "@mui/material/styles";
 import { logout } from "@/components/AuthGate";
 import { useProjects } from "@/components/ProjectContext";
+import { vozEnabled } from "@/lib/vozConfig";
 
 const NAV = [
   { section: "Resumen", items: [
@@ -70,6 +72,30 @@ export default function AppShell({ children }) {
   const router = useRouter();
   const pathname = usePathname();
   const { proyectos, proyectoId, setProyectoId, proyecto } = useProjects();
+  const [vozOn, setVozOn] = useState(true);
+
+  // Estado de "Carga por voz" (se puede apagar desde su propia pantalla).
+  useEffect(() => {
+    const sync = () => setVozOn(vozEnabled());
+    sync();
+    window.addEventListener("voz-config", sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener("voz-config", sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+
+  // Al entrar (una vez por sesión), si está activada, ir directo a la carga rápida.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!vozEnabled()) return;
+    if (pathname !== "/") return;
+    if (sessionStorage.getItem("farral_voz_redirected")) return;
+    sessionStorage.setItem("farral_voz_redirected", "1");
+    router.replace("/carga");
+    // eslint-disable-next-line
+  }, []);
 
   const handleNav = (href) => {
     setOpen(false);
@@ -79,6 +105,27 @@ export default function AppShell({ children }) {
   const drawer = (
     <Box sx={{ width: DRAWER_WIDTH, overflowX: "hidden" }} role="presentation">
       <List>
+        {vozOn && (
+          <Box>
+            <ListSubheader
+              disableSticky
+              sx={{
+                bgcolor: "transparent", lineHeight: "32px", mt: 0.5,
+                fontSize: 11, fontWeight: 700, letterSpacing: 0.6,
+                textTransform: "uppercase", color: "text.secondary",
+              }}
+            >
+              Asistente
+            </ListSubheader>
+            <ListItemButton
+              selected={pathname === "/carga"}
+              onClick={() => handleNav("/carga")}
+            >
+              <ListItemIcon sx={{ minWidth: 36 }}><KeyboardVoiceIcon /></ListItemIcon>
+              <ListItemText primary="Carga rápida" />
+            </ListItemButton>
+          </Box>
+        )}
         {NAV.map((grupo) => (
           <Box key={grupo.section}>
             <ListSubheader
