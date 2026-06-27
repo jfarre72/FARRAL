@@ -558,6 +558,9 @@ export default function LineaTiempoPage() {
         <Box sx={{ flexGrow: 1 }}>
           <Typography variant="h5">Planificación</Typography>
           <Typography variant="body2">Etapas, tareas y avance del proyecto.</Typography>
+          <Typography variant="caption" color="text.secondary">
+            Las fechas de la <b>etapa</b> son las <b>planificadas</b>; las fechas de cada <b>tarea</b> son las <b>reales</b>.
+          </Typography>
         </Box>
         <Button variant="outlined" startIcon={<PictureAsPdfIcon />} onClick={exportarPdf}>
           PDF
@@ -676,13 +679,13 @@ export default function LineaTiempoPage() {
                       {!isSm && (
                         <Box onClick={(e) => e.stopPropagation()} sx={{ display: "flex", gap: 1.5, alignItems: "center" }}>
                           <DateField
-                            label="Inicio" sx={{ width: DATE_W }}
+                            label="Inicio (plan)" sx={{ width: DATE_W }}
                             value={h.fecha_estimada ?? ""}
                             disabled={savingId === h.id}
                             onCommit={(v) => updateHito(h.id, { fecha_estimada: v })}
                           />
                           <DateField
-                            label="Fin" sx={{ width: DATE_W }}
+                            label="Fin (plan)" sx={{ width: DATE_W }}
                             value={h.fecha_real ?? ""}
                             disabled={savingId === h.id}
                             onCommit={(v) => updateHito(h.id, { fecha_real: v })}
@@ -726,12 +729,12 @@ export default function LineaTiempoPage() {
                         {isSm && (
                           <Grid container spacing={1.5} sx={{ mb: 1.5 }} alignItems="center">
                             <Grid item xs={6}>
-                              <DateField fullWidth label="Inicio"
+                              <DateField fullWidth label="Inicio (plan)"
                                 value={h.fecha_estimada ?? ""}
                                 onCommit={(v) => updateHito(h.id, { fecha_estimada: v })} />
                             </Grid>
                             <Grid item xs={6}>
-                              <DateField fullWidth label="Fin"
+                              <DateField fullWidth label="Fin (plan)"
                                 value={h.fecha_real ?? ""}
                                 onCommit={(v) => updateHito(h.id, { fecha_real: v })} />
                             </Grid>
@@ -822,7 +825,7 @@ export default function LineaTiempoPage() {
                                 <Box sx={{ width: DATE_W }}>
                                   {est !== "no_iniciado" && (
                                     <DateField
-                                      label="Inicio" size="small" fullWidth
+                                      label="Inicio (real)" size="small" fullWidth
                                       value={t.fecha_inicio ?? ""}
                                       onCommit={(v) => setFechaTarea(t, "fecha_inicio", v)}
                                     />
@@ -831,7 +834,7 @@ export default function LineaTiempoPage() {
                                 <Box sx={{ width: DATE_W }}>
                                   {est !== "no_iniciado" && (
                                     <DateField
-                                      label="Fin" size="small" fullWidth
+                                      label="Fin (real)" size="small" fullWidth
                                       value={t.fecha_fin ?? ""}
                                       onCommit={(v) => setFechaTarea(t, "fecha_fin", v)}
                                     />
