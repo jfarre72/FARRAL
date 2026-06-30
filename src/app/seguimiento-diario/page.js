@@ -20,7 +20,10 @@ import { getCache, setCache } from "@/lib/dataCache";
 const CAUSAS = ["Lluvia", "Falta de personal", "Falta de materiales", "Feriado", "Otra"];
 
 const DIAS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
-const DIAS_CORTO = ["Do", "Lu", "Ma", "Mi", "Ju", "Vi", "Sá"];
+// Encabezado del calendario arrancando en lunes.
+const DIAS_CORTO = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"];
+// Día de la semana (0=Dom … 6=Sáb) corresponde a fin de semana.
+const esFinDeSemana = (dow) => dow === 0 || dow === 6;
 const MESES = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
@@ -160,16 +163,30 @@ export default function SeguimientoDiarioPage() {
     return m;
   }, [registros]);
 
-  // Días trabajados por mes (del año visible)
+  // Días trabajados por mes — ventana fija de junio 2026 a junio 2027.
   const porMes = useMemo(() => {
-    const arr = MESES_CORTO.map((lbl, i) => ({ label: lbl, full: MESES[i], value: 0 }));
+    const meses = []; // {y, m(0-11), key, value}
+    let y = 2026, m = 5; // junio 2026
+    for (let i = 0; i < 13; i++) {
+      meses.push({
+        y, m,
+        label: m === 0 ? `${MESES_CORTO[m]} ${String(y).slice(2)}` : MESES_CORTO[m],
+        full: `${MESES[m]} ${y}`,
+        value: 0,
+      });
+      m++;
+      if (m > 11) { m = 0; y++; }
+    }
+    const idx = {};
+    meses.forEach((mes, i) => { idx[`${mes.y}-${mes.m}`] = i; });
     for (const r of registros) {
       if (!r.trabajado) continue;
-      const [y, m] = r.fecha.split("-").map(Number);
-      if (y === year) arr[m - 1].value += 1;
+      const [yy, mm] = r.fecha.split("-").map(Number);
+      const i = idx[`${yy}-${mm - 1}`];
+      if (i != null) meses[i].value += 1;
     }
-    return arr;
-  }, [registros, year]);
+    return meses;
+  }, [registros]);
 
   // Días trabajados por etapa (acumulado, todo el proyecto)
   const porEtapa = useMemo(() => {
@@ -195,9 +212,10 @@ export default function SeguimientoDiarioPage() {
     };
   }, [registros, year, month]);
 
-  // Celdas del calendario (incluye huecos al inicio)
+  // Celdas del calendario (incluye huecos al inicio). Arranca en lunes.
   const celdas = useMemo(() => {
-    const primero = new Date(year, month, 1).getDay(); // 0=Dom
+    // getDay(): 0=Dom … 6=Sáb. Reordenamos para que lunes sea la 1ª columna.
+    const primero = (new Date(year, month, 1).getDay() + 6) % 7;
     const diasMes = new Date(year, month + 1, 0).getDate();
     const arr = [];
     for (let i = 0; i < primero; i++) arr.push(null);
@@ -286,7 +304,7 @@ export default function SeguimientoDiarioPage() {
         <Grid item xs={12} md={7}>
           <Card sx={{ height: "100%" }}>
             <CardContent sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
-              <Typography variant="subtitle2" sx={{ mb: 1.5 }}>Días trabajados por mes · {year}</Typography>
+              <Typography variant="subtitle2" sx={{ mb: 1.5 }}>Días trabajados por mes · Jun 2026 – Jun 2027</Typography>
               <BarrasVerticales data={porMes} color={success} />
             </CardContent>
           </Card>
@@ -337,7 +355,9 @@ export default function SeguimientoDiarioPage() {
               const r = porFecha[fecha];
               const esHoy = fecha === hoyISO();
               const ets = r ? parseEtapas(r.etapa) : [];
-              let bg = "transparent", border = theme.palette.divider;
+              const finDeSemana = esFinDeSemana(new Date(year, month, d).getDay());
+              let bg = finDeSemana ? alpha(theme.palette.text.primary, 0.06) : "transparent";
+              let border = theme.palette.divider;
               if (r) {
                 if (r.trabajado) { bg = alpha(theme.palette.success.main, 0.16); border = alpha(theme.palette.success.main, 0.5); }
                 else { bg = alpha(theme.palette.error.main, 0.16); border = alpha(theme.palette.error.main, 0.5); }
