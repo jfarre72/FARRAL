@@ -227,7 +227,7 @@ create table if not exists public.movimientos_caja (
   id              uuid primary key default gen_random_uuid(),
   proyecto_id     uuid not null references public.proyectos(id) on delete cascade,
   fecha           date not null default current_date,
-  tipo            text not null check (tipo in ('ingreso','egreso','cambio')),
+  tipo            text not null check (tipo in ('ingreso','egreso','cambio','traspaso')),
   moneda          text not null check (moneda in ('USD','ARS')),
   monto           numeric(16,2) not null default 0,
   categoria       text,
