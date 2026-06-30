@@ -212,15 +212,27 @@ export default function SeguimientoDiarioPage() {
     };
   }, [registros, year, month]);
 
-  // Celdas del calendario (incluye huecos al inicio). Arranca en lunes.
+  // Celdas del calendario. Arranca en lunes y rellena el inicio y el final
+  // con los días de los meses vecinos (marcados como "otroMes").
   const celdas = useMemo(() => {
     // getDay(): 0=Dom … 6=Sáb. Reordenamos para que lunes sea la 1ª columna.
     const primero = (new Date(year, month, 1).getDay() + 6) % 7;
     const diasMes = new Date(year, month + 1, 0).getDate();
     const arr = [];
-    for (let i = 0; i < primero; i++) arr.push(null);
-    for (let d = 1; d <= diasMes; d++) arr.push(d);
-    while (arr.length % 7 !== 0) arr.push(null);
+    // Cola del mes anterior para completar el inicio.
+    const prevDias = new Date(year, month, 0).getDate();
+    let py = year, pm = month - 1;
+    if (pm < 0) { pm = 11; py--; }
+    for (let i = primero - 1; i >= 0; i--) {
+      arr.push({ d: prevDias - i, y: py, m: pm, otroMes: true });
+    }
+    // Días del mes en curso.
+    for (let d = 1; d <= diasMes; d++) arr.push({ d, y: year, m: month, otroMes: false });
+    // Cabeza del mes siguiente para completar la última semana.
+    let ny = year, nm = month + 1;
+    if (nm > 11) { nm = 0; ny++; }
+    let nd = 1;
+    while (arr.length % 7 !== 0) arr.push({ d: nd++, y: ny, m: nm, otroMes: true });
     return arr;
   }, [year, month]);
 
@@ -232,9 +244,11 @@ export default function SeguimientoDiarioPage() {
   };
   const irHoy = () => { setYear(today.getFullYear()); setMonth(today.getMonth()); };
 
-  const abrirDia = (d) => {
-    if (!d) return;
-    const fecha = iso(year, month, d);
+  const abrirDia = (cell) => {
+    if (!cell) return;
+    // Si se toca un día de otro mes, navegamos a ese mes.
+    if (cell.otroMes) { setYear(cell.y); setMonth(cell.m); }
+    const fecha = iso(cell.y, cell.m, cell.d);
     const r = porFecha[fecha];
     setFechaSel(fecha);
     setEditId(r?.id ?? null);
@@ -349,13 +363,13 @@ export default function SeguimientoDiarioPage() {
 
           {/* Grilla del calendario */}
           <Box sx={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gridAutoRows: 64, gap: 0.5 }}>
-            {celdas.map((d, i) => {
-              if (!d) return <Box key={`e${i}`} />;
-              const fecha = iso(year, month, d);
+            {celdas.map((cell, i) => {
+              const { d, y, m, otroMes } = cell;
+              const fecha = iso(y, m, d);
               const r = porFecha[fecha];
               const esHoy = fecha === hoyISO();
               const ets = r ? parseEtapas(r.etapa) : [];
-              const finDeSemana = esFinDeSemana(new Date(year, month, d).getDay());
+              const finDeSemana = esFinDeSemana(new Date(y, m, d).getDay());
               let bg = finDeSemana ? alpha(theme.palette.text.primary, 0.06) : "transparent";
               let border = theme.palette.divider;
               if (r) {
@@ -375,7 +389,7 @@ export default function SeguimientoDiarioPage() {
                   arrow disableInteractive
                 >
                   <Box
-                    onClick={() => abrirDia(d)}
+                    onClick={() => abrirDia(cell)}
                     sx={{
                       cursor: "pointer", borderRadius: 1.5,
                       border: "1px solid", borderColor: border,
@@ -384,6 +398,7 @@ export default function SeguimientoDiarioPage() {
                       display: "flex", flexDirection: "column", alignItems: "center",
                       outline: esHoy ? `2px solid ${theme.palette.primary.main}` : "none",
                       outlineOffset: -2,
+                      opacity: otroMes ? 0.5 : 1,
                       transition: "background-color .1s",
                       "&:hover": { borderColor: "primary.main" },
                     }}
