@@ -844,8 +844,8 @@ export default function CajaPage() {
             {visible.length === 0 ? (
               <EmptyState text="No hay movimientos en esta vista." />
             ) : (
-              <Box sx={{ width: "100%" }}>
-                <Table size="small" sx={{ width: "100%", "& tbody tr": { height: 56 }, "& td, & th": { px: 1 } }}>
+              <Box sx={{ width: "100%", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+                <Table size="small" sx={{ width: "100%", minWidth: { xs: 720, md: "100%" }, "& tbody tr": { height: 56 }, "& td, & th": { px: 1 } }}>
                   <TableHead>
                     <TableRow>
                       <TableCell sx={{ width: 92 }}>Fecha</TableCell>
