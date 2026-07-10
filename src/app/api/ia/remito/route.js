@@ -29,6 +29,31 @@ function costoUSD(modelo, usage) {
   return (inTok * p[0] + cacheRead * p[0] * 0.1 + outTok * p[1]) / 1_000_000;
 }
 
+// Interpreta una cantidad que puede venir con separadores de miles en cualquier
+// convención: "1,000.00" (US) y "1.000,00" (AR) => 1000; "3.00" => 3; "1,000" => 1000.
+function parseCantidad(v) {
+  if (v == null || v === "") return null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  let s = String(v).trim().replace(/[^\d.,-]/g, "");
+  if (!s) return null;
+  const hasComma = s.includes(","), hasDot = s.includes(".");
+  if (hasComma && hasDot) {
+    // El último separador que aparece es el decimal; el otro es de miles.
+    if (s.lastIndexOf(",") > s.lastIndexOf(".")) s = s.replace(/\./g, "").replace(",", ".");
+    else s = s.replace(/,/g, "");
+  } else if (hasComma) {
+    const parts = s.split(",");
+    // Coma con exactamente 3 dígitos al final => separador de miles.
+    s = parts[parts.length - 1].length === 3 ? s.replace(/,/g, "") : s.replace(",", ".");
+  } else if (hasDot) {
+    const parts = s.split(".");
+    // Punto con exactamente 3 dígitos al final => separador de miles (ej "1.000").
+    if (parts.length > 1 && parts[parts.length - 1].length === 3) s = s.replace(/\./g, "");
+  }
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
 function parseJsonLoose(text) {
   if (!text) return null;
   let t = String(text).trim();
@@ -45,7 +70,8 @@ function systemPrompt() {
 Tu tarea: extraer TODOS los renglones de material del comprobante. Por cada renglón devolvés cantidad, unidad, la descripción del material y una categoría normalizada.
 
 Reglas:
-- "cantidad": número (usá punto decimal; sin separador de miles). Si no se lee, null.
+- "cantidad": es la PRIMERA columna del remito (la de más a la izquierda, encabezada "Cantidad" o "Cant."). NO confundir con precio, importe, código ni total.
+  Los números pueden venir con separador de miles: "1,000.00" y "1.000,00" significan MIL (1000), "3.00" significa 3, "1,000" significa 1000. Devolvé el número entero/decimal REAL, sin separadores de miles (ej: 1000, no 1). Si no se lee, null.
 - "unidad": la unidad del renglón tal como corresponde (ej: "unidad", "bolsa", "m3", "m2", "ml", "kg", "tonelada", "pallet", "bolson", "litro", "barra", "rollo"). Si no está clara, "unidad".
 - "material": descripción del producto tal como figura (ej: "Ladrillo hueco 12x18x33", "Cemento Loma Negra 50kg", "Hierro del 8", "Malla Q188", "Arena fina").
 - "categoria": UNA de esta lista (la más parecida): ${CATEGORIAS.join(", ")}.
@@ -102,7 +128,7 @@ export async function POST(req) {
     const items = (Array.isArray(draft.items) ? draft.items : [])
       .map((it) => ({
         material: (it?.material ? String(it.material) : "").trim(),
-        cantidad: it?.cantidad != null && it.cantidad !== "" ? Number(it.cantidad) : null,
+        cantidad: parseCantidad(it?.cantidad),
         unidad: (it?.unidad ? String(it.unidad) : "unidad").trim().toLowerCase(),
         categoria: CATEGORIAS.includes(it?.categoria) ? it.categoria : "Otros",
       }))

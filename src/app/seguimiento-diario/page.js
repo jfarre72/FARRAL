@@ -406,17 +406,37 @@ export default function SeguimientoDiarioPage() {
                     <Typography variant="caption" sx={{ fontWeight: esHoy ? 800 : 700, lineHeight: 1, color: "text.primary" }}>
                       {d}
                     </Typography>
-                    {/* Mostramos las TAREAS hechas ese día; si no hay tareas
-                        cargadas, caemos a las etapas. */}
-                    {(tareasDia.length > 0 || ets.length > 0) && (
+                    {/* Días sin trabajar: mostramos el motivo. */}
+                    {r && !r.trabajado && (
                       <Typography variant="caption" align="center" sx={{
-                        fontSize: 9.5, lineHeight: 1.05, mt: 0.4,
-                        color: tareasDia.length > 0 ? "text.primary" : "text.secondary",
+                        fontSize: 9.5, lineHeight: 1.05, mt: 0.4, color: "error.main",
                         overflow: "hidden", textOverflow: "ellipsis",
                         display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
                       }}>
-                        {tareasDia.length > 0 ? tareasDia.join(", ") : ets.join(", ")}
+                        No: {r.causa || "—"}
                       </Typography>
+                    )}
+                    {/* Días trabajados: mostramos la ETAPA y la TAREA. */}
+                    {r && r.trabajado && (ets.length > 0 || tareasDia.length > 0) && (
+                      <Box sx={{ mt: 0.3, width: "100%", overflow: "hidden" }}>
+                        {ets.length > 0 && (
+                          <Typography variant="caption" align="center" sx={{
+                            display: "block", fontSize: 9, lineHeight: 1.05, color: "text.secondary",
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          }}>
+                            {ets.join(", ")}
+                          </Typography>
+                        )}
+                        {tareasDia.length > 0 && (
+                          <Typography variant="caption" align="center" sx={{
+                            fontSize: 9.5, lineHeight: 1.05, color: "text.primary",
+                            overflow: "hidden", textOverflow: "ellipsis",
+                            display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                          }}>
+                            {tareasDia.join(", ")}
+                          </Typography>
+                        )}
+                      </Box>
                     )}
                     {r?.observacion && (
                       <Stack direction="row" spacing={0.25} alignItems="center" sx={{ mt: "auto", maxWidth: "100%" }}>

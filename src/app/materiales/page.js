@@ -53,6 +53,28 @@ const CATEGORIAS_MAT = [
 // Ítem vacío de material (renglón del remito).
 const emptyMatItem = () => ({ material: "", cantidad: "", unidad: "unidad", categoria: "Otros" });
 
+// Interpreta una cantidad con separadores de miles en cualquier convención:
+// "1,000.00" y "1.000,00" => 1000; "3.00" => 3; "1,000" => 1000.
+const parseCantidad = (v) => {
+  if (v == null || v === "") return null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  let s = String(v).trim().replace(/[^\d.,-]/g, "");
+  if (!s) return null;
+  const hasComma = s.includes(","), hasDot = s.includes(".");
+  if (hasComma && hasDot) {
+    if (s.lastIndexOf(",") > s.lastIndexOf(".")) s = s.replace(/\./g, "").replace(",", ".");
+    else s = s.replace(/,/g, "");
+  } else if (hasComma) {
+    const parts = s.split(",");
+    s = parts[parts.length - 1].length === 3 ? s.replace(/,/g, "") : s.replace(",", ".");
+  } else if (hasDot) {
+    const parts = s.split(".");
+    if (parts.length > 1 && parts[parts.length - 1].length === 3) s = s.replace(/\./g, "");
+  }
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+};
+
 // Reduce una imagen a un tamaño manejable y la devuelve como base64 (sin el
 // prefijo data:) + media type, para mandarla al lector de remitos.
 async function imagenAOptimizada(file, maxDim = 1600, quality = 0.72) {
@@ -699,7 +721,7 @@ export default function MaterialesPage() {
         materiales_items: (() => {
           const mats = (f.materiales_items || []).map(it => ({
             material: (it.material || "").trim(),
-            cantidad: it.cantidad !== "" && it.cantidad != null ? Number(parseMiles(String(it.cantidad))) : null,
+            cantidad: parseCantidad(it.cantidad),
             unidad: (it.unidad || "unidad").toString().trim().toLowerCase() || "unidad",
             categoria: CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros",
           })).filter(it => it.material || it.cantidad != null);
