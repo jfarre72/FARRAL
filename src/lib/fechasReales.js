@@ -45,13 +45,36 @@ export function fechasRealesPorTarea(registros, tareas, hitos) {
   return porTarea;
 }
 
+// Fecha de hoy en formato ISO (YYYY-MM-DD), hora local.
+export function isoHoy() {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${da}`;
+}
+
+// Deriva el estado de una tarea a partir de sus fechas reales (del Diario) y de
+// la fecha de hoy:
+//   - completado (finalización manual) => "finalizado".
+//   - sin días cargados en el Diario    => "no_iniciado".
+//   - primer día en el futuro           => "planificado" (se está planificando).
+//   - primer día hoy o en el pasado     => "en_curso".
+export function estadoDesdeDiario(tarea, todayISO = isoHoy()) {
+  if (tarea.completado) return "finalizado";
+  const ini = tarea.fecha_inicio;
+  if (!ini) return "no_iniciado";
+  return ini > todayISO ? "planificado" : "en_curso";
+}
+
 // Aplica las fechas derivadas del Diario sobre una lista de tareas, devolviendo
-// nuevas tareas con fecha_inicio / fecha_fin tomadas del Diario (o null si la
-// tarea no tiene días cargados).
-export function aplicarFechasReales(registros, tareas, hitos) {
+// nuevas tareas con fecha_inicio / fecha_fin y estado tomados del Diario. Si la
+// tarea no tiene días cargados, sus fechas quedan en null y el estado se deriva
+// según corresponda.
+export function aplicarFechasReales(registros, tareas, hitos, todayISO = isoHoy()) {
   const map = fechasRealesPorTarea(registros, tareas, hitos);
   return (tareas || []).map((t) => {
     const r = map.get(t.id);
-    return { ...t, fecha_inicio: r?.fecha_inicio ?? null, fecha_fin: r?.fecha_fin ?? null };
+    const conFechas = { ...t, fecha_inicio: r?.fecha_inicio ?? null, fecha_fin: r?.fecha_fin ?? null };
+    return { ...conFechas, estado: estadoDesdeDiario(conFechas, todayISO) };
   });
 }

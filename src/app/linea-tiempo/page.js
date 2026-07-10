@@ -2,7 +2,7 @@
 import {
   Card, CardContent, Stack, Typography, Alert, Box, Grid, TextField,
   Checkbox, LinearProgress, Divider, Chip, Button, IconButton, Tooltip,
-  Collapse, MenuItem, useMediaQuery
+  Collapse, useMediaQuery
 } from "@mui/material";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
@@ -19,7 +19,7 @@ import { useProjects } from "@/components/ProjectContext";
 import { fmtDate, fmtDuracion } from "@/components/Money";
 import { getCache, setCache } from "@/lib/dataCache";
 import { printDocument, esc } from "@/lib/printPdf";
-import { fechasRealesPorTarea } from "@/lib/fechasReales";
+import { aplicarFechasReales } from "@/lib/fechasReales";
 
 // Días hábiles (lunes a viernes) entre dos fechas ISO (YYYY-MM-DD).
 // Cuenta ambos extremos inclusive: de lunes a viernes son 5 días.
@@ -101,6 +101,8 @@ const ESTADOS = [
 // Deriva el estado de una tarea (compatibilidad con filas previas a la migración).
 const estadoTarea = (t) =>
   t.estado || (t.completado ? "finalizado" : ((t.avance ?? 0) > 0 ? "en_curso" : "no_iniciado"));
+const ESTADO_LABEL = Object.fromEntries(ESTADOS.map(e => [e.value, e.label]));
+const ESTADO_COLOR = Object.fromEntries(ESTADOS.map(e => [e.value, e.color]));
 
 // Anchos compartidos para alinear las fechas de tareas con las de la etapa.
 const DATE_W = 150;   // ancho de cada campo de fecha (Inicio / Fin)
@@ -380,18 +382,13 @@ export default function LineaTiempoPage() {
 
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
 
-  // Fechas reales (inicio/fin) de cada tarea derivadas del Diario.
-  const fechasReales = useMemo(
-    () => fechasRealesPorTarea(diario, tareas, hitos),
-    [diario, tareas, hitos]
-  );
-  // Tareas con las fechas reales tomadas del Diario (sobreescriben lo guardado).
+  // Tareas con fechas reales y estado derivados del Diario (sobreescriben lo
+  // guardado): las fechas salen de los días cargados y el estado surge de si
+  // esos días son futuros (planificado), presentes/pasados (en curso) o si no
+  // hay días (no iniciado). "Finalizado" se conserva por marca manual.
   const tareasConReal = useMemo(
-    () => tareas.map(t => {
-      const r = fechasReales.get(t.id);
-      return { ...t, fecha_inicio: r?.fecha_inicio ?? null, fecha_fin: r?.fecha_fin ?? null };
-    }),
-    [tareas, fechasReales]
+    () => aplicarFechasReales(diario, tareas, hitos),
+    [diario, tareas, hitos]
   );
 
   const tareasDe = (hitoId) =>
@@ -470,22 +467,13 @@ export default function LineaTiempoPage() {
     if (error) { alert(error.message); reload(); }
   };
 
-  // Cambia el estado de una tarea. Las fechas reales ya no se setean acá:
-  // se derivan del Diario. Finalizado => avance 100% (suma al avance).
-  const setEstadoTarea = async (t, estado) => {
-    const patch = { estado };
-    if (estado === "no_iniciado") {
-      patch.completado = false; patch.avance = 0; patch.completado_at = null;
-    } else if (estado === "planificado") {
-      patch.completado = false; patch.avance = 0; patch.completado_at = null;
-    } else if (estado === "en_curso") {
-      patch.completado = false;
-      if ((t.avance ?? 0) >= 100) patch.avance = 50;
-      patch.completado_at = null;
-    } else if (estado === "finalizado") {
-      patch.completado = true; patch.avance = 100;
-      patch.completado_at = new Date().toISOString();
-    }
+  // Marca / desmarca una tarea como finalizada. El resto de los estados
+  // (no iniciado / planificado / en curso) se derivan del Diario, así que acá
+  // sólo manejamos la finalización manual.
+  const setFinalizada = async (t, fin) => {
+    const patch = fin
+      ? { completado: true, avance: 100, completado_at: new Date().toISOString() }
+      : { completado: false, avance: 0, completado_at: null };
     setTareas(prev => prev.map(x => x.id === t.id ? { ...x, ...patch } : x));
     const { error } = await supabase.from("hito_tareas").update(patch).eq("id", t.id);
     if (error) { alert(error.message); reload(); }
@@ -829,15 +817,24 @@ export default function LineaTiempoPage() {
                                 <NameField value={t.nombre} strike={est === "finalizado"}
                                   onCommit={(v) => setNombreTarea(t, v)} />
                               </Box>
-                              {/* estado */}
-                              <Box onClick={(e) => e.stopPropagation()} sx={{ mr: 1 }}>
-                                <TextField
-                                  select size="small" value={est}
-                                  onChange={(e) => setEstadoTarea(t, e.target.value)}
-                                  sx={{ width: 150 }}
-                                >
-                                  {ESTADOS.map(op => <MenuItem key={op.value} value={op.value}>{op.label}</MenuItem>)}
-                                </TextField>
+                              {/* estado (derivado del Diario) + finalización manual */}
+                              <Box onClick={(e) => e.stopPropagation()} sx={{ mr: 1, width: 150, display: "flex", alignItems: "center", gap: 0.5 }}>
+                                <Chip
+                                  size="small" variant="outlined"
+                                  color={ESTADO_COLOR[est] || "default"}
+                                  label={ESTADO_LABEL[est] || est}
+                                  sx={{ flexGrow: 1 }}
+                                />
+                                <Tooltip title={est === "finalizado" ? "Reabrir tarea" : "Marcar como finalizada"}>
+                                  <Checkbox
+                                    size="small" color="success"
+                                    checked={est === "finalizado"}
+                                    icon={<RadioButtonUncheckedIcon fontSize="small" />}
+                                    checkedIcon={<CheckCircleIcon fontSize="small" />}
+                                    onChange={(e) => setFinalizada(t, e.target.checked)}
+                                    sx={{ p: 0.5 }}
+                                  />
+                                </Tooltip>
                               </Box>
                               {/* avance (sólo en curso) */}
                               <Box onClick={(e) => e.stopPropagation()} sx={{ mr: 1.5, width: 92, display: "flex", justifyContent: "flex-end" }}>
