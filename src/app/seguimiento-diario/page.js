@@ -406,13 +406,16 @@ export default function SeguimientoDiarioPage() {
                     <Typography variant="caption" sx={{ fontWeight: esHoy ? 800 : 700, lineHeight: 1, color: "text.primary" }}>
                       {d}
                     </Typography>
-                    {ets.length > 0 && (
+                    {/* Mostramos las TAREAS hechas ese día; si no hay tareas
+                        cargadas, caemos a las etapas. */}
+                    {(tareasDia.length > 0 || ets.length > 0) && (
                       <Typography variant="caption" align="center" sx={{
-                        fontSize: 9.5, lineHeight: 1.05, mt: 0.4, color: "text.secondary",
+                        fontSize: 9.5, lineHeight: 1.05, mt: 0.4,
+                        color: tareasDia.length > 0 ? "text.primary" : "text.secondary",
                         overflow: "hidden", textOverflow: "ellipsis",
                         display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
                       }}>
-                        {ets.join(", ")}
+                        {tareasDia.length > 0 ? tareasDia.join(", ") : ets.join(", ")}
                       </Typography>
                     )}
                     {r?.observacion && (

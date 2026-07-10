@@ -19,6 +19,25 @@ const addDays = (d, n) => { const r = new Date(d); r.setDate(r.getDate() + Math.
 const diffDays = (a, b) => Math.round((b - a) / MS_DAY);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
+// Días hábiles (lunes a viernes) de atraso (+) o adelanto (−) entre la fecha
+// planificada y la real: cuenta las jornadas laborables que las separan SIN
+// incluir el día de plan. Ej: plan viernes, real lunes siguiente => +1 (atraso).
+const habilesAtraso = (aDate, bDate) => {
+  if (!aDate || !bDate) return null;
+  const signo = bDate >= aDate ? 1 : -1;
+  const ini = signo > 0 ? new Date(aDate) : new Date(bDate);
+  const fin = signo > 0 ? new Date(bDate) : new Date(aDate);
+  let count = 0;
+  const cur = new Date(ini);
+  cur.setDate(cur.getDate() + 1); // excluimos el día base (el planificado)
+  while (cur <= fin) {
+    const dow = cur.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count * signo;
+};
+
 // Avance 0-100 de una tarea.
 const avanceT = (t) => (t.avance != null ? Number(t.avance) : (t.completado ? 100 : 0));
 const estadoT = (t) => t.estado || (t.completado ? "finalizado" : (avanceT(t) > 0 ? "en_curso" : "no_iniciado"));
@@ -35,7 +54,7 @@ const desfaseTxt = (n) => {
   if (n == null) return "—";
   if (n === 0) return "En fecha";
   const abs = Math.abs(n);
-  return n > 0 ? `+${abs} día${abs === 1 ? "" : "s"} (atraso)` : `−${abs} día${abs === 1 ? "" : "s"} (adelanto)`;
+  return n > 0 ? `+${abs} día${abs === 1 ? "" : "s"} háb. (atraso)` : `−${abs} día${abs === 1 ? "" : "s"} háb. (adelanto)`;
 };
 
 
@@ -110,6 +129,12 @@ export default function CronogramaPage() {
         // Si ya venció el fin y todavía no terminó, proyectamos al menos a hoy.
         projStart = realStart;
         projEnd = realEnd < hoy ? hoy : realEnd;
+        // Si TODAVÍA no se cargaron (planificaron en el Diario) las fechas reales
+        // de todas las tareas de la etapa, no adelantamos el fin antes del plan:
+        // el fin proyectado no puede ser anterior al planificado. Así una etapa a
+        // la que sólo le cargaste una tarea no aparece "terminando antes".
+        const todasConReal = ts.length > 0 && ts.every(t => pd(t.fecha_fin));
+        if (!todasConReal && effPlanEnd && projEnd < effPlanEnd) projEnd = effPlanEnd;
       } else if (planDur != null) {
         // No arrancó: arranca cuando pueda (su plan o cuando se libere la anterior),
         // sin empezar en el pasado.
@@ -121,7 +146,10 @@ export default function CronogramaPage() {
 
       // Desfase medido contra el plan YA corrido por el atraso de arriba (effPlanEnd).
       // Así una etapa que sólo hereda el atraso aguas arriba marca 0 (no lo vuelve a sumar).
+      // El desfase en días corridos maneja la cascada (empujar/traer etapas), y el
+      // desfase en días HÁBILES es el que se le muestra al usuario.
       const desfase = (effPlanEnd && projEnd) ? diffDays(effPlanEnd, projEnd) : null;
+      const desfaseHab = (effPlanEnd && projEnd) ? habilesAtraso(effPlanEnd, projEnd) : null;
       // El desfase propio de esta etapa corre a las siguientes: el atraso las empuja a la
       // derecha y el adelanto las trae a la izquierda (las que no arrancaron pueden empezar antes).
       if (desfase != null) cascada += desfase;
@@ -134,7 +162,7 @@ export default function CronogramaPage() {
 
       filas.push({
         h, ts, planStart, planEnd, realStart, realEnd, projStart, projEnd,
-        effPlanStart, effPlanEnd, avance, finalizado, tieneDatos, desfase, vencidas,
+        effPlanStart, effPlanEnd, avance, finalizado, tieneDatos, desfase, desfaseHab, vencidas,
       });
     }
 
@@ -160,7 +188,9 @@ export default function CronogramaPage() {
     const planDur = (planIni && planFin) ? diffDays(planIni, planFin) : null;
     const projDur = (projIni && projFin) ? diffDays(projIni, projFin) : null;
     const atrasoTotal = (planFin && projFin) ? diffDays(planFin, projFin) : null;
-    const proyeccion = { planIni, projIni, planFin, projFin, planDur, projDur, atrasoTotal };
+    // Atraso que se le muestra al usuario: en días hábiles (lun-vie).
+    const atrasoTotalHab = (planFin && projFin) ? habilesAtraso(planFin, projFin) : null;
+    const proyeccion = { planIni, projIni, planFin, projFin, planDur, projDur, atrasoTotal, atrasoTotalHab };
 
     return { filas, dominio, proyeccion };
   }, [hitos, tareas]);
@@ -191,18 +221,18 @@ export default function CronogramaPage() {
               <Indicador label="Fin planificado" value={fmtDate(proyeccion.planFin)} />
               <Indicador label="Duración planificada" value={fmtDuracion(proyeccion.planIni, proyeccion.planFin)} />
               <Indicador label="Fin proyectado" value={proyeccion.projFin ? fmtDate(proyeccion.projFin) : "—"}
-                color={proyeccion.atrasoTotal > 0 ? "error.main" : "success.main"} />
+                color={proyeccion.atrasoTotalHab > 0 ? "error.main" : "success.main"} />
               <Indicador label="Duración proyectada" value={fmtDuracion(proyeccion.projIni, proyeccion.projFin)}
                 color={(proyeccion.projDur != null && proyeccion.planDur != null)
                   ? (proyeccion.projDur > proyeccion.planDur ? "error.main" : proyeccion.projDur < proyeccion.planDur ? "success.main" : "text.primary")
                   : "text.primary"} />
               <Indicador label="Atraso proyectado"
-                value={proyeccion.atrasoTotal != null ? desfaseTxt(proyeccion.atrasoTotal) : "—"}
-                color={proyeccion.atrasoTotal > 0 ? "error.main" : proyeccion.atrasoTotal < 0 ? "success.main" : "text.primary"} />
+                value={proyeccion.atrasoTotalHab != null ? desfaseTxt(proyeccion.atrasoTotalHab) : "—"}
+                color={proyeccion.atrasoTotalHab > 0 ? "error.main" : proyeccion.atrasoTotalHab < 0 ? "success.main" : "text.primary"} />
             </Stack>
-            {proyeccion.atrasoTotal > 0 && (
+            {proyeccion.atrasoTotalHab > 0 && (
               <Alert severity="warning" sx={{ mt: 2 }}>
-                Si la etapa en curso mantiene este ritmo, la obra termina <b>{proyeccion.atrasoTotal} día{proyeccion.atrasoTotal === 1 ? "" : "s"}</b> más tarde de lo planificado. Revisá las etapas marcadas en rojo y sus tareas vencidas para corregir a tiempo.
+                Si la etapa en curso mantiene este ritmo, la obra termina <b>{proyeccion.atrasoTotalHab} día{proyeccion.atrasoTotalHab === 1 ? "" : "s"} hábil{proyeccion.atrasoTotalHab === 1 ? "" : "es"}</b> más tarde de lo planificado. Revisá las etapas marcadas en rojo y sus tareas vencidas para corregir a tiempo.
               </Alert>
             )}
           </CardContent>
@@ -266,15 +296,15 @@ export default function CronogramaPage() {
                         )}
                         {/* Barra real / proyectada (color) */}
                         {f.projStart && f.projEnd && (
-                          <Tooltip title={`${f.finalizado ? "Real" : "Proyectado"}: ${fmtDate(f.projStart)} → ${fmtDate(f.projEnd)}${f.desfase != null ? ` · ${desfaseTxt(f.desfase)}` : ""}`}>
+                          <Tooltip title={`${f.finalizado ? "Real" : "Proyectado"}: ${fmtDate(f.projStart)} → ${fmtDate(f.projEnd)}${f.desfaseHab != null ? ` · ${desfaseTxt(f.desfaseHab)}` : ""}`}>
                             <Box sx={{
                               position: "absolute", left: `${pct(f.projStart)}%`, width: `${Math.max(0.7, pct(f.projEnd) - pct(f.projStart))}%`,
                               top: 16, height: 11, borderRadius: 4, overflow: "hidden",
-                              bgcolor: f.desfase > 0 ? "rgba(192,57,43,0.18)" : "rgba(30,142,62,0.18)",
-                              border: "1px solid", borderColor: f.desfase > 0 ? "rgba(192,57,43,0.5)" : "rgba(30,142,62,0.5)",
+                              bgcolor: f.desfaseHab > 0 ? "rgba(192,57,43,0.18)" : "rgba(30,142,62,0.18)",
+                              border: "1px solid", borderColor: f.desfaseHab > 0 ? "rgba(192,57,43,0.5)" : "rgba(30,142,62,0.5)",
                               borderStyle: f.finalizado ? "solid" : "dashed",
                             }}>
-                              <Box sx={{ height: "100%", width: `${f.avance}%`, bgcolor: f.desfase > 0 ? "rgba(192,57,43,0.55)" : "rgba(30,142,62,0.55)" }} />
+                              <Box sx={{ height: "100%", width: `${f.avance}%`, bgcolor: f.desfaseHab > 0 ? "rgba(192,57,43,0.55)" : "rgba(30,142,62,0.55)" }} />
                             </Box>
                           </Tooltip>
                         )}
@@ -364,12 +394,12 @@ export default function CronogramaPage() {
 function estadoEtapa(f) {
   if (!f.tieneDatos) return { label: "Sin datos", color: "default" };
   if (f.finalizado) {
-    const d = f.desfase;
+    const d = f.desfaseHab;
     if (d != null && d > 0) return { label: "Terminó tarde", color: "error" };
     if (d != null && d < 0) return { label: "Terminó antes", color: "success" };
     return { label: "Terminada", color: "success" };
   }
-  if (f.desfase != null && f.desfase > 0) return { label: desfaseTxt(f.desfase), color: "error" };
+  if (f.desfaseHab != null && f.desfaseHab > 0) return { label: desfaseTxt(f.desfaseHab), color: "error" };
   if (f.avance > 0) return { label: "En curso", color: "warning" };
   return { label: "Pendiente", color: "default" };
 }

@@ -852,12 +852,22 @@ export default function LineaTiempoPage() {
                                 </Box>
                                 <Box sx={{ width: CHIP_W, display: "flex", justifyContent: "center" }}>
                                   {(() => {
-                                    const d = diasHabiles(t.fecha_inicio, t.fecha_fin);
-                                    return d != null ? (
-                                      <Chip size="small" variant="outlined"
-                                        label={`${d} día${Math.abs(d) === 1 ? "" : "s"} háb.`}
-                                        color={d < 0 ? "error" : "default"} />
-                                    ) : null;
+                                    // Duración = días efectivamente trabajados (esfuerzo), no el
+                                    // intervalo entre inicio y fin: una tarea puede hacerse en
+                                    // jornadas salteadas.
+                                    const d = t.dias_trabajados || 0;
+                                    if (!d) return null;
+                                    const intervalo = diasHabiles(t.fecha_inicio, t.fecha_fin);
+                                    const salteada = intervalo != null && intervalo > d;
+                                    return (
+                                      <Tooltip title={salteada
+                                        ? `${d} día${d === 1 ? "" : "s"} de trabajo, en un intervalo de ${intervalo} días háb. (jornadas salteadas)`
+                                        : `${d} día${d === 1 ? "" : "s"} de trabajo`}>
+                                        <Chip size="small" variant="outlined"
+                                          label={`${d} día${d === 1 ? "" : "s"}`}
+                                          color={salteada ? "warning" : "default"} />
+                                      </Tooltip>
+                                    );
                                   })()}
                                 </Box>
                                 <Box sx={{ width: CHK_W }} />

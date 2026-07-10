@@ -14,7 +14,10 @@
 export const parseCsv = (s) =>
   s ? s.split(",").map((x) => x.trim()).filter(Boolean) : [];
 
-// Devuelve un Map: tarea.id -> { fecha_inicio, fecha_fin } (ISO YYYY-MM-DD).
+// Devuelve un Map: tarea.id -> { fecha_inicio, fecha_fin, dias } (ISO YYYY-MM-DD).
+// - fecha_inicio / fecha_fin: primer y último día trabajado de la tarea.
+// - dias: cantidad de días efectivamente trabajados (el "esfuerzo"), que puede
+//   ser menor que el intervalo si la tarea se hizo en jornadas salteadas.
 // Sólo incluye tareas que tengan al menos un día cargado en el Diario.
 export function fechasRealesPorTarea(registros, tareas, hitos) {
   const idToNombre = {};
@@ -28,6 +31,7 @@ export function fechasRealesPorTarea(registros, tareas, hitos) {
     const etapaNombre = idToNombre[t.hito_id];
     let min = null;
     let max = null;
+    const dias = new Set(); // fechas distintas trabajadas (esfuerzo real)
     for (const r of regs) {
       const tks = parseCsv(r.tareas);
       if (!tks.includes(t.nombre)) continue;
@@ -39,8 +43,9 @@ export function fechasRealesPorTarea(registros, tareas, hitos) {
       // Las fechas ISO (YYYY-MM-DD) se comparan bien lexicográficamente.
       if (min == null || r.fecha < min) min = r.fecha;
       if (max == null || r.fecha > max) max = r.fecha;
+      dias.add(r.fecha);
     }
-    if (min) porTarea.set(t.id, { fecha_inicio: min, fecha_fin: max });
+    if (min) porTarea.set(t.id, { fecha_inicio: min, fecha_fin: max, dias: dias.size });
   }
   return porTarea;
 }
@@ -74,7 +79,12 @@ export function aplicarFechasReales(registros, tareas, hitos, todayISO = isoHoy(
   const map = fechasRealesPorTarea(registros, tareas, hitos);
   return (tareas || []).map((t) => {
     const r = map.get(t.id);
-    const conFechas = { ...t, fecha_inicio: r?.fecha_inicio ?? null, fecha_fin: r?.fecha_fin ?? null };
+    const conFechas = {
+      ...t,
+      fecha_inicio: r?.fecha_inicio ?? null,
+      fecha_fin: r?.fecha_fin ?? null,
+      dias_trabajados: r?.dias ?? 0,
+    };
     return { ...conFechas, estado: estadoDesdeDiario(conFechas, todayISO) };
   });
 }
