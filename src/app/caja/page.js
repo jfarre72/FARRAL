@@ -310,38 +310,58 @@ export default function CajaPage() {
   // Lista visible según filtro + delta y saldo running por fila
   const visible = useMemo(() => {
     const caja = filtroMoneda;
-    const deltaPara = (row, c) => {
+    // Titular en foco (si hay filtro). Cuando está seteado, los deltas se
+    // calculan POR TITULAR, atribuyendo cada lado del movimiento a la caja que
+    // corresponde (el destino de un cambio/traspaso recibe en SU caja). Cuando
+    // es null, el delta es global (toda la caja del proyecto), igual que antes.
+    const titScope = filtroTitular !== "all" ? filtroTitular : null;
+    const deltaPara = (row, c, T = null) => {
       const monto = Number(row.monto || 0);
-      if (row.kind === "aporte") return row.moneda === c ? +monto : 0;
+      const has = (who) => T == null || who === T; // ¿le corresponde al titular en foco?
+      if (row.kind === "aporte") return (row.moneda === c && has(row.titular)) ? +monto : 0;
       const mv = row.raw ?? {};
-      if (mv.tipo === "ingreso") return mv.moneda === c ? +monto : 0;
+      const t = mv.titular;
+      if (mv.tipo === "ingreso") return (mv.moneda === c && has(t)) ? +monto : 0;
       if (mv.tipo === "egreso") {
         if (mv.con_cambio) {
+          // El cambio integrado ocurre dentro de la misma caja (la del egreso).
+          if (!has(t)) return 0;
           let d = 0;
-          if (mv.cambio_moneda_origen === c) d -= Number(mv.cambio_monto_origen || 0);
+          const monOrigen = Number(mv.cambio_monto_origen || 0);
+          if (mv.cambio_moneda_origen === c) d -= monOrigen;
           if (mv.moneda === c) {
             const tc = Number(mv.cambio_tipo_cambio || 0);
-            const monOrigen = Number(mv.cambio_monto_origen || 0);
             const entrada = mv.cambio_moneda_origen === "USD" ? monOrigen * tc : (tc > 0 ? monOrigen / tc : 0);
             d += entrada;
-            if (Number(mv.monto || 0) > 0) d -= Number(mv.monto || 0);
+            if (monto > 0) d -= monto;
           }
           return d;
         }
-        return mv.moneda === c ? -monto : 0;
+        return (mv.moneda === c && has(t)) ? -monto : 0;
       }
       if (mv.tipo === "cambio") {
+        // El origen entrega su divisa; el destino (que puede ser otro titular:
+        // "cambio con traspaso") recibe la conversión en SU caja.
+        const tDest = mv.titular_destino || t;
         let d = 0;
-        if (mv.moneda === c) d -= monto;
-        if (mv.moneda_destino === c) d += Number(mv.monto_destino || 0);
+        if (mv.moneda === c && has(t)) d -= monto;
+        if (mv.moneda_destino === c && has(tDest)) d += Number(mv.monto_destino || 0);
+        return d;
+      }
+      if (mv.tipo === "traspaso") {
+        // Reasigna entre cajas personales de la misma moneda (neto global 0).
+        if (mv.moneda !== c) return 0;
+        let d = 0;
+        if (has(mv.titular)) d -= monto;
+        if (has(mv.titular_destino)) d += monto;
         return d;
       }
       return 0;
     };
 
     const filtered = unified.filter(row => {
-      // Filtro de moneda
-      if (caja !== "all" && deltaPara(row, caja) === 0) return false;
+      // Filtro de moneda (consciente del titular en foco).
+      if (caja !== "all" && deltaPara(row, caja, titScope) === 0) return false;
       // Filtro de titular
       if (filtroTitular !== "all") {
         // Para traspasos y cambios con traspaso, mostrar si el titular es
@@ -354,15 +374,16 @@ export default function CajaPage() {
       }
       return true;
     });
-    // Saldo acumulado (corrido) en ambas monedas, en orden cronológico.
+    // Saldo acumulado (corrido) en ambas monedas, en orden cronológico. Si hay
+    // un titular en foco, el saldo es el de SU caja (coincide con la tarjeta).
     const asc = [...filtered].sort((a, b) => a.fecha > b.fecha ? 1 : -1);
     let saldo = 0, saldoUSD = 0, saldoARS = 0;
     const acc = {};
     for (const r of asc) {
-      const d = caja === "all" ? null : deltaPara(r, caja);
+      const d = caja === "all" ? null : deltaPara(r, caja, titScope);
       if (d != null) saldo += d;
-      saldoUSD += deltaPara(r, "USD");
-      saldoARS += deltaPara(r, "ARS");
+      saldoUSD += deltaPara(r, "USD", titScope);
+      saldoARS += deltaPara(r, "ARS", titScope);
       acc[r.id] = { delta: d, saldo, saldoUSD, saldoARS };
     }
     return filtered.map(r => ({
