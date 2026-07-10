@@ -14,6 +14,7 @@ import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import AttachFileIcon from "@mui/icons-material/AttachFile";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
+import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
@@ -42,6 +43,40 @@ const fmtNum0 = (val) => {
 
 // Ítem vacío para el formulario de recupero (varios por retiro).
 const emptyRecItem = () => ({ unidad: "pallet", cantidad: "", precio: "" });
+
+// Categorías normalizadas de material (deben coincidir con /api/ia/remito).
+const CATEGORIAS_MAT = [
+  "Cemento", "Cal", "Arena", "Piedra/Granza", "Ladrillos/Bloques",
+  "Hierro/Acero", "Malla", "Hormigón", "Madera", "Aislaciones",
+  "Hidráulica", "Electricidad", "Pintura", "Aberturas", "Otros",
+];
+// Ítem vacío de material (renglón del remito).
+const emptyMatItem = () => ({ material: "", cantidad: "", unidad: "unidad", categoria: "Otros" });
+
+// Reduce una imagen a un tamaño manejable y la devuelve como base64 (sin el
+// prefijo data:) + media type, para mandarla al lector de remitos.
+async function imagenAOptimizada(file, maxDim = 1600, quality = 0.72) {
+  const dataUrl = await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = reject;
+    fr.readAsDataURL(file);
+  });
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = reject;
+    i.src = dataUrl;
+  });
+  const escala = Math.min(1, maxDim / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * escala));
+  const h = Math.max(1, Math.round(img.height * escala));
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+  const out = canvas.toDataURL("image/jpeg", quality);
+  return { base64: out.split(",")[1], mediaType: "image/jpeg" };
+}
 
 // Devuelve los ítems de recupero de un retiro como arreglo normalizado.
 // Usa recupero_items (V28) si existe; si no, sintetiza el ítem único de la V27.
@@ -98,8 +133,10 @@ export default function MaterialesPage() {
   const [recuperos, setRecuperos] = useState([]); // ingresos de caja marcados como recupero
   const [hitos, setHitos] = useState([]); // nombres de etapas del proyecto
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState(0); // 0 = Cuentas, 1 = Cuenta corriente, 2 = Por etapa
+  const [tab, setTab] = useState(0); // 0 = Cuentas, 1 = Cuenta corriente, 2 = Por etapa, 3 = Consumo
   const [cuentaSel, setCuentaSel] = useState(""); // cuenta elegida en la solapa de cuenta corriente
+  const [consumoEtapa, setConsumoEtapa] = useState(""); // filtro de etapa en la solapa de consumo
+  const [leyendoIA, setLeyendoIA] = useState(null); // cuentaId con lectura de remito en curso
 
   // Dialog cuenta
   const [openCuenta, setOpenCuenta] = useState(false);
@@ -467,7 +504,7 @@ export default function MaterialesPage() {
   const [retiroOpen, setRetiroOpen] = useState(null); // cuentaId del diálogo de retiro
   const openNuevoRetiro = (cuentaId) => {
     setEditRet(null);
-    setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", remito_nro: "", etapa: "", tc: "", file: null, recupero: false, recupero_items: [emptyRecItem()] } }));
+    setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", remito_nro: "", etapa: "", tc: "", file: null, recupero: false, recupero_items: [emptyRecItem()], materiales_items: [] } }));
     setRetiroOpen(cuentaId);
   };
   const setRet = (cuentaId, patch) =>
@@ -488,11 +525,19 @@ export default function MaterialesPage() {
       recupero_items: r.recupero && its.length
         ? its.map(it => ({ unidad: it.unidad, cantidad: String(it.cantidad ?? ""), precio: it.precio != null ? String(it.precio) : "" }))
         : [emptyRecItem()],
+      materiales_items: Array.isArray(r.materiales_items)
+        ? r.materiales_items.map(it => ({
+            material: it.material || "",
+            cantidad: it.cantidad != null ? String(it.cantidad) : "",
+            unidad: it.unidad || "unidad",
+            categoria: CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros",
+          }))
+        : [],
     } }));
   };
   const cancelEditRetiro = (cuentaId) => {
     setEditRet(null); setRetiroOpen(null);
-    setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", remito_nro: "", etapa: "", tc: "", file: null, recupero: false, recupero_items: [emptyRecItem()] } }));
+    setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", remito_nro: "", etapa: "", tc: "", file: null, recupero: false, recupero_items: [emptyRecItem()], materiales_items: [] } }));
   };
 
   // ---- Ítems de recupero del retiro en curso ----
@@ -509,10 +554,108 @@ export default function MaterialesPage() {
     setRet(cuentaId, { recupero_items: next.length ? next : [emptyRecItem()] });
   };
 
+  // ---- Ítems de material del remito (para analizar el consumo) ----
+  const matItemsDe = (cuentaId) => {
+    const its = nuevoRetiro[cuentaId]?.materiales_items;
+    return Array.isArray(its) ? its : [];
+  };
+  const addMatItem = (cuentaId) =>
+    setRet(cuentaId, { materiales_items: [...matItemsDe(cuentaId), emptyMatItem()] });
+  const setMatItem = (cuentaId, idx, patch) =>
+    setRet(cuentaId, { materiales_items: matItemsDe(cuentaId).map((it, i) => i === idx ? { ...it, ...patch } : it) });
+  const delMatItem = (cuentaId, idx) =>
+    setRet(cuentaId, { materiales_items: matItemsDe(cuentaId).filter((_, i) => i !== idx) });
+
+  // Lee la foto del remito con IA y completa la lista de materiales del retiro.
+  const leerRemitoIA = async (cuentaId) => {
+    const f = nuevoRetiro[cuentaId] || {};
+    const file = f.file;
+    if (!file || !file.type?.startsWith("image/")) {
+      alert("Adjuntá una FOTO (imagen) del remito para poder leerlo con IA.");
+      return;
+    }
+    setLeyendoIA(cuentaId);
+    try {
+      const { base64, mediaType } = await imagenAOptimizada(file);
+      const res = await fetch("/api/ia/remito", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ imagenBase64: base64, mediaType, etapas: hitos, hoy: hoyISO() }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        const msg = {
+          FALTA_API_KEY: "Falta configurar la API key (ANTHROPIC_API_KEY) en Vercel.",
+          SIN_IMAGEN: "No se recibió la imagen.",
+          PARSEO: "No pude interpretar el remito. Cargá los ítems a mano.",
+          API_ERROR: "Error del asistente: " + (data.detalle || ""),
+          RED: "Error de red: " + (data.detalle || ""),
+        }[data.error] || ("Error: " + (data.error || "desconocido"));
+        alert(msg);
+        return;
+      }
+      if (data.usage) {
+        supabase.from("ia_uso").insert({
+          proyecto_id: proyecto?.id ?? null, tipo: "remito", modelo: data.usage.modelo,
+          input_tokens: data.usage.input_tokens, output_tokens: data.usage.output_tokens, costo_usd: data.usage.costo_usd,
+        });
+      }
+      const items = (data.items || []).map(it => ({
+        material: it.material || "",
+        cantidad: it.cantidad != null ? String(it.cantidad) : "",
+        unidad: it.unidad || "unidad",
+        categoria: CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros",
+      }));
+      setRet(cuentaId, {
+        materiales_items: items.length ? items : [emptyMatItem()],
+        ...(data.remito_nro && !f.remito_nro ? { remito_nro: String(data.remito_nro) } : {}),
+      });
+      if (!items.length) alert("No pude leer materiales del remito. Cargalos a mano.");
+      else if (data.nota) alert("Nota IA: " + data.nota);
+    } catch (e) {
+      alert("No se pudo procesar la imagen: " + (e?.message || e));
+    } finally {
+      setLeyendoIA(null);
+    }
+  };
+
+  // Consumo de materiales agregado (de los ítems de los remitos), opcionalmente
+  // filtrado por etapa. Agrupa por categoría + material + unidad.
+  const consumo = useMemo(() => {
+    const map = {};
+    for (const c of cuentas) {
+      for (const r of retiros.filter(x => x.cuenta_id === c.id)) {
+        const et = r.etapa || "(Sin etapa)";
+        if (consumoEtapa && et !== consumoEtapa) continue;
+        const its = Array.isArray(r.materiales_items) ? r.materiales_items : [];
+        for (const it of its) {
+          const material = (it.material || "").trim() || "(sin nombre)";
+          const unidad = (it.unidad || "unidad").toString().trim().toLowerCase();
+          const categoria = CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros";
+          const key = `${categoria}||${material.toLowerCase()}||${unidad}`;
+          (map[key] ??= { categoria, material, unidad, cantidad: 0, retiros: 0, etapas: new Set() });
+          map[key].cantidad += Number(it.cantidad || 0);
+          map[key].retiros += 1;
+          map[key].etapas.add(et);
+        }
+      }
+    }
+    return Object.values(map)
+      .map(v => ({ ...v, etapas: [...v.etapas] }))
+      .sort((a, b) => a.categoria === b.categoria
+        ? b.cantidad - a.cantidad
+        : a.categoria.localeCompare(b.categoria));
+    // eslint-disable-next-line
+  }, [cuentas, retiros, consumoEtapa]);
+
   const addRetiro = async (cuentaId) => {
     const f = nuevoRetiro[cuentaId] || {};
     const monto = Number(f.monto || 0);
     if (!monto || monto <= 0) { alert("Ingresá el monto del retiro."); return; }
+    // Foto del remito OBLIGATORIA: al menos una foto nueva, o (en edición) la ya cargada.
+    const editingNow = editRet && editRet.cuenta_id === cuentaId;
+    const tieneFoto = !!f.file || (editingNow && !!editRet.remito_url);
+    if (!tieneFoto) { alert("La foto del remito es obligatoria para cargar un retiro."); return; }
     setSubiendo(cuentaId);
     try {
       let remito_url = null, remito_path = null;
@@ -552,6 +695,16 @@ export default function MaterialesPage() {
         recupero_total: recupero && items.length > 0 ? recuperoTotal : null,
         // columnas planas V27 en null: ya se usa recupero_items
         recupero_unidad: null, recupero_cantidad: null, recupero_precio: null,
+        // Detalle de materiales del remito (para analizar el consumo).
+        materiales_items: (() => {
+          const mats = (f.materiales_items || []).map(it => ({
+            material: (it.material || "").trim(),
+            cantidad: it.cantidad !== "" && it.cantidad != null ? Number(parseMiles(String(it.cantidad))) : null,
+            unidad: (it.unidad || "unidad").toString().trim().toLowerCase() || "unidad",
+            categoria: CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros",
+          })).filter(it => it.material || it.cantidad != null);
+          return mats.length ? mats : null;
+        })(),
       };
       const editing = editRet && editRet.cuenta_id === cuentaId;
       let error;
@@ -567,7 +720,7 @@ export default function MaterialesPage() {
       }
       if (error) { alert(error.message); setSubiendo(null); return; }
       setEditRet(null); setRetiroOpen(null);
-      setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", remito_nro: "", etapa: "", tc: "", file: null, recupero: false, recupero_items: [emptyRecItem()] } }));
+      setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", remito_nro: "", etapa: "", tc: "", file: null, recupero: false, recupero_items: [emptyRecItem()], materiales_items: [] } }));
       reload();
     } finally {
       setSubiendo(null);
@@ -641,6 +794,7 @@ export default function MaterialesPage() {
           <Tab label="Cuentas" />
           <Tab label="Cuenta corriente" />
           <Tab label="Por etapa (USD)" />
+          <Tab label="Consumo" />
         </Tabs>
       )}
 
@@ -839,8 +993,10 @@ export default function MaterialesPage() {
                         value={nr.descripcion ?? ""} onChange={(e) => setRet(c.id, { descripcion: e.target.value })} />
                     </Grid>
                     <Grid item xs={8} sm={2}>
-                      <Button component="label" variant="outlined" startIcon={<AttachFileIcon />} fullWidth size="small" sx={{ overflow: "hidden" }}>
-                        {nr.file ? nr.file.name : "Foto remito"}
+                      <Button component="label" variant={nr.file || (editRet?.cuenta_id === c.id && editRet?.remito_url) ? "outlined" : "contained"}
+                        color={nr.file || (editRet?.cuenta_id === c.id && editRet?.remito_url) ? "primary" : "error"}
+                        startIcon={<AttachFileIcon />} fullWidth size="small" sx={{ overflow: "hidden" }}>
+                        {nr.file ? nr.file.name : (editRet?.cuenta_id === c.id && editRet?.remito_url ? "Cambiar foto" : "Foto remito *")}
                         <input hidden type="file" accept="image/*,application/pdf"
                           onChange={(e) => setRet(c.id, { file: e.target.files?.[0] ?? null })} />
                       </Button>
@@ -984,6 +1140,64 @@ export default function MaterialesPage() {
                       );
                     })()}
                   </Box>
+
+                  {/* ===== Materiales del remito (para analizar el consumo) ===== */}
+                  <Box sx={{ mt: 2 }}>
+                    <Divider sx={{ mb: 1.5 }} />
+                    <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1} sx={{ mb: 1 }}>
+                      <Box>
+                        <Typography variant="body2" fontWeight={600}>Materiales del remito</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Detalle de lo que salió, para analizar el consumo por material y por etapa. Leelo de la foto con IA y ajustá lo que haga falta.
+                        </Typography>
+                      </Box>
+                      <Button size="small" variant="outlined" startIcon={<AutoAwesomeIcon />}
+                        disabled={leyendoIA === c.id || !(nr.file && nr.file.type?.startsWith("image/"))}
+                        onClick={() => leerRemitoIA(c.id)} sx={{ flexShrink: 0 }}>
+                        {leyendoIA === c.id ? "Leyendo…" : "Leer remito con IA"}
+                      </Button>
+                    </Stack>
+                    {!(nr.file && nr.file.type?.startsWith("image/")) && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                        Adjuntá la foto (imagen) del remito arriba para poder leerlo con IA.
+                      </Typography>
+                    )}
+                    <Stack spacing={1.25}>
+                      {matItemsDe(c.id).map((it, idx) => (
+                        <Grid container spacing={1} alignItems="center" key={idx}>
+                          <Grid item xs={12} sm={4}>
+                            <TextField label="Material" fullWidth size="small"
+                              value={it.material ?? ""} onChange={(e) => setMatItem(c.id, idx, { material: e.target.value })} />
+                          </Grid>
+                          <Grid item xs={4} sm={2}>
+                            <TextField label="Cantidad" fullWidth size="small" inputProps={{ inputMode: "decimal" }}
+                              value={it.cantidad ?? ""} onChange={(e) => setMatItem(c.id, idx, { cantidad: e.target.value.replace(/[^\d.,]/g, "") })} />
+                          </Grid>
+                          <Grid item xs={4} sm={2}>
+                            <TextField label="Unidad" fullWidth size="small"
+                              value={it.unidad ?? ""} onChange={(e) => setMatItem(c.id, idx, { unidad: e.target.value })} />
+                          </Grid>
+                          <Grid item xs={4} sm={3}>
+                            <TextField select label="Categoría" fullWidth size="small"
+                              value={CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros"}
+                              onChange={(e) => setMatItem(c.id, idx, { categoria: e.target.value })}>
+                              {CATEGORIAS_MAT.map(cat => <MenuItem key={cat} value={cat}>{cat}</MenuItem>)}
+                            </TextField>
+                          </Grid>
+                          <Grid item xs={12} sm={1} sx={{ textAlign: "right" }}>
+                            <Tooltip title="Quitar material">
+                              <IconButton size="small" onClick={() => delMatItem(c.id, idx)}>
+                                <DeleteOutlineIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </Grid>
+                        </Grid>
+                      ))}
+                    </Stack>
+                    <Button size="small" startIcon={<AddIcon />} onClick={() => addMatItem(c.id)} sx={{ mt: 1 }}>
+                      Agregar material
+                    </Button>
+                  </Box>
                   </DialogContent>
                   <DialogActions sx={{ px: 3, py: 2 }}>
                     <Button onClick={() => cancelEditRetiro(c.id)}>Cancelar</Button>
@@ -1033,6 +1247,11 @@ export default function MaterialesPage() {
                             </TableCell>
                             <TableCell>
                               {r.descripcion || "—"}
+                              {Array.isArray(r.materiales_items) && r.materiales_items.map((it, i) => (
+                                <Typography key={"m" + i} variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                                  {it.cantidad != null ? `${fmtNum0(it.cantidad)} ${it.unidad || ""} · ` : ""}{it.material}
+                                </Typography>
+                              ))}
                               {r.recupero && itemsRecupero(r).map((it, i) => (
                                 <Typography key={i} variant="caption" color="warning.main" sx={{ display: "block" }}>
                                   Recupero · {fmtNum0(it.cantidad)} {it.unidad === "bolson" ? "bolsón/es" : "pallet/s"} · {fmtMoney(it.total, c.moneda)}
@@ -1392,6 +1611,73 @@ export default function MaterialesPage() {
           <Alert severity="info">
             Este es el insumo para comparar “plan vs real” por etapa en dólares. La integración con Económico (sumar esto al real por etapa y excluir el egreso de acopio de la Caja) queda como próximo paso.
           </Alert>
+        </Stack>
+      )}
+
+      {tab === 3 && (
+        <Stack spacing={2}>
+          <Card><CardContent>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2} justifyContent="space-between" alignItems={{ sm: "center" }}>
+              <Box>
+                <Typography variant="subtitle2" fontWeight={800} sx={{ textTransform: "uppercase", letterSpacing: 0.6 }}>
+                  Consumo de materiales
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Cantidades salidas según los remitos de los retiros (leídos con IA o cargados a mano). Sirve para saber cuánto material llevó cada etapa y aprender para la próxima obra.
+                </Typography>
+              </Box>
+              <TextField select size="small" label="Etapa" sx={{ minWidth: 220 }}
+                value={consumoEtapa} onChange={(e) => setConsumoEtapa(e.target.value)}>
+                <MenuItem value="">Todas las etapas</MenuItem>
+                {(hitos.length ? hitos : ETAPAS_DEFAULT).map(et => <MenuItem key={et} value={et}>{et}</MenuItem>)}
+                <MenuItem value="(Sin etapa)">(Sin etapa)</MenuItem>
+              </TextField>
+            </Stack>
+          </CardContent></Card>
+
+          <Card><CardContent sx={{ p: { xs: 1, sm: 2 } }}>
+            <Box sx={{ overflowX: "auto" }}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ width: 150 }}>Categoría</TableCell>
+                    <TableCell>Material</TableCell>
+                    <TableCell align="right" sx={{ width: 120 }}>Cantidad</TableCell>
+                    <TableCell sx={{ width: 90 }}>Unidad</TableCell>
+                    <TableCell align="right" sx={{ width: 80 }}>Retiros</TableCell>
+                    {!consumoEtapa && <TableCell>Etapas</TableCell>}
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {consumo.length === 0 && (
+                    <TableRow><TableCell colSpan={consumoEtapa ? 5 : 6}>
+                      <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
+                        Todavía no hay materiales cargados. Cargá un retiro con la foto del remito y leelo con IA.
+                      </Typography>
+                    </TableCell></TableRow>
+                  )}
+                  {consumo.map((m, i) => (
+                    <TableRow key={i} hover>
+                      <TableCell><Chip size="small" variant="outlined" label={m.categoria} /></TableCell>
+                      <TableCell>{m.material}</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmtNum0(m.cantidad)}</TableCell>
+                      <TableCell sx={{ color: "text.secondary" }}>{m.unidad}</TableCell>
+                      <TableCell align="right" sx={{ color: "text.secondary" }}>{m.retiros}</TableCell>
+                      {!consumoEtapa && (
+                        <TableCell>
+                          <Stack direction="row" spacing={0.5} sx={{ flexWrap: "wrap" }} useFlexGap>
+                            {m.etapas.map(et => (
+                              <Chip key={et} size="small" variant="outlined" color={et === "(Sin etapa)" ? "default" : "primary"} label={et} />
+                            ))}
+                          </Stack>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Box>
+          </CardContent></Card>
         </Stack>
       )}
 
