@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtDate, fmtDuracion } from "@/components/Money";
+import { aplicarFechasReales } from "@/lib/fechasReales";
 
 // ---- Utilidades de fecha ----
 const MS_DAY = 86400000;
@@ -58,6 +59,10 @@ export default function CronogramaPage() {
       const { data } = await supabase.from("hito_tareas").select("*").in("hito_id", ids).order("orden");
       ts = data ?? [];
     }
+    // Las fechas reales (inicio/fin) de cada tarea se toman del Diario.
+    const { data: diario } = await supabase
+      .from("seguimiento_diario").select("fecha,trabajado,etapa,tareas").eq("proyecto_id", proyecto.id);
+    ts = aplicarFechasReales(diario ?? [], ts, hs ?? []);
     setHitos(hs ?? []);
     setTareas(ts);
     setLoading(false);

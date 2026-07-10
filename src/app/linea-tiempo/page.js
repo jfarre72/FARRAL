@@ -19,6 +19,7 @@ import { useProjects } from "@/components/ProjectContext";
 import { fmtDate, fmtDuracion } from "@/components/Money";
 import { getCache, setCache } from "@/lib/dataCache";
 import { printDocument, esc } from "@/lib/printPdf";
+import { fechasRealesPorTarea } from "@/lib/fechasReales";
 
 // Días hábiles (lunes a viernes) entre dos fechas ISO (YYYY-MM-DD).
 // Cuenta ambos extremos inclusive: de lunes a viernes son 5 días.
@@ -296,6 +297,25 @@ function PctField({ value, onCommit }) {
   );
 }
 
+// Muestra una fecha real (derivada del Diario) en modo lectura. Imita el alto de
+// un TextField chico para mantener la grilla alineada.
+function RealDate({ label, value }) {
+  return (
+    <Box sx={{
+      width: "100%", minHeight: 40, borderRadius: 1, px: 1, py: 0.5,
+      border: "1px solid", borderColor: "divider", bgcolor: "action.hover",
+      display: "flex", flexDirection: "column", justifyContent: "center",
+    }}>
+      <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, lineHeight: 1.1 }}>
+        {label}
+      </Typography>
+      <Typography variant="body2" sx={{ lineHeight: 1.2, color: value ? "text.primary" : "text.disabled" }}>
+        {value ? fmtDate(value) : "— (sin días en Diario)"}
+      </Typography>
+    </Box>
+  );
+}
+
 // Nombre de tarea editable que guarda al salir del campo (blur/Enter).
 function NameField({ value, onCommit, strike }) {
   const [local, setLocal] = useState(value ?? "");
@@ -326,6 +346,7 @@ export default function LineaTiempoPage() {
   const isSm = useMediaQuery(theme.breakpoints.down("sm"));
   const [hitos, setHitos] = useState(() => getCache("linea-tiempo", proyecto?.id)?.hitos ?? []);
   const [tareas, setTareas] = useState(() => getCache("linea-tiempo", proyecto?.id)?.tareas ?? []);
+  const [diario, setDiario] = useState(() => getCache("linea-tiempo", proyecto?.id)?.diario ?? []);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
   const [expanded, setExpanded] = useState({});
@@ -334,7 +355,7 @@ export default function LineaTiempoPage() {
   const reload = async () => {
     if (!proyecto) return;
     const cached = getCache("linea-tiempo", proyecto.id);
-    if (cached) { setHitos(cached.hitos); setTareas(cached.tareas); }
+    if (cached) { setHitos(cached.hitos); setTareas(cached.tareas); setDiario(cached.diario ?? []); }
     setLoading(!cached); // con caché mostramos al instante y revalidamos sin bloquear
     const { data: hs } = await supabase
       .from("hitos").select("*")
@@ -346,16 +367,35 @@ export default function LineaTiempoPage() {
         .from("hito_tareas").select("*").in("hito_id", ids).order("orden");
       ts = data ?? [];
     }
-    setCache("linea-tiempo", proyecto.id, { hitos: hs ?? [], tareas: ts });
+    // Días del Diario: fuente de verdad de las fechas reales de las tareas.
+    const { data: dr } = await supabase
+      .from("seguimiento_diario").select("fecha,trabajado,etapa,tareas").eq("proyecto_id", proyecto.id);
+    const diarioData = dr ?? [];
+    setCache("linea-tiempo", proyecto.id, { hitos: hs ?? [], tareas: ts, diario: diarioData });
     setHitos(hs ?? []);
     setTareas(ts);
+    setDiario(diarioData);
     setLoading(false);
   };
 
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
 
+  // Fechas reales (inicio/fin) de cada tarea derivadas del Diario.
+  const fechasReales = useMemo(
+    () => fechasRealesPorTarea(diario, tareas, hitos),
+    [diario, tareas, hitos]
+  );
+  // Tareas con las fechas reales tomadas del Diario (sobreescriben lo guardado).
+  const tareasConReal = useMemo(
+    () => tareas.map(t => {
+      const r = fechasReales.get(t.id);
+      return { ...t, fecha_inicio: r?.fecha_inicio ?? null, fecha_fin: r?.fecha_fin ?? null };
+    }),
+    [tareas, fechasReales]
+  );
+
   const tareasDe = (hitoId) =>
-    tareas.filter(t => t.hito_id === hitoId).sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+    tareasConReal.filter(t => t.hito_id === hitoId).sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
 
   // Avance de una tarea (0-100): usa 'avance', con fallback a completado.
   const avanceTarea = (t) => (t.avance != null ? Number(t.avance) : (t.completado ? 100 : 0));
@@ -430,37 +470,22 @@ export default function LineaTiempoPage() {
     if (error) { alert(error.message); reload(); }
   };
 
-  // Cambia el estado de una tarea, seteando fechas por defecto (hoy) que
-  // luego se pueden ajustar. Finalizado => avance 100% (suma al avance).
+  // Cambia el estado de una tarea. Las fechas reales ya no se setean acá:
+  // se derivan del Diario. Finalizado => avance 100% (suma al avance).
   const setEstadoTarea = async (t, estado) => {
-    const hoy = toISODate(new Date());
     const patch = { estado };
     if (estado === "no_iniciado") {
       patch.completado = false; patch.avance = 0; patch.completado_at = null;
     } else if (estado === "planificado") {
-      // Habilita planificar las fechas reales (inicio y fin) antes de arrancar.
       patch.completado = false; patch.avance = 0; patch.completado_at = null;
-      if (!t.fecha_inicio) patch.fecha_inicio = hoy;
-      if (!t.fecha_fin) patch.fecha_fin = hoy;
     } else if (estado === "en_curso") {
       patch.completado = false;
       if ((t.avance ?? 0) >= 100) patch.avance = 50;
       patch.completado_at = null;
-      if (!t.fecha_inicio) patch.fecha_inicio = hoy;
     } else if (estado === "finalizado") {
       patch.completado = true; patch.avance = 100;
       patch.completado_at = new Date().toISOString();
-      if (!t.fecha_inicio) patch.fecha_inicio = hoy;
-      if (!t.fecha_fin) patch.fecha_fin = hoy;
     }
-    setTareas(prev => prev.map(x => x.id === t.id ? { ...x, ...patch } : x));
-    const { error } = await supabase.from("hito_tareas").update(patch).eq("id", t.id);
-    if (error) { alert(error.message); reload(); }
-  };
-
-  // Ajusta una fecha (inicio/fin) de la tarea.
-  const setFechaTarea = async (t, campo, valor) => {
-    const patch = { [campo]: valor || null };
     setTareas(prev => prev.map(x => x.id === t.id ? { ...x, ...patch } : x));
     const { error } = await supabase.from("hito_tareas").update(patch).eq("id", t.id);
     if (error) { alert(error.message); reload(); }
@@ -559,7 +584,7 @@ export default function LineaTiempoPage() {
           <Typography variant="h5">Planificación</Typography>
           <Typography variant="body2">Etapas, tareas y avance del proyecto.</Typography>
           <Typography variant="caption" color="text.secondary">
-            Las fechas de la <b>etapa</b> son las <b>planificadas</b>; las fechas de cada <b>tarea</b> son las <b>reales</b>.
+            Las fechas de la <b>etapa</b> son las <b>planificadas</b>; las fechas <b>reales</b> de cada <b>tarea</b> se toman automáticamente del <b>Diario</b> (primer y último día en que se cargó esa tarea).
           </Typography>
         </Box>
         <Button variant="outlined" startIcon={<PictureAsPdfIcon />} onClick={exportarPdf}>
@@ -820,25 +845,13 @@ export default function LineaTiempoPage() {
                                   <PctField value={avanceTarea(t)} onCommit={(v) => setAvanceTarea(t, v)} />
                                 )}
                               </Box>
-                              {/* fechas alineadas con la etapa */}
+                              {/* fechas reales (según el Diario), alineadas con la etapa */}
                               <Box onClick={(e) => e.stopPropagation()} sx={{ display: "flex", gap: 1.5, alignItems: "center" }}>
                                 <Box sx={{ width: DATE_W }}>
-                                  {est !== "no_iniciado" && (
-                                    <DateField
-                                      label="Inicio (real)" size="small" fullWidth
-                                      value={t.fecha_inicio ?? ""}
-                                      onCommit={(v) => setFechaTarea(t, "fecha_inicio", v)}
-                                    />
-                                  )}
+                                  <RealDate label="Inicio (real)" value={t.fecha_inicio} />
                                 </Box>
                                 <Box sx={{ width: DATE_W }}>
-                                  {est !== "no_iniciado" && (
-                                    <DateField
-                                      label="Fin (real)" size="small" fullWidth
-                                      value={t.fecha_fin ?? ""}
-                                      onCommit={(v) => setFechaTarea(t, "fecha_fin", v)}
-                                    />
-                                  )}
+                                  <RealDate label="Fin (real)" value={t.fecha_fin} />
                                 </Box>
                                 <Box sx={{ width: CHIP_W, display: "flex", justifyContent: "center" }}>
                                   {(() => {
