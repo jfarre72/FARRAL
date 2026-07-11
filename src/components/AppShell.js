@@ -17,6 +17,7 @@ import AccountTreeIcon from "@mui/icons-material/AccountTree";
 import HandymanIcon from "@mui/icons-material/Handyman";
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import StackedBarChartIcon from "@mui/icons-material/StackedBarChart";
+import SavingsIcon from "@mui/icons-material/Savings";
 import PhotoLibraryIcon from "@mui/icons-material/PhotoLibrary";
 import DescriptionIcon from "@mui/icons-material/Description";
 import FolderOpenIcon from "@mui/icons-material/FolderOpen";
@@ -52,6 +53,7 @@ const NAV = [
   ]},
   { section: "Finanzas", items: [
     { label: "Caja",            href: "/caja",          icon: <PointOfSaleIcon /> },
+    { label: "Plan financiero", href: "/plan-financiero", icon: <SavingsIcon /> },
     { label: "Presupuestos",    href: "/presupuestos",  icon: <RequestQuoteIcon /> },
     { label: "Materiales",      href: "/materiales",    icon: <Inventory2Icon /> },
     { label: "Plan vs Real",    href: "/economico",     icon: <AccountTreeIcon /> },
