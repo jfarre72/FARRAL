@@ -1,14 +1,16 @@
 "use client";
 import {
   Card, CardContent, Stack, Typography, Alert, Box, Grid, TextField,
-  LinearProgress, Table, TableHead, TableBody, TableRow, TableCell, Chip, Divider,
-  Tooltip,
+  LinearProgress, Table, TableHead, TableBody, TableRow, TableCell, Chip,
+  Tooltip, Accordion, AccordionSummary, AccordionDetails,
 } from "@mui/material";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtMoney, fmtDate } from "@/components/Money";
 import { aplicarFechasReales } from "@/lib/fechasReales";
+import { saldosCaja } from "@/lib/caja";
 
 const num = (v) => Number(v || 0);
 // Parseo tolerante de montos con separadores de miles ("1.800.000" / "1,800,000").
@@ -53,11 +55,10 @@ export default function PlanFinancieroPage() {
 
   const [hitos, setHitos] = useState([]);
   const [tareas, setTareas] = useState([]); // ya con fechas/estado del Diario
+  const [saldos, setSaldos] = useState({ ars: 0, usd: 0 }); // saldos reales de Caja
   const [loading, setLoading] = useState(true);
 
   const [tc, setTc] = useState("");
-  const [saldoARS, setSaldoARS] = useState("");
-  const [saldoUSD, setSaldoUSD] = useState("");
 
   const reload = async () => {
     if (!proyecto) return;
@@ -70,10 +71,14 @@ export default function PlanFinancieroPage() {
       const { data } = await supabase.from("hito_tareas").select("*").in("hito_id", ids).order("orden");
       ts = data ?? [];
     }
-    const { data: dr } = await supabase
-      .from("seguimiento_diario").select("fecha,trabajado,etapa,tareas").eq("proyecto_id", proyecto.id);
+    const [{ data: dr }, { data: aportes }, { data: movs }] = await Promise.all([
+      supabase.from("seguimiento_diario").select("fecha,trabajado,etapa,tareas").eq("proyecto_id", proyecto.id),
+      supabase.from("aportes").select("monto,moneda,entra_a_caja").eq("proyecto_id", proyecto.id),
+      supabase.from("movimientos_caja").select("*").eq("proyecto_id", proyecto.id),
+    ]);
     setHitos(hs ?? []);
     setTareas(aplicarFechasReales(dr ?? [], ts, hs ?? []));
+    setSaldos(saldosCaja(aportes ?? [], movs ?? []));
     setLoading(false);
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
@@ -96,7 +101,8 @@ export default function PlanFinancieroPage() {
     });
   }, [hitos, tareas]);
 
-  // Semanas (lun-dom) según la fecha planificada (inicio) de cada tarea.
+  // Semanas (lun-dom) según la fecha planificada (inicio) de cada tarea, con el
+  // USD a vender por semana y su ACUMULADO.
   const calcSemanas = useMemo(() => {
     const conFecha = tareas.filter(t => t.fecha_inicio && totalTarea(t) > 0);
     const map = new Map();
@@ -107,17 +113,20 @@ export default function PlanFinancieroPage() {
       map.get(key).total += totalTarea(t);
     }
     const arr = [...map.values()].sort((a, b) => (a.key < b.key ? -1 : 1));
-    let saldoRest = parseMonto(saldoARS);
+    let saldoRest = num(saldos.ars);
+    let acumUSD = 0;
     return arr.map(s => {
       const cubierto = Math.min(saldoRest, s.total);
       saldoRest -= cubierto;
       const deficit = Math.max(0, s.total - cubierto);
-      return { ...s, usdVender: tcNum > 0 ? deficit / tcNum : null };
+      const usdVender = tcNum > 0 ? deficit / tcNum : null;
+      if (usdVender != null) acumUSD += usdVender;
+      return { ...s, usdVender, acumUSD: tcNum > 0 ? acumUSD : null };
     });
-  }, [tareas, saldoARS, tcNum]);
+  }, [tareas, saldos.ars, tcNum]);
 
   const usdVenderTotal = calcSemanas.reduce((s, w) => s + (w.usdVender || 0), 0);
-  const saldoUSDNum = parseMonto(saldoUSD);
+  const saldoUSDNum = num(saldos.usd);
 
   const totalGeneralARS = porEtapa.reduce((s, e) => s + e.subtotal, 0);
 
@@ -144,12 +153,10 @@ export default function PlanFinancieroPage() {
                 value={tc} onChange={(e) => setTc(e.target.value)} placeholder="1520" />
             </Grid>
             <Grid item xs={6} sm={3}>
-              <TextField label="Saldo ARS disponible hoy" fullWidth size="small" inputProps={{ inputMode: "decimal" }}
-                value={saldoARS} onChange={(e) => setSaldoARS(e.target.value)} placeholder="0" />
+              <SaldoBox label="Saldo ARS (Caja)" value={fmtMoney(saldos.ars, "ARS")} />
             </Grid>
             <Grid item xs={6} sm={3}>
-              <TextField label="Saldo USD disponible hoy" fullWidth size="small" inputProps={{ inputMode: "decimal" }}
-                value={saldoUSD} onChange={(e) => setSaldoUSD(e.target.value)} placeholder="0" />
+              <SaldoBox label="Saldo USD (Caja)" value={fmtMoney(saldos.usd, "USD")} />
             </Grid>
             <Grid item xs={12} sm={3}>
               <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5, display: "block" }}>
@@ -159,9 +166,9 @@ export default function PlanFinancieroPage() {
                 <Typography fontWeight={800} sx={{ color: "#0F2A4A", fontVariantNumeric: "tabular-nums" }}>
                   {tcNum > 0 ? fmtMoney(usdVenderTotal, "USD") : "—"}
                 </Typography>
-                {tcNum > 0 && saldoUSDNum > 0 && (
+                {tcNum > 0 && (
                   <Chip size="small" color={saldoUSDNum >= usdVenderTotal ? "success" : "error"} variant="outlined"
-                    label={saldoUSDNum >= usdVenderTotal ? "Alcanza" : `Faltan ${fmtMoney(usdVenderTotal - saldoUSDNum, "USD")}`} />
+                    label={saldoUSDNum >= usdVenderTotal ? "Alcanza con el USD en caja" : `Faltan ${fmtMoney(usdVenderTotal - saldoUSDNum, "USD")}`} />
                 )}
               </Stack>
             </Grid>
@@ -175,6 +182,7 @@ export default function PlanFinancieroPage() {
                     <TableCell>Semana</TableCell>
                     <TableCell align="right">A pagar (ARS)</TableCell>
                     <TableCell align="right">USD a vender</TableCell>
+                    <TableCell align="right">USD acumulado</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -185,6 +193,9 @@ export default function PlanFinancieroPage() {
                       <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums", fontWeight: 700, color: "#0F2A4A" }}>
                         {s.usdVender != null ? fmtMoney(s.usdVender, "USD") : "—"}
                       </TableCell>
+                      <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums", color: "text.secondary" }}>
+                        {s.acumUSD != null ? fmtMoney(s.acumUSD, "USD") : "—"}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -192,7 +203,7 @@ export default function PlanFinancieroPage() {
             </Box>
           )}
           <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: "block" }}>
-            Las semanas salen de la <b>fecha planificada</b> de cada tarea (según el Diario). El saldo ARS cubre primero las semanas más cercanas.
+            Los saldos salen de <b>Caja</b>. Las semanas salen de la <b>fecha planificada</b> de cada tarea (según el Diario); el saldo ARS cubre primero las semanas más cercanas y el acumulado suma los USD a vender.
           </Typography>
         </CardContent>
       </Card>
@@ -211,15 +222,18 @@ export default function PlanFinancieroPage() {
             </Typography>
           )}
 
-          <Box sx={{ overflowX: "auto" }}>
+          <Box>
             {porEtapa.map(({ hito, tareas: ts, subtotal }) => (
-              <Box key={hito.id} sx={{ mb: 2.5 }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center"
-                  sx={{ bgcolor: "rgba(15,42,74,0.05)", px: 1.5, py: 0.75, borderRadius: 1, borderLeft: "4px solid #0F2A4A" }}>
-                  <Typography variant="subtitle2" fontWeight={800}>{hito.nombre}</Typography>
-                  <Typography variant="body2">Subtotal etapa <b style={{ color: "#0F2A4A" }}>{fmtMoney(subtotal, "ARS")}</b></Typography>
-                </Stack>
-                <Table size="small" sx={{ mt: 0.5, minWidth: 900 }}>
+              <Accordion key={hito.id} disableGutters defaultExpanded={false}
+                sx={{ "&:before": { display: "none" }, border: "1px solid", borderColor: "divider", borderRadius: 1, mb: 1, overflow: "hidden" }}>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: "rgba(15,42,74,0.05)", borderLeft: "4px solid #0F2A4A" }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ width: "100%", pr: 1 }}>
+                    <Typography variant="subtitle2" fontWeight={800}>{hito.nombre}</Typography>
+                    <Typography variant="body2">Subtotal <b style={{ color: "#0F2A4A" }}>{fmtMoney(subtotal, "ARS")}</b></Typography>
+                  </Stack>
+                </AccordionSummary>
+                <AccordionDetails sx={{ p: 0, overflowX: "auto" }}>
+                <Table size="small" sx={{ minWidth: 900 }}>
                   <TableHead>
                     <TableRow>
                       <TableCell sx={{ width: 110 }}>Fecha plan</TableCell>
@@ -263,7 +277,8 @@ export default function PlanFinancieroPage() {
                     })}
                   </TableBody>
                 </Table>
-              </Box>
+                </AccordionDetails>
+              </Accordion>
             ))}
           </Box>
         </CardContent>
@@ -337,6 +352,17 @@ export default function PlanFinancieroPage() {
         </CardContent>
       </Card>
     </Stack>
+  );
+}
+
+// Muestra un saldo (traído de Caja) en modo lectura, con el mismo alto que un
+// campo chico para que la fila quede alineada.
+function SaldoBox({ label, value }) {
+  return (
+    <Box sx={{ minHeight: 40, borderRadius: 1, px: 1.25, py: 0.5, border: "1px solid", borderColor: "divider", bgcolor: "action.hover", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+      <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, lineHeight: 1.1 }}>{label}</Typography>
+      <Typography variant="body2" fontWeight={700} sx={{ fontVariantNumeric: "tabular-nums", lineHeight: 1.2 }}>{value}</Typography>
+    </Box>
   );
 }
 
