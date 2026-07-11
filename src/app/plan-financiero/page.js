@@ -2,9 +2,11 @@
 import {
   Card, CardContent, Stack, Typography, Alert, Box, Grid, TextField,
   LinearProgress, Table, TableHead, TableBody, TableRow, TableCell, Chip,
-  Tooltip, Accordion, AccordionSummary, AccordionDetails,
+  Tooltip, Accordion, AccordionSummary, AccordionDetails, IconButton, Switch,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutline";
+import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
@@ -89,22 +91,34 @@ export default function PlanFinancieroPage() {
     const { error } = await supabase.from("hito_tareas").update(patch).eq("id", tareaId);
     if (error) { alert(error.message); reload(); }
   };
+  // Incluir / quitar una tarea del plan (no borra la tarea real).
+  const setTareaIncluir = (t, incl) => setEst(t.id, { plan_incluir: incl });
+  // Incluir / quitar una etapa entera del plan.
+  const setHitoIncluir = async (hitoId, incl) => {
+    setHitos(prev => prev.map(h => h.id === hitoId ? { ...h, plan_incluir: incl } : h));
+    const { error } = await supabase.from("hitos").update({ plan_incluir: incl }).eq("id", hitoId);
+    if (error) { alert(error.message); reload(); }
+  };
 
   const tcNum = parseMonto(tc);
+  const tareaIncluida = (h, t) => h.plan_incluir !== false && t.plan_incluir !== false;
 
-  // Tareas por etapa (en orden de etapa y de tarea).
+  // Tareas por etapa (en orden de etapa y de tarea). El subtotal sólo suma las
+  // tareas incluidas de una etapa incluida.
   const porEtapa = useMemo(() => {
     return hitos.map(h => {
+      const etapaIncl = h.plan_incluir !== false;
       const ts = tareas.filter(t => t.hito_id === h.id).sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
-      const subtotal = ts.reduce((s, t) => s + totalTarea(t), 0);
-      return { hito: h, tareas: ts, subtotal };
+      const subtotal = ts.reduce((s, t) => s + (etapaIncl && t.plan_incluir !== false ? totalTarea(t) : 0), 0);
+      return { hito: h, tareas: ts, subtotal, etapaIncl };
     });
   }, [hitos, tareas]);
 
   // Semanas (lun-dom) según la fecha planificada (inicio) de cada tarea, con el
   // USD a vender por semana y su ACUMULADO.
   const calcSemanas = useMemo(() => {
-    const conFecha = tareas.filter(t => t.fecha_inicio && totalTarea(t) > 0);
+    const hitoIncl = Object.fromEntries(hitos.map(h => [h.id, h.plan_incluir !== false]));
+    const conFecha = tareas.filter(t => t.fecha_inicio && totalTarea(t) > 0 && t.plan_incluir !== false && hitoIncl[t.hito_id]);
     const map = new Map();
     for (const t of conFecha) {
       const ini = lunesDe(t.fecha_inicio);
@@ -123,12 +137,10 @@ export default function PlanFinancieroPage() {
       if (usdVender != null) acumUSD += usdVender;
       return { ...s, usdVender, acumUSD: tcNum > 0 ? acumUSD : null };
     });
-  }, [tareas, saldos.ars, tcNum]);
+  }, [tareas, hitos, saldos.ars, tcNum]);
 
   const usdVenderTotal = calcSemanas.reduce((s, w) => s + (w.usdVender || 0), 0);
   const saldoUSDNum = num(saldos.usd);
-
-  const totalGeneralARS = porEtapa.reduce((s, e) => s + e.subtotal, 0);
 
   if (!proyecto) return <Alert severity="info">Seleccioná un proyecto.</Alert>;
 
@@ -223,54 +235,87 @@ export default function PlanFinancieroPage() {
           )}
 
           <Box>
-            {porEtapa.map(({ hito, tareas: ts, subtotal }) => (
+            {porEtapa.map(({ hito, tareas: ts, subtotal, etapaIncl }) => {
+              const objetivo = num(hito.valor_plan);
+              const estimadoUSD = tcNum > 0 ? subtotal / tcNum : null;
+              const dif = (etapaIncl && objetivo > 0 && estimadoUSD != null) ? objetivo - estimadoUSD : null;
+              return (
               <Accordion key={hito.id} disableGutters defaultExpanded={false}
-                sx={{ "&:before": { display: "none" }, border: "1px solid", borderColor: "divider", borderRadius: 1, mb: 1, overflow: "hidden" }}>
-                <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: "rgba(15,42,74,0.05)", borderLeft: "4px solid #0F2A4A" }}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ width: "100%", pr: 1 }}>
-                    <Typography variant="subtitle2" fontWeight={800}>{hito.nombre}</Typography>
-                    <Typography variant="body2">Subtotal <b style={{ color: "#0F2A4A" }}>{fmtMoney(subtotal, "ARS")}</b></Typography>
+                sx={{ "&:before": { display: "none" }, border: "1px solid", borderColor: "divider", borderRadius: 1, mb: 1, overflow: "hidden", opacity: etapaIncl ? 1 : 0.55 }}>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: "rgba(15,42,74,0.05)", borderLeft: `4px solid ${etapaIncl ? "#0F2A4A" : "#9AA5B1"}` }}>
+                  <Stack direction="row" alignItems="center" spacing={1.5} sx={{ width: "100%", pr: 1, flexWrap: "wrap" }} useFlexGap>
+                    <Tooltip title={etapaIncl ? "Quitar etapa del plan (no la borra)" : "Volver a incluir la etapa"}>
+                      <Switch size="small" checked={etapaIncl}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => setHitoIncluir(hito.id, e.target.checked)} />
+                    </Tooltip>
+                    <Typography variant="subtitle2" fontWeight={800} sx={{ flexGrow: 1, minWidth: 120, textDecoration: etapaIncl ? "none" : "line-through" }}>
+                      {hito.nombre}
+                    </Typography>
+                    {etapaIncl ? (
+                      <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flexWrap: "wrap" }} useFlexGap>
+                        <Typography variant="body2">Real <b style={{ color: "#0F2A4A" }}>{fmtMoney(subtotal, "ARS")}</b></Typography>
+                        <Typography variant="body2" color="text.secondary">Obj. {objetivo > 0 ? fmtMoney(objetivo, "USD") : "—"}</Typography>
+                        {dif == null
+                          ? <Tooltip title="Cargá el objetivo en Ajustes (Etapas) y el dólar de venta arriba"><Chip size="small" variant="outlined" label="Sin comparar" /></Tooltip>
+                          : dif < -0.5
+                            ? <Chip size="small" color="error" variant="outlined" label={`Por encima ${fmtMoney(-dif, "USD")}`} />
+                            : dif > 0.5
+                              ? <Chip size="small" color="success" variant="outlined" label={`Por debajo ${fmtMoney(dif, "USD")}`} />
+                              : <Chip size="small" label="En objetivo" />}
+                      </Stack>
+                    ) : (
+                      <Chip size="small" label="Quitada del plan" />
+                    )}
                   </Stack>
                 </AccordionSummary>
                 <AccordionDetails sx={{ p: 0, overflowX: "auto" }}>
-                <Table size="small" sx={{ minWidth: 900 }}>
+                <Table size="small" sx={{ minWidth: 1180 }}>
                   <TableHead>
                     <TableRow>
-                      <TableCell sx={{ width: 110 }}>Fecha plan</TableCell>
-                      <TableCell sx={{ minWidth: 160 }}>Tarea</TableCell>
-                      <TableCell sx={{ minWidth: 220 }}>Materiales a pedir (notas)</TableCell>
-                      <TableCell align="right" sx={{ width: 130 }}>MAT $</TableCell>
-                      <TableCell align="right" sx={{ width: 130 }}>MOD</TableCell>
-                      <TableCell align="right" sx={{ width: 130 }}>MAQ</TableCell>
-                      <TableCell align="right" sx={{ width: 130 }}>Total</TableCell>
+                      <TableCell sx={{ width: 108 }}>Fecha plan</TableCell>
+                      <TableCell sx={{ minWidth: 150 }}>Tarea</TableCell>
+                      <TableCell sx={{ minWidth: 180 }}>Materiales (nota)</TableCell>
+                      <TableCell align="right" sx={{ width: 120 }}>MAT $</TableCell>
+                      <TableCell sx={{ minWidth: 140 }}>MOD (nota)</TableCell>
+                      <TableCell align="right" sx={{ width: 120 }}>MOD $</TableCell>
+                      <TableCell sx={{ minWidth: 140 }}>MAQ (nota)</TableCell>
+                      <TableCell align="right" sx={{ width: 120 }}>MAQ $</TableCell>
+                      <TableCell align="right" sx={{ width: 120 }}>Total</TableCell>
+                      <TableCell align="center" sx={{ width: 48 }}></TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {ts.length === 0 && (
-                      <TableRow><TableCell colSpan={7}>
+                      <TableRow><TableCell colSpan={10}>
                         <Typography variant="body2" color="text.secondary">Esta etapa no tiene tareas cargadas.</Typography>
                       </TableCell></TableRow>
                     )}
                     {ts.map((t) => {
                       const est = ESTADO_CHIP[t.estado] || ESTADO_CHIP.no_iniciado;
+                      const incl = etapaIncl && t.plan_incluir !== false;
                       return (
-                        <TableRow key={t.id} hover>
+                        <TableRow key={t.id} hover sx={{ opacity: incl ? 1 : 0.45 }}>
                           <TableCell sx={{ whiteSpace: "nowrap" }}>{t.fecha_inicio ? fmtDate(t.fecha_inicio) : "—"}</TableCell>
                           <TableCell>
-                            <Typography variant="body2" sx={{ fontWeight: 500 }}>{t.nombre}</Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 500, textDecoration: t.plan_incluir === false ? "line-through" : "none" }}>{t.nombre}</Typography>
                             <Chip size="small" variant="outlined" color={est.color} label={est.label} sx={{ height: 18, mt: 0.25 }} />
                           </TableCell>
-                          <TableCell>
-                            <TextField variant="standard" fullWidth multiline placeholder="Ej: Hierro Ø8/Ø10, arena, cemento…"
-                              defaultValue={t.est_notas ?? ""}
-                              onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== (t.est_notas ?? null)) setEst(t.id, { est_notas: v }); }}
-                              InputProps={{ disableUnderline: true }} inputProps={{ style: { fontSize: 13 } }} />
-                          </TableCell>
+                          <TableCell><NoteCell value={t.est_notas} placeholder="Hierro, arena, cemento…" onCommit={(v) => setEst(t.id, { est_notas: v })} /></TableCell>
                           <TableCell align="right"><MoneyCell value={t.est_mat} onCommit={(v) => setEst(t.id, { est_mat: v })} /></TableCell>
+                          <TableCell><NoteCell value={t.est_notas_mod} placeholder="Cuadrilla, jornales…" onCommit={(v) => setEst(t.id, { est_notas_mod: v })} /></TableCell>
                           <TableCell align="right"><MoneyCell value={t.est_mod} onCommit={(v) => setEst(t.id, { est_mod: v })} /></TableCell>
+                          <TableCell><NoteCell value={t.est_notas_maq} placeholder="Retro, vibrador…" onCommit={(v) => setEst(t.id, { est_notas_maq: v })} /></TableCell>
                           <TableCell align="right"><MoneyCell value={t.est_maq} onCommit={(v) => setEst(t.id, { est_maq: v })} /></TableCell>
                           <TableCell align="right" sx={{ whiteSpace: "nowrap", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
                             {fmtMoney(totalTarea(t), "ARS")}
+                          </TableCell>
+                          <TableCell align="center">
+                            <Tooltip title={t.plan_incluir === false ? "Volver a incluir la tarea" : "Quitar tarea del plan"}>
+                              <IconButton size="small" onClick={() => setTareaIncluir(t, t.plan_incluir === false)}>
+                                {t.plan_incluir === false ? <AddCircleOutlineIcon fontSize="small" /> : <RemoveCircleOutlineIcon fontSize="small" />}
+                              </IconButton>
+                            </Tooltip>
                           </TableCell>
                         </TableRow>
                       );
@@ -279,75 +324,8 @@ export default function PlanFinancieroPage() {
                 </Table>
                 </AccordionDetails>
               </Accordion>
-            ))}
-          </Box>
-        </CardContent>
-      </Card>
-
-      {/* Comparación por etapa: planificado vs objetivo de Ajustes */}
-      <Card>
-        <CardContent sx={{ p: { xs: 1, sm: 2 } }}>
-          <Typography variant="subtitle1" fontWeight={700} sx={{ px: { xs: 0.5, sm: 0 } }}>Planificado vs objetivo por etapa</Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ mb: 1.5, display: "block", px: { xs: 0.5, sm: 0 } }}>
-            Compara lo que estás estimando (en USD, al dólar de venta) contra el valor planificado de la etapa (Ajustes → Etapas). Cargá el dólar de venta arriba.
-          </Typography>
-          <Box sx={{ overflowX: "auto" }}>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Etapa</TableCell>
-                  <TableCell align="right">Objetivo (USD)</TableCell>
-                  <TableCell align="right">Estimado (ARS)</TableCell>
-                  <TableCell align="right">Estimado (USD)</TableCell>
-                  <TableCell align="right">Diferencia (USD)</TableCell>
-                  <TableCell sx={{ width: 130 }}>Estado</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {porEtapa.map(({ hito, subtotal }) => {
-                  const objetivo = num(hito.valor_plan);
-                  const estimadoUSD = tcNum > 0 ? subtotal / tcNum : null;
-                  const dif = (objetivo > 0 && estimadoUSD != null) ? objetivo - estimadoUSD : null;
-                  return (
-                    <TableRow key={hito.id} hover>
-                      <TableCell>{hito.nombre}</TableCell>
-                      <TableCell align="right" sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", color: objetivo > 0 ? "text.primary" : "text.disabled" }}>
-                        {objetivo > 0 ? fmtMoney(objetivo, "USD") : "—"}
-                      </TableCell>
-                      <TableCell align="right" sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtMoney(subtotal, "ARS")}</TableCell>
-                      <TableCell align="right" sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-                        {estimadoUSD != null ? fmtMoney(estimadoUSD, "USD") : "—"}
-                      </TableCell>
-                      <TableCell align="right" sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", fontWeight: 700,
-                        color: dif == null ? "text.disabled" : dif < 0 ? "error.main" : "success.main" }}>
-                        {dif != null ? fmtMoney(dif, "USD") : "—"}
-                      </TableCell>
-                      <TableCell>
-                        {dif == null
-                          ? <Tooltip title="Cargá el objetivo en Ajustes y el dólar de venta arriba"><Typography variant="caption" color="text.disabled">—</Typography></Tooltip>
-                          : dif < -0.5
-                            ? <Chip size="small" color="error" variant="outlined" label="Por encima" />
-                            : dif > 0.5
-                              ? <Chip size="small" color="success" variant="outlined" label="Por debajo" />
-                              : <Chip size="small" label="En objetivo" />}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-                <TableRow>
-                  <TableCell sx={{ fontWeight: 800 }}>Total</TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
-                    {fmtMoney(porEtapa.reduce((s, e) => s + num(e.hito.valor_plan), 0), "USD")}
-                  </TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{fmtMoney(totalGeneralARS, "ARS")}</TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
-                    {tcNum > 0 ? fmtMoney(totalGeneralARS / tcNum, "USD") : "—"}
-                  </TableCell>
-                  <TableCell align="right" />
-                  <TableCell />
-                </TableRow>
-              </TableBody>
-            </Table>
+              );
+            })}
           </Box>
         </CardContent>
       </Card>
@@ -363,6 +341,18 @@ function SaldoBox({ label, value }) {
       <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, lineHeight: 1.1 }}>{label}</Typography>
       <Typography variant="body2" fontWeight={700} sx={{ fontVariantNumeric: "tabular-nums", lineHeight: 1.2 }}>{value}</Typography>
     </Box>
+  );
+}
+
+// Celda de nota (texto) que guarda al salir del campo (blur/Enter).
+function NoteCell({ value, onCommit, placeholder }) {
+  return (
+    <TextField
+      variant="standard" fullWidth multiline placeholder={placeholder}
+      defaultValue={value ?? ""}
+      onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== (value ?? null)) onCommit(v); }}
+      InputProps={{ disableUnderline: true }} inputProps={{ style: { fontSize: 12 } }}
+    />
   );
 }
 
