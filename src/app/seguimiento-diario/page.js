@@ -123,6 +123,9 @@ export default function SeguimientoDiarioPage() {
   const [err, setErr] = useState(null);
   const [etapasOpen, setEtapasOpen] = useState(false);
   const [tareasOpen, setTareasOpen] = useState(false);
+  const [dupDias, setDupDias] = useState(2); // cuántos días copiar al duplicar
+  const [dragFrom, setDragFrom] = useState(null); // fecha origen del arrastre
+  const [dragOver, setDragOver] = useState(null); // fecha destino resaltada
 
   const reload = async () => {
     if (!proyecto) return;
@@ -298,6 +301,50 @@ export default function SeguimientoDiarioPage() {
     reload();
   };
 
+  // Mueve el registro de un día a otro (arrastrar y soltar). Si el destino ya
+  // tiene registro, pide confirmación y lo reemplaza.
+  const moverRegistro = async (fromFecha, toFecha) => {
+    if (!fromFecha || !toFecha || fromFecha === toFecha) return;
+    const src = porFecha[fromFecha];
+    if (!src) return;
+    const dst = porFecha[toFecha];
+    if (dst) {
+      if (!confirm(`El ${fmtDate(toFecha)} ya tiene un registro. ¿Reemplazarlo con el del ${fmtDate(fromFecha)}?`)) return;
+      const { error: delErr } = await supabase.from("seguimiento_diario").delete().eq("id", dst.id);
+      if (delErr) { alert(delErr.message); return; }
+    }
+    const { error } = await supabase.from("seguimiento_diario").update({ fecha: toFecha }).eq("id", src.id);
+    if (error) { alert(error.message); return; }
+    reload();
+  };
+
+  // Duplica el contenido del día abierto (incluido él mismo) a los próximos N
+  // días consecutivos, sobrescribiendo lo que hubiera en esos días.
+  const duplicar = async () => {
+    if (!proyecto || !fechaSel) return;
+    if (!form.trabajado && !form.causa.trim()) { setErr("Indicá la causa por la que no se trabajó."); return; }
+    const n = Math.max(1, Math.min(60, Number(dupDias) || 1));
+    const base = new Date(fechaSel + "T00:00:00");
+    const datos = {
+      trabajado: form.trabajado,
+      causa: form.trabajado ? null : (form.causa.trim() || null),
+      etapa: joinEtapas(form.etapas),
+      tareas: joinEtapas(form.tareas),
+      observacion: form.observacion.trim() || null,
+    };
+    const rows = [];
+    for (let i = 0; i <= n; i++) {
+      const d = new Date(base); d.setDate(d.getDate() + i);
+      rows.push({ proyecto_id: proyecto.id, fecha: iso(d.getFullYear(), d.getMonth(), d.getDate()), ...datos });
+    }
+    setSaving(true);
+    const { error } = await supabase.from("seguimiento_diario").upsert(rows, { onConflict: "proyecto_id,fecha" });
+    setSaving(false);
+    if (error) { setErr(error.message); return; }
+    setOpen(false);
+    reload();
+  };
+
   if (!proyecto) return <Alert severity="info">Seleccioná un proyecto.</Alert>;
 
   const success = theme.palette.success.main;
@@ -390,15 +437,22 @@ export default function SeguimientoDiarioPage() {
                 >
                   <Box
                     onClick={() => abrirDia(cell)}
+                    draggable={!!r}
+                    onDragStart={(e) => { if (r) { setDragFrom(fecha); e.dataTransfer.effectAllowed = "move"; } }}
+                    onDragEnd={() => { setDragFrom(null); setDragOver(null); }}
+                    onDragOver={(e) => { if (dragFrom && dragFrom !== fecha) { e.preventDefault(); if (dragOver !== fecha) setDragOver(fecha); } }}
+                    onDragLeave={() => { if (dragOver === fecha) setDragOver(null); }}
+                    onDrop={(e) => { e.preventDefault(); moverRegistro(dragFrom, fecha); setDragFrom(null); setDragOver(null); }}
                     sx={{
-                      cursor: "pointer", borderRadius: 1.5,
-                      border: "1px solid", borderColor: border,
+                      cursor: r ? "grab" : "pointer", borderRadius: 1.5,
+                      border: dragOver === fecha ? "2px dashed" : "1px solid",
+                      borderColor: dragOver === fecha ? "primary.main" : border,
                       bgcolor: bg,
                       p: 0.75, overflow: "hidden",
                       display: "flex", flexDirection: "column", alignItems: "center",
                       outline: esHoy ? `2px solid ${theme.palette.primary.main}` : "none",
                       outlineOffset: -2,
-                      opacity: otroMes ? 0.5 : 1,
+                      opacity: (otroMes ? 0.5 : 1) * (dragFrom === fecha ? 0.4 : 1),
                       transition: "background-color .1s",
                       "&:hover": { borderColor: "primary.main" },
                     }}
@@ -559,6 +613,25 @@ export default function SeguimientoDiarioPage() {
               value={form.observacion}
               onChange={(e) => setForm(f => ({ ...f, observacion: e.target.value }))}
             />
+
+            {/* Duplicar a los días siguientes (tareas que duran varios días) */}
+            <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: "action.hover" }}>
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Typography variant="body2">Duplicar a los próximos</Typography>
+                <TextField
+                  type="number" size="small" value={dupDias}
+                  onChange={(e) => setDupDias(e.target.value)}
+                  inputProps={{ min: 1, max: 60, style: { width: 44, textAlign: "center" } }}
+                />
+                <Typography variant="body2">días</Typography>
+                <Button size="small" variant="outlined" onClick={duplicar} disabled={saving}>
+                  Duplicar
+                </Button>
+              </Stack>
+              <Typography variant="caption" color="text.secondary">
+                Copia este día (con sus etapas, tareas y observación) a los días consecutivos. Útil para una tarea que dura varios días.
+              </Typography>
+            </Box>
           </Stack>
         </DialogContent>
         <DialogActions sx={{ justifyContent: "space-between" }}>
