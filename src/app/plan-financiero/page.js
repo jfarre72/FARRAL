@@ -53,14 +53,25 @@ const ESTADO_CHIP = {
 };
 
 export default function PlanFinancieroPage() {
-  const { proyecto } = useProjects();
+  const { proyecto, refresh } = useProjects();
 
   const [hitos, setHitos] = useState([]);
   const [tareas, setTareas] = useState([]); // ya con fechas/estado del Diario
   const [saldos, setSaldos] = useState({ ars: 0, usd: 0 }); // saldos reales de Caja
   const [loading, setLoading] = useState(true);
 
+  // El dólar de venta queda guardado en el proyecto; se edita y persiste al salir del campo.
   const [tc, setTc] = useState("");
+  useEffect(() => {
+    setTc(proyecto?.dolar_venta != null ? String(proyecto.dolar_venta) : "");
+  }, [proyecto?.dolar_venta]);
+  const guardarTc = async () => {
+    if (!proyecto) return;
+    const v = parseMonto(tc);
+    if (v === num(proyecto.dolar_venta)) return;
+    const { error } = await supabase.from("proyectos").update({ dolar_venta: v || null }).eq("id", proyecto.id);
+    if (error) alert(error.message); else refresh();
+  };
 
   const reload = async () => {
     if (!proyecto) return;
@@ -162,7 +173,10 @@ export default function PlanFinancieroPage() {
           <Grid container spacing={2} alignItems="flex-end">
             <Grid item xs={12} sm={3}>
               <TextField label="Dólar de venta (ARS/USD)" fullWidth size="small" inputProps={{ inputMode: "decimal" }}
-                value={tc} onChange={(e) => setTc(e.target.value)} placeholder="1520" />
+                value={tc} onChange={(e) => setTc(e.target.value)}
+                onBlur={guardarTc}
+                onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                placeholder="1520" helperText="Se guarda automáticamente" />
             </Grid>
             <Grid item xs={6} sm={3}>
               <SaldoBox label="Saldo ARS (Caja)" value={fmtMoney(saldos.ars, "ARS")} />
