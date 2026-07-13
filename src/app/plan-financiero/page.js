@@ -77,7 +77,7 @@ export default function PlanFinancieroPage() {
     if (!proyecto) return;
     setLoading(true);
     const { data: hs } = await supabase
-      .from("hitos").select("id,nombre,orden,valor_plan").eq("proyecto_id", proyecto.id).order("orden");
+      .from("hitos").select("id,nombre,orden,valor_plan,plan_incluir").eq("proyecto_id", proyecto.id).order("orden");
     const ids = (hs ?? []).map(h => h.id);
     let ts = [];
     if (ids.length) {
