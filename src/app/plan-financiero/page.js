@@ -138,7 +138,9 @@ export default function PlanFinancieroPage() {
       map.get(key).total += totalTarea(t);
     }
     const arr = [...map.values()].sort((a, b) => (a.key < b.key ? -1 : 1));
-    let saldoRest = num(saldos.ars);
+    // Sólo el saldo ARS positivo se usa para cubrir pagos (un saldo negativo no
+    // aumenta lo que hay que vender). Cubre primero las semanas más cercanas.
+    let saldoRest = Math.max(0, num(saldos.ars));
     let acumUSD = 0;
     return arr.map(s => {
       const cubierto = Math.min(saldoRest, s.total);
@@ -176,7 +178,7 @@ export default function PlanFinancieroPage() {
                 value={tc} onChange={(e) => setTc(e.target.value)}
                 onBlur={guardarTc}
                 onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-                placeholder="1520" helperText="Se guarda automáticamente" />
+                placeholder="1520" />
             </Grid>
             <Grid item xs={6} sm={3}>
               <SaldoBox label="Saldo ARS (Caja)" value={fmtMoney(saldos.ars, "ARS")} />
@@ -268,7 +270,10 @@ export default function PlanFinancieroPage() {
                     </Typography>
                     {etapaIncl ? (
                       <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flexWrap: "wrap" }} useFlexGap>
-                        <Typography variant="body2">Real <b style={{ color: "#0F2A4A" }}>{fmtMoney(subtotal, "ARS")}</b></Typography>
+                        <Typography variant="body2">
+                          Real <b style={{ color: "#0F2A4A" }}>{fmtMoney(subtotal, "ARS")}</b>
+                          {estimadoUSD != null && <> · <b style={{ color: "#0F2A4A" }}>{fmtMoney(estimadoUSD, "USD")}</b></>}
+                        </Typography>
                         <Typography variant="body2" color="text.secondary">Obj. {objetivo > 0 ? fmtMoney(objetivo, "USD") : "—"}</Typography>
                         {dif == null
                           ? <Tooltip title="Cargá el objetivo en Ajustes (Etapas) y el dólar de venta arriba"><Chip size="small" variant="outlined" label="Sin comparar" /></Tooltip>
