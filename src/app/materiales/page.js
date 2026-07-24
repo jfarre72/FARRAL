@@ -137,12 +137,31 @@ const fmtMiles = (val) => {
   if (decPart !== undefined) out += "," + decPart;
   return out;
 };
-// Quita los separadores y devuelve un string apto para Number().
+// Devuelve un string apto para Number(), interpretando separadores de miles y
+// decimales. Es IDEMPOTENTE: entiende tanto el formato de pantalla AR
+// ("721.131,52" -> "721131.52") como el valor ya normalizado ("721131.52"),
+// para que aplicarla dos veces no rompa el decimal.
 const parseMiles = (val) => {
   if (val === "" || val === null || val === undefined) return "";
-  // Conserva solo dígitos, coma decimal y signo; coma -> punto.
-  const cleaned = String(val).replace(/[^\d,-]/g, "").replace(",", ".");
-  return cleaned;
+  let s = String(val).trim().replace(/[^\d.,-]/g, "");
+  if (s === "" || s === "-") return s;
+  const neg = s.startsWith("-");
+  s = s.replace(/^-/, "");
+  const hasComma = s.includes(","), hasDot = s.includes(".");
+  if (hasComma && hasDot) {
+    // El último separador es el decimal; el otro es de miles.
+    if (s.lastIndexOf(",") > s.lastIndexOf(".")) s = s.replace(/\./g, "").replace(",", ".");
+    else s = s.replace(/,/g, "");
+  } else if (hasComma) {
+    // Coma sola: siempre es el separador decimal (AR).
+    s = s.replace(",", ".");
+  } else if (hasDot) {
+    // Punto solo: es de miles si hay más de un grupo y el último es de 3 dígitos
+    // (ej "721.131", "1.500.000"); si no, es decimal (ej "721131.52").
+    const p = s.split(".");
+    if (p.length > 2 || (p.length === 2 && p[1].length === 3)) s = s.replace(/\./g, "");
+  }
+  return (neg ? "-" : "") + s;
 };
 
 export default function MaterialesPage() {
