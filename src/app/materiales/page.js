@@ -50,8 +50,19 @@ const CATEGORIAS_MAT = [
   "Hierro/Acero", "Malla", "Hormigón", "Madera", "Aislaciones",
   "Hidráulica", "Electricidad", "Pintura", "Aberturas", "Otros",
 ];
-// Ítem vacío de material (renglón del remito).
-const emptyMatItem = () => ({ material: "", cantidad: "", unidad: "unidad", categoria: "Otros" });
+// Ítem vacío de material (renglón del remito). precio = precio unitario de la
+// lista del acopio; el subtotal es cantidad × precio.
+const emptyMatItem = () => ({ codigo: "", material: "", cantidad: "", unidad: "unidad", categoria: "Otros", precio: "" });
+// Ítem vacío de lista de precios de acopio.
+const emptyPrecioItem = () => ({ codigo: "", material: "", unidad: "unidad", categoria: "Otros", precio_bruto: "", descuento: "0", precio: "" });
+// Neto de una fila de lista = bruto × (1 − descuento/100), redondeado a 2 decimales.
+const netoDe = (bruto, desc) => {
+  const b = Number(bruto || 0);
+  let d = Number(desc || 0);
+  if (!Number.isFinite(d) || d < 0) d = 0;
+  if (d > 100) d = 100;
+  return Math.round(b * (1 - d / 100) * 100) / 100;
+};
 
 // Interpreta una cantidad con separadores de miles en cualquier convención:
 // "1,000.00" y "1.000,00" => 1000; "3.00" => 3; "1,000" => 1000.
@@ -98,6 +109,19 @@ async function imagenAOptimizada(file, maxDim = 1600, quality = 0.72) {
   canvas.getContext("2d").drawImage(img, 0, 0, w, h);
   const out = canvas.toDataURL("image/jpeg", quality);
   return { base64: out.split(",")[1], mediaType: "image/jpeg" };
+}
+
+// Lee un archivo cualquiera (PDF o imagen) y lo devuelve como base64 sin el
+// prefijo data:, junto con su media type. Para PDFs, que van al lector nativo.
+async function archivoABase64(file) {
+  const dataUrl = await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = reject;
+    fr.readAsDataURL(file);
+  });
+  const base64 = String(dataUrl).split(",")[1] || "";
+  return { base64, mediaType: file.type || "application/octet-stream" };
 }
 
 // Devuelve los ítems de recupero de un retiro como arreglo normalizado.
@@ -254,6 +278,32 @@ export default function MaterialesPage() {
     const reales = anticiposReales(cuentaId).filter(a => Number(a.tipo_cambio || 0) > 0);
     return reales.length ? Number(reales[reales.length - 1].tipo_cambio) : null;
   };
+  // Anticipos (acopios) que tienen lista de precios cargada.
+  const anticiposConLista = (cuentaId) =>
+    anticiposReales(cuentaId).filter(a => Array.isArray(a.lista_precios) && a.lista_precios.length);
+  // Acopio "vigente" por FIFO: sumando los anticipos por fecha, el primero cuyo
+  // acumulado supera lo ya retirado es el que se está consumiendo. Para valorizar
+  // devuelvo su id sólo si tiene lista; si el vigente no tiene, uso el último con
+  // lista cargada. "" si ningún acopio tiene lista.
+  const anticipoVigenteId = (cuentaId) => {
+    const conLista = anticiposConLista(cuentaId);
+    if (!conLista.length) return "";
+    const reales = anticiposReales(cuentaId).slice()
+      .sort((a, b) => String(a.fecha || "").localeCompare(String(b.fecha || "")));
+    const retirado = retiros.filter(r => r.cuenta_id === cuentaId).reduce((s, r) => s + Number(r.monto || 0), 0);
+    let acum = 0;
+    for (const a of reales) {
+      acum += Number(a.monto || 0);
+      if (acum > retirado && Array.isArray(a.lista_precios) && a.lista_precios.length) return a.id;
+    }
+    return conLista[conLista.length - 1].id;
+  };
+  // Lista de precios (arreglo de ítems) de un anticipo por id.
+  const listaDe = (anticipoId) => {
+    const a = anticipos.find(x => x.id === anticipoId);
+    return Array.isArray(a?.lista_precios) ? a.lista_precios : [];
+  };
+
   // USD de un monto en la moneda de la cuenta, usando el TC dado o el de la cuenta.
   const usdDe = (c, monto, tc) => {
     if (!esARS(c)) return Number(monto || 0);
@@ -437,6 +487,122 @@ export default function MaterialesPage() {
     if (error) alert(error.message); else reload();
   };
 
+  // ---- Lista de precios del acopio (diálogo por anticipo) ----
+  const [listaDlg, setListaDlg] = useState(null); // { anticipo, cuenta, items, file, acopio_nro }
+  const [leyendoLista, setLeyendoLista] = useState(false);
+  const [guardandoLista, setGuardandoLista] = useState(false);
+  const openListaDlg = (a, c) => {
+    const items = Array.isArray(a.lista_precios) && a.lista_precios.length
+      ? a.lista_precios.map(it => ({
+          codigo: it.codigo || "",
+          material: it.material || "",
+          unidad: it.unidad || "unidad",
+          categoria: CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros",
+          precio_bruto: it.precio_bruto != null ? String(it.precio_bruto) : "",
+          descuento: it.descuento != null ? String(it.descuento) : "0",
+        }))
+      : [emptyPrecioItem()];
+    setListaDlg({ anticipo: a, cuenta: c, items, file: null, acopio_nro: a.acopio_nro || "" });
+  };
+  const setListaItem = (idx, patch) =>
+    setListaDlg(prev => prev && ({ ...prev, items: prev.items.map((it, i) => i === idx ? { ...it, ...patch } : it) }));
+  const addListaItem = () =>
+    setListaDlg(prev => prev && ({ ...prev, items: [...prev.items, emptyPrecioItem()] }));
+  const delListaItem = (idx) =>
+    setListaDlg(prev => prev && ({ ...prev, items: prev.items.filter((_, i) => i !== idx) }));
+  // Lee la lista de precios (foto o PDF) con IA y llena la tabla del diálogo.
+  const leerListaIA = async () => {
+    const dlg = listaDlg;
+    if (!dlg?.file) { alert("Adjuntá la foto o el PDF de la lista de acopio."); return; }
+    const file = dlg.file;
+    const esImagen = file.type?.startsWith("image/");
+    const esPDF = file.type === "application/pdf";
+    if (!esImagen && !esPDF) { alert("La lista tiene que ser una imagen o un PDF."); return; }
+    setLeyendoLista(true);
+    try {
+      const payload = {};
+      if (esPDF) { const { base64 } = await archivoABase64(file); payload.pdfBase64 = base64; }
+      else { const { base64, mediaType } = await imagenAOptimizada(file, 2000, 0.8); payload.imagenBase64 = base64; payload.mediaType = mediaType; }
+      const res = await fetch("/api/ia/lista-precios", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        const msg = {
+          FALTA_API_KEY: "Falta configurar la API key (ANTHROPIC_API_KEY) en Vercel.",
+          SIN_ARCHIVO: "No se recibió el archivo.",
+          PARSEO: "No pude interpretar la lista. Cargá los precios a mano.",
+          API_ERROR: "Error del asistente: " + (data.detalle || ""),
+          RED: "Error de red: " + (data.detalle || ""),
+        }[data.error] || ("Error: " + (data.error || "desconocido"));
+        alert(msg); return;
+      }
+      if (data.usage) {
+        supabase.from("ia_uso").insert({
+          proyecto_id: proyecto?.id ?? null, tipo: "lista_precios", modelo: data.usage.modelo,
+          input_tokens: data.usage.input_tokens, output_tokens: data.usage.output_tokens, costo_usd: data.usage.costo_usd,
+        });
+      }
+      const items = (data.items || []).map(it => ({
+        codigo: it.codigo || "",
+        material: it.material || "",
+        unidad: it.unidad || "unidad",
+        categoria: CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros",
+        precio_bruto: it.precio_bruto != null ? String(it.precio_bruto) : "",
+        descuento: it.descuento != null ? String(it.descuento) : "0",
+      }));
+      setListaDlg(prev => prev && ({
+        ...prev,
+        items: items.length ? items : [emptyPrecioItem()],
+        acopio_nro: prev.acopio_nro || (data.acopio_nro ? String(data.acopio_nro) : ""),
+      }));
+      if (!items.length) alert("No pude leer precios de la lista. Cargalos a mano.");
+      else if (data.nota) alert("Nota IA: " + data.nota);
+    } catch (e) {
+      alert("No se pudo procesar el archivo: " + (e?.message || e));
+    } finally {
+      setLeyendoLista(false);
+    }
+  };
+  // Guarda la lista congelada dentro del anticipo (+ sube el archivo adjunto).
+  const saveLista = async () => {
+    const dlg = listaDlg;
+    if (!dlg) return;
+    setGuardandoLista(true);
+    try {
+      const lista = dlg.items.map(it => {
+        const bruto = Number(parseMiles(it.precio_bruto ?? "")) || 0;
+        const desc = Number(parseMiles(it.descuento ?? "")) || 0;
+        return {
+          codigo: (it.codigo || "").toString().trim() || null,
+          material: (it.material || "").trim(),
+          unidad: (it.unidad || "unidad").toString().trim().toLowerCase() || "unidad",
+          categoria: CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros",
+          precio_bruto: bruto || null,
+          descuento: desc || 0,
+          precio: netoDe(bruto, desc),
+        };
+      }).filter(it => it.material || it.precio_bruto != null);
+
+      const datos = { lista_precios: lista.length ? lista : null, acopio_nro: (dlg.acopio_nro || "").trim() || null };
+      // Subo el archivo adjunto de la lista, si hay uno nuevo.
+      if (dlg.file) {
+        const ext = (dlg.file.name.split(".").pop() || "bin").toLowerCase();
+        const path = `${proyecto.id}/materiales/listas/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+        const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, dlg.file, { upsert: false });
+        if (upErr) { alert(upErr.message); setGuardandoLista(false); return; }
+        const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
+        if (dlg.anticipo.lista_precios_path) await supabase.storage.from(BUCKET).remove([dlg.anticipo.lista_precios_path]);
+        datos.lista_precios_url = pub.publicUrl; datos.lista_precios_path = path;
+      }
+      const { error } = await supabase.from("anticipos_materiales").update(datos).eq("id", dlg.anticipo.id);
+      if (error) { alert(error.message); setGuardandoLista(false); return; }
+      setListaDlg(null); reload();
+    } finally {
+      setGuardandoLista(false);
+    }
+  };
+
   // ---- Devoluciones a saldo (recupero acreditado en la cuenta) ----
   // Se guarda como un anticipo más (suma al saldo) marcado es_devolucion, con el
   // detalle de pallets / bolsones devueltos para descontar el pendiente a recuperar.
@@ -545,7 +711,7 @@ export default function MaterialesPage() {
   const [retiroOpen, setRetiroOpen] = useState(null); // cuentaId del diálogo de retiro
   const openNuevoRetiro = (cuentaId) => {
     setEditRet(null);
-    setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", remito_nro: "", etapa: "", tc: "", file: null, recupero: false, recupero_items: [emptyRecItem()], materiales_items: [] } }));
+    setNuevoRetiro(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), descripcion: "", monto: "", remito_nro: "", etapa: "", tc: "", file: null, recupero: false, recupero_items: [emptyRecItem()], materiales_items: [], lista_anticipo_id: anticipoVigenteId(cuentaId) } }));
     setRetiroOpen(cuentaId);
   };
   const setRet = (cuentaId, patch) =>
@@ -566,12 +732,15 @@ export default function MaterialesPage() {
       recupero_items: r.recupero && its.length
         ? its.map(it => ({ unidad: it.unidad, cantidad: String(it.cantidad ?? ""), precio: it.precio != null ? String(it.precio) : "" }))
         : [emptyRecItem()],
+      lista_anticipo_id: r.lista_anticipo_id || anticipoVigenteId(r.cuenta_id),
       materiales_items: Array.isArray(r.materiales_items)
         ? r.materiales_items.map(it => ({
+            codigo: it.codigo || "",
             material: it.material || "",
             cantidad: it.cantidad != null ? String(it.cantidad) : "",
             unidad: it.unidad || "unidad",
             categoria: CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros",
+            precio: it.precio != null ? String(it.precio) : "",
           }))
         : [],
     } }));
@@ -595,33 +764,57 @@ export default function MaterialesPage() {
     setRet(cuentaId, { recupero_items: next.length ? next : [emptyRecItem()] });
   };
 
-  // ---- Ítems de material del remito (para analizar el consumo) ----
+  // ---- Ítems de material del remito (para analizar el consumo y valorizar) ----
   const matItemsDe = (cuentaId) => {
     const its = nuevoRetiro[cuentaId]?.materiales_items;
     return Array.isArray(its) ? its : [];
   };
+  // Subtotal de un ítem = cantidad × precio unitario.
+  const subtotalMat = (it) => (Number(parseCantidad(it?.cantidad)) || 0) * (Number(parseMiles(it?.precio ?? "")) || 0);
+  // Total del remito = Σ subtotales. Es la sumatoria P×Q.
+  const totalMatItems = (cuentaId) => matItemsDe(cuentaId).reduce((s, it) => s + subtotalMat(it), 0);
+  // Setea los ítems y, si alguno tiene precio, sincroniza el Monto con Σ(P×Q).
+  const setMatItems = (cuentaId, items) => {
+    const patch = { materiales_items: items };
+    if (items.some(it => (Number(parseMiles(it?.precio ?? "")) || 0) > 0)) {
+      const total = items.reduce((s, it) => s + subtotalMat(it), 0);
+      patch.monto = String(Math.round(total * 100) / 100);
+    }
+    setRet(cuentaId, patch);
+  };
   const addMatItem = (cuentaId) =>
-    setRet(cuentaId, { materiales_items: [...matItemsDe(cuentaId), emptyMatItem()] });
+    setMatItems(cuentaId, [...matItemsDe(cuentaId), emptyMatItem()]);
   const setMatItem = (cuentaId, idx, patch) =>
-    setRet(cuentaId, { materiales_items: matItemsDe(cuentaId).map((it, i) => i === idx ? { ...it, ...patch } : it) });
+    setMatItems(cuentaId, matItemsDe(cuentaId).map((it, i) => i === idx ? { ...it, ...patch } : it));
   const delMatItem = (cuentaId, idx) =>
-    setRet(cuentaId, { materiales_items: matItemsDe(cuentaId).filter((_, i) => i !== idx) });
+    setMatItems(cuentaId, matItemsDe(cuentaId).filter((_, i) => i !== idx));
 
   // Lee la foto del remito con IA y completa la lista de materiales del retiro.
   const leerRemitoIA = async (cuentaId) => {
     const f = nuevoRetiro[cuentaId] || {};
     const file = f.file;
-    if (!file || !file.type?.startsWith("image/")) {
-      alert("Adjuntá una FOTO (imagen) del remito para poder leerlo con IA.");
+    const esImagen = file && file.type?.startsWith("image/");
+    const esPDF = file && file.type === "application/pdf";
+    if (!esImagen && !esPDF) {
+      alert("Adjuntá una FOTO (imagen) o un PDF del remito para poder leerlo con IA.");
       return;
     }
     setLeyendoIA(cuentaId);
     try {
-      const { base64, mediaType } = await imagenAOptimizada(file);
+      // Lista de precios del acopio elegido (para que la IA valorice cada ítem).
+      const lista = listaDe(f.lista_anticipo_id);
+      const payload = { etapas: hitos, hoy: hoyISO(), lista };
+      if (esPDF) {
+        const { base64 } = await archivoABase64(file);
+        payload.pdfBase64 = base64;
+      } else {
+        const { base64, mediaType } = await imagenAOptimizada(file);
+        payload.imagenBase64 = base64; payload.mediaType = mediaType;
+      }
       const res = await fetch("/api/ia/remito", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ imagenBase64: base64, mediaType, etapas: hitos, hoy: hoyISO() }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!data.ok) {
@@ -642,16 +835,19 @@ export default function MaterialesPage() {
         });
       }
       const items = (data.items || []).map(it => ({
+        codigo: it.codigo || "",
         material: it.material || "",
         cantidad: it.cantidad != null ? String(it.cantidad) : "",
         unidad: it.unidad || "unidad",
         categoria: CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros",
+        precio: it.precio_unitario != null ? String(it.precio_unitario) : "",
       }));
-      setRet(cuentaId, {
-        materiales_items: items.length ? items : [emptyMatItem()],
-        ...(data.remito_nro && !f.remito_nro ? { remito_nro: String(data.remito_nro) } : {}),
-      });
+      // Sincroniza el monto con Σ(P×Q) si vinieron precios de la lista.
+      setMatItems(cuentaId, items.length ? items : [emptyMatItem()]);
+      if (data.remito_nro && !f.remito_nro) setRet(cuentaId, { remito_nro: String(data.remito_nro) });
+      const sinPrecio = items.filter(it => !(Number(it.precio) > 0)).length;
       if (!items.length) alert("No pude leer materiales del remito. Cargalos a mano.");
+      else if (lista.length && sinPrecio) alert(`Leí ${items.length} materiales. ${sinPrecio} no encontraron precio en la lista del acopio: revisalos y cargá el precio a mano.` + (data.nota ? "\n\nNota IA: " + data.nota : ""));
       else if (data.nota) alert("Nota IA: " + data.nota);
     } catch (e) {
       alert("No se pudo procesar la imagen: " + (e?.message || e));
@@ -736,14 +932,22 @@ export default function MaterialesPage() {
         recupero_total: recupero && items.length > 0 ? recuperoTotal : null,
         // columnas planas V27 en null: ya se usa recupero_items
         recupero_unidad: null, recupero_cantidad: null, recupero_precio: null,
-        // Detalle de materiales del remito (para analizar el consumo).
+        lista_anticipo_id: f.lista_anticipo_id || null,
+        // Detalle de materiales del remito (para analizar el consumo y valorizar).
         materiales_items: (() => {
-          const mats = (f.materiales_items || []).map(it => ({
-            material: (it.material || "").trim(),
-            cantidad: parseCantidad(it.cantidad),
-            unidad: (it.unidad || "unidad").toString().trim().toLowerCase() || "unidad",
-            categoria: CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros",
-          })).filter(it => it.material || it.cantidad != null);
+          const mats = (f.materiales_items || []).map(it => {
+            const cantidad = parseCantidad(it.cantidad);
+            const precio = Number(parseMiles(it.precio ?? "")) || 0;
+            return {
+              codigo: (it.codigo || "").toString().trim() || null,
+              material: (it.material || "").trim(),
+              cantidad,
+              unidad: (it.unidad || "unidad").toString().trim().toLowerCase() || "unidad",
+              categoria: CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros",
+              precio: precio > 0 ? precio : null,
+              total: precio > 0 ? Math.round((Number(cantidad) || 0) * precio * 100) / 100 : null,
+            };
+          }).filter(it => it.material || it.cantidad != null);
           return mats.length ? mats : null;
         })(),
       };
@@ -980,6 +1184,18 @@ export default function MaterialesPage() {
                             <Typography variant="body2" sx={{ flex: 1, fontWeight: 600, color: "#1E8E3E" }}>{fmtMoney(a.monto, c.moneda)}</Typography>
                             {esARS(c) && <Typography variant="body2" sx={{ width: 80, textAlign: "right", color: "text.secondary" }}>{Number(a.tipo_cambio || 0) > 0 ? fmtNum0(a.tipo_cambio) : "—"}</Typography>}
                             {esARS(c) && <Typography variant="body2" sx={{ width: 110, textAlign: "right", color: "text.secondary" }}>{Number(a.tipo_cambio || 0) > 0 ? fmtMoney(Number(a.monto || 0) / Number(a.tipo_cambio), "USD") : "—"}</Typography>}
+                            {(() => {
+                              const n = Array.isArray(a.lista_precios) ? a.lista_precios.length : 0;
+                              return (
+                                <Tooltip title={n ? `Lista de precios: ${n} ítems. Tocá para ver/editar.` : "Cargar lista de precios de este acopio (foto o PDF)"}>
+                                  <Button size="small" variant={n ? "outlined" : "text"} color={n ? "success" : "primary"}
+                                    startIcon={<ReceiptLongIcon sx={{ fontSize: 16 }} />}
+                                    onClick={() => openListaDlg(a, c)} sx={{ minWidth: 0, height: 24, px: 1, whiteSpace: "nowrap" }}>
+                                    {n ? `Lista (${n})` : "Lista"}
+                                  </Button>
+                                </Tooltip>
+                              );
+                            })()}
                             {a.movimiento_id ? (
                               <Tooltip title="Acopio generado desde Caja; editalo o eliminalo desde el movimiento de Caja">
                                 <Chip size="small" variant="outlined" label="Caja" sx={{ height: 22 }} />
@@ -1182,63 +1398,121 @@ export default function MaterialesPage() {
                     })()}
                   </Box>
 
-                  {/* ===== Materiales del remito (para analizar el consumo) ===== */}
+                  {/* ===== Materiales del remito (consumo + valorización) ===== */}
+                  {(() => {
+                    const listasCta = anticiposConLista(c.id);
+                    const listaSel = nr.lista_anticipo_id || "";
+                    const listaLen = listaDe(listaSel).length;
+                    const total = totalMatItems(c.id);
+                    const hayPrecios = matItemsDe(c.id).some(it => (Number(parseMiles(it.precio ?? "")) || 0) > 0);
+                    const puedeIA = nr.file && (nr.file.type?.startsWith("image/") || nr.file.type === "application/pdf");
+                    return (
                   <Box sx={{ mt: 2 }}>
                     <Divider sx={{ mb: 1.5 }} />
                     <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1} sx={{ mb: 1 }}>
                       <Box>
                         <Typography variant="body2" fontWeight={600}>Materiales del remito</Typography>
                         <Typography variant="caption" color="text.secondary">
-                          Detalle de lo que salió, para analizar el consumo por material y por etapa. Leelo de la foto con IA y ajustá lo que haga falta.
+                          Detalle de lo que salió. La IA lee las cantidades y las multiplica por el precio de la lista del acopio; el Monto es la suma.
                         </Typography>
                       </Box>
                       <Button size="small" variant="outlined" startIcon={<AutoAwesomeIcon />}
-                        disabled={leyendoIA === c.id || !(nr.file && nr.file.type?.startsWith("image/"))}
+                        disabled={leyendoIA === c.id || !puedeIA}
                         onClick={() => leerRemitoIA(c.id)} sx={{ flexShrink: 0 }}>
                         {leyendoIA === c.id ? "Leyendo…" : "Leer remito con IA"}
                       </Button>
                     </Stack>
-                    {!(nr.file && nr.file.type?.startsWith("image/")) && (
+                    {/* Selector de lista de precios del acopio (default: FIFO). */}
+                    <Grid container spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                      <Grid item xs={12} sm={7}>
+                        <TextField select label="Lista de precios (acopio)" fullWidth size="small"
+                          value={listasCta.some(a => a.id === listaSel) ? listaSel : ""}
+                          onChange={(e) => setRet(c.id, { lista_anticipo_id: e.target.value })}
+                          helperText={listasCta.length
+                            ? (listaLen ? `${listaLen} precios · se usa para valorizar el remito` : "Este acopio no tiene lista cargada")
+                            : "Ningún acopio tiene lista. Cargala desde “Anticipos / acopios”."}>
+                          <MenuItem value="">(Sin lista — cargo precios a mano)</MenuItem>
+                          {listasCta.map(a => (
+                            <MenuItem key={a.id} value={a.id}>
+                              {(a.fecha ? fmtDate(a.fecha) : "s/f")} · {fmtMoney(a.monto, c.moneda)}
+                              {a.acopio_nro ? ` · acopio ${a.acopio_nro}` : ""} ({(a.lista_precios || []).length} precios)
+                            </MenuItem>
+                          ))}
+                        </TextField>
+                      </Grid>
+                    </Grid>
+                    {!puedeIA && (
                       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                        Adjuntá la foto (imagen) del remito arriba para poder leerlo con IA.
+                        Adjuntá la foto o el PDF del remito arriba para poder leerlo con IA.
                       </Typography>
                     )}
                     <Stack spacing={1.25}>
-                      {matItemsDe(c.id).map((it, idx) => (
-                        <Grid container spacing={1} alignItems="center" key={idx}>
-                          <Grid item xs={12} sm={4}>
-                            <TextField label="Material" fullWidth size="small"
-                              value={it.material ?? ""} onChange={(e) => setMatItem(c.id, idx, { material: e.target.value })} />
+                      {matItemsDe(c.id).map((it, idx) => {
+                        const sub = subtotalMat(it);
+                        return (
+                        <Box key={idx} sx={{ p: 1, border: "1px solid", borderColor: "rgba(15,42,74,0.10)", borderRadius: 1 }}>
+                          <Grid container spacing={1} alignItems="center">
+                            <Grid item xs={8} sm={5}>
+                              <TextField label="Material" fullWidth size="small"
+                                value={it.material ?? ""} onChange={(e) => setMatItem(c.id, idx, { material: e.target.value })}
+                                helperText={it.codigo ? `Cód. ${it.codigo}` : " "} />
+                            </Grid>
+                            <Grid item xs={4} sm={2}>
+                              <TextField select label="Categoría" fullWidth size="small"
+                                value={CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros"}
+                                onChange={(e) => setMatItem(c.id, idx, { categoria: e.target.value })}>
+                                {CATEGORIAS_MAT.map(cat => <MenuItem key={cat} value={cat}>{cat}</MenuItem>)}
+                              </TextField>
+                            </Grid>
+                            <Grid item xs={4} sm={1.5}>
+                              <TextField label="Cantidad" fullWidth size="small" inputProps={{ inputMode: "decimal" }}
+                                value={it.cantidad ?? ""} onChange={(e) => setMatItem(c.id, idx, { cantidad: e.target.value.replace(/[^\d.,]/g, "") })} />
+                            </Grid>
+                            <Grid item xs={4} sm={1.5}>
+                              <TextField label="Unidad" fullWidth size="small"
+                                value={it.unidad ?? ""} onChange={(e) => setMatItem(c.id, idx, { unidad: e.target.value })} />
+                            </Grid>
+                            <Grid item xs={4} sm={2}>
+                              <TextField label={`Precio (${c.moneda})`} fullWidth size="small" inputProps={{ inputMode: "decimal" }}
+                                value={fmtMiles(it.precio ?? "")} onChange={(e) => setMatItem(c.id, idx, { precio: parseMiles(e.target.value) })} />
+                            </Grid>
+                            <Grid item xs={8} sm={9}>
+                              <Typography variant="caption" color="text.secondary">
+                                Subtotal:{" "}
+                                <Typography component="span" fontWeight={700} color={sub > 0 ? "secondary.main" : "text.disabled"} sx={{ fontVariantNumeric: "tabular-nums" }}>
+                                  {fmtMoney(sub, c.moneda)}
+                                </Typography>
+                              </Typography>
+                            </Grid>
+                            <Grid item xs={4} sm={3} sx={{ textAlign: "right" }}>
+                              <Tooltip title="Quitar material">
+                                <IconButton size="small" onClick={() => delMatItem(c.id, idx)}>
+                                  <DeleteOutlineIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            </Grid>
                           </Grid>
-                          <Grid item xs={4} sm={2}>
-                            <TextField label="Cantidad" fullWidth size="small" inputProps={{ inputMode: "decimal" }}
-                              value={it.cantidad ?? ""} onChange={(e) => setMatItem(c.id, idx, { cantidad: e.target.value.replace(/[^\d.,]/g, "") })} />
-                          </Grid>
-                          <Grid item xs={4} sm={2}>
-                            <TextField label="Unidad" fullWidth size="small"
-                              value={it.unidad ?? ""} onChange={(e) => setMatItem(c.id, idx, { unidad: e.target.value })} />
-                          </Grid>
-                          <Grid item xs={4} sm={3}>
-                            <TextField select label="Categoría" fullWidth size="small"
-                              value={CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros"}
-                              onChange={(e) => setMatItem(c.id, idx, { categoria: e.target.value })}>
-                              {CATEGORIAS_MAT.map(cat => <MenuItem key={cat} value={cat}>{cat}</MenuItem>)}
-                            </TextField>
-                          </Grid>
-                          <Grid item xs={12} sm={1} sx={{ textAlign: "right" }}>
-                            <Tooltip title="Quitar material">
-                              <IconButton size="small" onClick={() => delMatItem(c.id, idx)}>
-                                <DeleteOutlineIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          </Grid>
-                        </Grid>
-                      ))}
+                        </Box>
+                        );
+                      })}
                     </Stack>
-                    <Button size="small" startIcon={<AddIcon />} onClick={() => addMatItem(c.id)} sx={{ mt: 1 }}>
-                      Agregar material
-                    </Button>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 1, flexWrap: "wrap", gap: 1 }}>
+                      <Button size="small" startIcon={<AddIcon />} onClick={() => addMatItem(c.id)}>
+                        Agregar material
+                      </Button>
+                      {hayPrecios && (
+                        <Typography variant="body2">
+                          Total remito (Σ P×Q):{" "}
+                          <Typography component="span" fontWeight={700} color="secondary.main" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                            {fmtMoney(total, c.moneda)}
+                          </Typography>
+                          <Typography component="span" variant="caption" color="text.secondary"> → se cargó como Monto</Typography>
+                        </Typography>
+                      )}
+                    </Stack>
                   </Box>
+                    );
+                  })()}
                   </DialogContent>
                   <DialogActions sx={{ px: 3, py: 2 }}>
                     <Button onClick={() => cancelEditRetiro(c.id)}>Cancelar</Button>
@@ -1721,6 +1995,114 @@ export default function MaterialesPage() {
           </CardContent></Card>
         </Stack>
       )}
+
+      {/* Dialog: lista de precios de un acopio (anticipo) */}
+      <Dialog open={!!listaDlg} onClose={() => setListaDlg(null)} fullWidth maxWidth="md" fullScreen={fullScreen}>
+        {listaDlg && (() => {
+          const { anticipo: a, cuenta: c, items, file } = listaDlg;
+          const puedeIA = file && (file.type?.startsWith("image/") || file.type === "application/pdf");
+          const totalItems = items.filter(it => (it.material || "").trim() || Number(parseMiles(it.precio_bruto ?? "")) > 0).length;
+          return (
+            <>
+              <DialogTitle>
+                Lista de precios del acopio · {c.proveedor}
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                  {a.fecha ? fmtDate(a.fecha) : "sin fecha"} · {fmtMoney(a.monto, c.moneda)} — congelada dentro de este acopio
+                </Typography>
+              </DialogTitle>
+              <DialogContent dividers>
+                <Grid container spacing={1.5} alignItems="center" sx={{ mb: 1 }}>
+                  <Grid item xs={6} sm={3}>
+                    <TextField label="Acopio N°" fullWidth size="small"
+                      value={listaDlg.acopio_nro ?? ""} onChange={(e) => setListaDlg(prev => prev && ({ ...prev, acopio_nro: e.target.value }))} />
+                  </Grid>
+                  <Grid item xs={6} sm={4}>
+                    <Button component="label" variant={file ? "outlined" : "contained"}
+                      startIcon={<AttachFileIcon />} fullWidth size="small" sx={{ overflow: "hidden" }}>
+                      {file ? file.name : "Adjuntar lista (foto/PDF)"}
+                      <input hidden type="file" accept="image/*,application/pdf"
+                        onChange={(e) => setListaDlg(prev => prev && ({ ...prev, file: e.target.files?.[0] ?? null }))} />
+                    </Button>
+                  </Grid>
+                  <Grid item xs={12} sm={5}>
+                    <Button variant="outlined" startIcon={<AutoAwesomeIcon />} fullWidth size="small"
+                      disabled={leyendoLista || !puedeIA} onClick={leerListaIA}>
+                      {leyendoLista ? "Leyendo lista…" : "Leer lista con IA"}
+                    </Button>
+                  </Grid>
+                </Grid>
+                {!puedeIA && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                    Adjuntá la foto o el PDF de la lista para leerla con IA. El neto = precio − descuento.
+                  </Typography>
+                )}
+                <Box sx={{ overflowX: "auto" }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ width: 70 }}>Código</TableCell>
+                        <TableCell>Denominación</TableCell>
+                        <TableCell sx={{ width: 90 }}>Unidad</TableCell>
+                        <TableCell align="right" sx={{ width: 110 }}>Precio</TableCell>
+                        <TableCell align="right" sx={{ width: 80 }}>Desc. %</TableCell>
+                        <TableCell align="right" sx={{ width: 120 }}>Neto</TableCell>
+                        <TableCell sx={{ width: 44 }}></TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {items.map((it, idx) => {
+                        const neto = netoDe(parseMiles(it.precio_bruto ?? ""), parseMiles(it.descuento ?? ""));
+                        return (
+                          <TableRow key={idx}>
+                            <TableCell>
+                              <TextField variant="standard" size="small" fullWidth
+                                value={it.codigo ?? ""} onChange={(e) => setListaItem(idx, { codigo: e.target.value })} />
+                            </TableCell>
+                            <TableCell>
+                              <TextField variant="standard" size="small" fullWidth
+                                value={it.material ?? ""} onChange={(e) => setListaItem(idx, { material: e.target.value })} />
+                            </TableCell>
+                            <TableCell>
+                              <TextField variant="standard" size="small" fullWidth
+                                value={it.unidad ?? ""} onChange={(e) => setListaItem(idx, { unidad: e.target.value })} />
+                            </TableCell>
+                            <TableCell align="right">
+                              <TextField variant="standard" size="small" fullWidth inputProps={{ inputMode: "decimal", style: { textAlign: "right" } }}
+                                value={fmtMiles(it.precio_bruto ?? "")} onChange={(e) => setListaItem(idx, { precio_bruto: parseMiles(e.target.value) })} />
+                            </TableCell>
+                            <TableCell align="right">
+                              <TextField variant="standard" size="small" fullWidth inputProps={{ inputMode: "decimal", style: { textAlign: "right" } }}
+                                value={it.descuento ?? ""} onChange={(e) => setListaItem(idx, { descuento: e.target.value.replace(/[^\d.,]/g, "") })} />
+                            </TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 700, color: "#1E8E3E", fontVariantNumeric: "tabular-nums" }}>
+                              {fmtMoney(neto, c.moneda)}
+                            </TableCell>
+                            <TableCell align="right">
+                              <IconButton size="small" onClick={() => delListaItem(idx)}>
+                                <DeleteOutlineIcon fontSize="small" />
+                              </IconButton>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </Box>
+                <Button size="small" startIcon={<AddIcon />} onClick={addListaItem} sx={{ mt: 1 }}>
+                  Agregar renglón
+                </Button>
+              </DialogContent>
+              <DialogActions sx={{ px: 3, py: 2 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ mr: "auto" }}>{totalItems} ítems</Typography>
+                <Button onClick={() => setListaDlg(null)}>Cancelar</Button>
+                <Button variant="contained" color="secondary" disabled={guardandoLista} onClick={saveLista}>
+                  {guardandoLista ? "…" : "Guardar lista"}
+                </Button>
+              </DialogActions>
+            </>
+          );
+        })()}
+      </Dialog>
 
       {/* Dialog nueva/editar cuenta */}
       <Dialog open={openCuenta} onClose={() => setOpenCuenta(false)} fullWidth maxWidth="sm" fullScreen={fullScreen}>

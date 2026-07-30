@@ -64,8 +64,26 @@ function parseJsonLoose(text) {
   try { return JSON.parse(t); } catch { return null; }
 }
 
-function systemPrompt() {
-  return `Sos un asistente de una obra de construcción en Argentina que lee REMITOS y FACTURAS de proveedores de materiales a partir de una foto.
+// Arma la parte del prompt que cruza cada renglón contra la lista de precios del
+// acopio (si se envió una). El modelo mapea por código cuando el remito lo trae,
+// o por nombre parecido, y devuelve el código y el precio unitario de la lista.
+function bloqueLista(lista) {
+  if (!Array.isArray(lista) || !lista.length) {
+    return `- "codigo": null. "precio_unitario": null. (No se envió lista de precios.)`;
+  }
+  // Lista compacta: "codigo | material | precio_neto".
+  const filas = lista
+    .filter((it) => it && (it.codigo || it.material))
+    .map((it) => `${it.codigo ?? ""} | ${it.material ?? ""} | ${it.precio ?? ""}`)
+    .join("\n");
+  return `- "codigo" y "precio_unitario": ADEMÁS de leer la cantidad, cruzá cada renglón contra esta LISTA DE PRECIOS del acopio (formato "codigo | material | precio_neto"). Emparejá por el CÓDIGO si el remito lo muestra; si no, por el material más parecido (mismo producto, aunque el texto no sea idéntico). Devolvé "codigo" = el código de la lista que emparejaste y "precio_unitario" = el precio_neto de esa fila. Si ningún renglón de la lista corresponde con seguridad, devolvé "codigo": null y "precio_unitario": null (NO inventes un precio).
+
+LISTA DE PRECIOS:
+${filas}`;
+}
+
+function systemPrompt(lista) {
+  return `Sos un asistente de una obra de construcción en Argentina que lee REMITOS y FACTURAS de proveedores de materiales a partir de una foto o un PDF.
 
 Tu tarea: extraer TODOS los renglones de material del comprobante. Por cada renglón devolvés cantidad, unidad, la descripción del material y una categoría normalizada.
 
@@ -75,12 +93,13 @@ Reglas:
 - "unidad": la unidad del renglón tal como corresponde (ej: "unidad", "bolsa", "m3", "m2", "ml", "kg", "tonelada", "pallet", "bolson", "litro", "barra", "rollo"). Si no está clara, "unidad".
 - "material": descripción del producto tal como figura (ej: "Ladrillo hueco 12x18x33", "Cemento Loma Negra 50kg", "Hierro del 8", "Malla Q188", "Arena fina").
 - "categoria": UNA de esta lista (la más parecida): ${CATEGORIAS.join(", ")}.
+${bloqueLista(lista)}
 - NO inventes renglones ni cantidades. Si el comprobante no es legible o no tiene materiales, devolvé "items": [].
 - Ignorá totales, IVA, transporte y renglones que no sean material físico.
 - "remito_nro": número de remito/comprobante si se lee, o null.
 
 Devolvé SOLO este JSON (sin markdown):
-{"remito_nro":null,"items":[{"material":null,"cantidad":null,"unidad":"unidad","categoria":"Otros"}],"nota":null}`;
+{"remito_nro":null,"items":[{"codigo":null,"material":null,"cantidad":null,"unidad":"unidad","categoria":"Otros","precio_unitario":null}],"nota":null}`;
 }
 
 export async function POST(req) {
@@ -90,10 +109,16 @@ export async function POST(req) {
   let body;
   try { body = await req.json(); } catch { body = {}; }
   const imagenBase64 = body?.imagenBase64 || "";
+  const pdfBase64 = body?.pdfBase64 || "";
   const mediaType = body?.mediaType || "image/jpeg";
-  if (!imagenBase64) return Response.json({ ok: false, error: "SIN_IMAGEN" }, { status: 200 });
+  const lista = Array.isArray(body?.lista) ? body.lista : [];
+  if (!imagenBase64 && !pdfBase64) return Response.json({ ok: false, error: "SIN_IMAGEN" }, { status: 200 });
 
   const modelo = process.env.IA_MODELO_VISION || "claude-haiku-4-5";
+
+  const fuente = pdfBase64
+    ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdfBase64 } }
+    : { type: "image", source: { type: "base64", media_type: mediaType, data: imagenBase64 } };
 
   try {
     const resp = await fetch("https://api.anthropic.com/v1/messages", {
@@ -105,12 +130,12 @@ export async function POST(req) {
       },
       body: JSON.stringify({
         model: modelo,
-        max_tokens: 1500,
-        system: systemPrompt(),
+        max_tokens: 2500,
+        system: systemPrompt(lista),
         messages: [{
           role: "user",
           content: [
-            { type: "image", source: { type: "base64", media_type: mediaType, data: imagenBase64 } },
+            fuente,
             { type: "text", text: "Leé este remito y devolvé el detalle de materiales en el JSON pedido." },
           ],
         }],
@@ -127,10 +152,12 @@ export async function POST(req) {
     // Normalizo los ítems (defensivo).
     const items = (Array.isArray(draft.items) ? draft.items : [])
       .map((it) => ({
+        codigo: (it?.codigo != null ? String(it.codigo) : "").trim(),
         material: (it?.material ? String(it.material) : "").trim(),
         cantidad: parseCantidad(it?.cantidad),
         unidad: (it?.unidad ? String(it.unidad) : "unidad").trim().toLowerCase(),
         categoria: CATEGORIAS.includes(it?.categoria) ? it.categoria : "Otros",
+        precio_unitario: parseCantidad(it?.precio_unitario),
       }))
       .filter((it) => it.material || it.cantidad != null);
 
