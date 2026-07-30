@@ -564,6 +564,43 @@ export default function MaterialesPage() {
       setLeyendoLista(false);
     }
   };
+  // Importa la lista desde un Excel/CSV adjunto (cálculo puro, SIN IA => gratis).
+  const importarExcel = async () => {
+    const dlg = listaDlg;
+    if (!dlg?.file) { alert("Adjuntá el Excel (.xlsx/.xls) o CSV de la lista."); return; }
+    setLeyendoLista(true);
+    try {
+      const { base64 } = await archivoABase64(dlg.file);
+      const res = await fetch("/api/materiales/lista-excel", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ base64 }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        const msg = {
+          SIN_ARCHIVO: "No se recibió el archivo.",
+          VACIO: "El Excel está vacío.",
+          SIN_COLUMNAS: "No encontré las columnas. Asegurate de que la planilla tenga encabezados con al menos “Denominación” (o Descripción/Material) y “Precio”.",
+          PARSEO: "No pude leer el Excel: " + (data.detalle || ""),
+        }[data.error] || ("Error: " + (data.error || "desconocido"));
+        alert(msg); return;
+      }
+      const items = (data.items || []).map(it => ({
+        codigo: it.codigo || "",
+        material: it.material || "",
+        unidad: it.unidad || "unidad",
+        categoria: CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros",
+        precio_bruto: it.precio_bruto != null ? String(it.precio_bruto) : "",
+        descuento: it.descuento != null ? String(it.descuento) : "0",
+      }));
+      setListaDlg(prev => prev && ({ ...prev, items: items.length ? items : [emptyPrecioItem()] }));
+      if (!items.length) alert("No encontré renglones en el Excel. Revisá que tenga columnas de Denominación y Precio.");
+    } catch (e) {
+      alert("No se pudo leer el Excel: " + (e?.message || e));
+    } finally {
+      setLeyendoLista(false);
+    }
+  };
+
   // Guarda la lista congelada dentro del anticipo (+ sube el archivo adjunto).
   const saveLista = async () => {
     const dlg = listaDlg;
@@ -2000,7 +2037,8 @@ export default function MaterialesPage() {
       <Dialog open={!!listaDlg} onClose={() => setListaDlg(null)} fullWidth maxWidth="md" fullScreen={fullScreen}>
         {listaDlg && (() => {
           const { anticipo: a, cuenta: c, items, file } = listaDlg;
-          const puedeIA = file && (file.type?.startsWith("image/") || file.type === "application/pdf");
+          const esExcel = file && /\.(xlsx|xls|csv)$/i.test(file.name || "");
+          const puedeIA = file && !esExcel && (file.type?.startsWith("image/") || file.type === "application/pdf");
           const totalItems = items.filter(it => (it.material || "").trim() || Number(parseMiles(it.precio_bruto ?? "")) > 0).length;
           return (
             <>
@@ -2019,23 +2057,30 @@ export default function MaterialesPage() {
                   <Grid item xs={6} sm={4}>
                     <Button component="label" variant={file ? "outlined" : "contained"}
                       startIcon={<AttachFileIcon />} fullWidth size="small" sx={{ overflow: "hidden" }}>
-                      {file ? file.name : "Adjuntar lista (foto/PDF)"}
-                      <input hidden type="file" accept="image/*,application/pdf"
+                      {file ? file.name : "Adjuntar lista (Excel/PDF/foto)"}
+                      <input hidden type="file" accept=".xlsx,.xls,.csv,image/*,application/pdf"
                         onChange={(e) => setListaDlg(prev => prev && ({ ...prev, file: e.target.files?.[0] ?? null }))} />
                     </Button>
                   </Grid>
                   <Grid item xs={12} sm={5}>
-                    <Button variant="outlined" startIcon={<AutoAwesomeIcon />} fullWidth size="small"
-                      disabled={leyendoLista || !puedeIA} onClick={leerListaIA}>
-                      {leyendoLista ? "Leyendo lista…" : "Leer lista con IA"}
-                    </Button>
+                    {esExcel ? (
+                      <Button variant="contained" color="success" fullWidth size="small"
+                        disabled={leyendoLista} onClick={importarExcel}>
+                        {leyendoLista ? "Importando…" : "Importar Excel (gratis)"}
+                      </Button>
+                    ) : (
+                      <Button variant="outlined" startIcon={<AutoAwesomeIcon />} fullWidth size="small"
+                        disabled={leyendoLista || !puedeIA} onClick={leerListaIA}>
+                        {leyendoLista ? "Leyendo lista…" : "Leer lista con IA"}
+                      </Button>
+                    )}
                   </Grid>
                 </Grid>
-                {!puedeIA && (
-                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                    Adjuntá la foto o el PDF de la lista para leerla con IA. El neto = precio − descuento.
-                  </Typography>
-                )}
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                  {esExcel
+                    ? "Excel/CSV: se lee gratis y al instante (sin IA). Mapea Código · Denominación · Precio · Descuento; el neto = precio − descuento."
+                    : "Recomendado: adjuntá un Excel/CSV (gratis, sin IA). Con foto o PDF se usa IA (tiene costo). El neto = precio − descuento."}
+                </Typography>
                 <Box sx={{ overflowX: "auto" }}>
                   <Table size="small">
                     <TableHead>
