@@ -10,9 +10,37 @@
 // etapa esté presente en el día para desambiguar tareas homónimas de distintas
 // etapas.
 
-// Convierte el texto separado por comas (etapas / tareas) en un arreglo limpio.
-export const parseCsv = (s) =>
-  s ? s.split(",").map((x) => x.trim()).filter(Boolean) : [];
+// Convierte el valor guardado (etapas / tareas) en un arreglo limpio.
+//
+// A partir de ahora las listas se guardan como JSON (ver serializeLista) para
+// que un nombre que contenga comas —p. ej. "Instalaciones bajo platea (agua,
+// cloaca, electricidad)"— no se parta en pedazos. Para no romper los registros
+// viejos, si el texto no es un arreglo JSON válido caemos al formato anterior
+// (separado por comas).
+export const parseLista = (s) => {
+  if (!s) return [];
+  if (typeof s !== "string") return Array.isArray(s) ? s : [];
+  const txt = s.trim();
+  if (txt.startsWith("[")) {
+    try {
+      const arr = JSON.parse(txt);
+      if (Array.isArray(arr)) {
+        return arr.map((x) => String(x).trim()).filter(Boolean);
+      }
+    } catch {
+      // No era JSON válido: seguimos con el parseo legacy.
+    }
+  }
+  return txt.split(",").map((x) => x.trim()).filter(Boolean);
+};
+
+// Serializa una lista de nombres para guardarla. Devuelve JSON (soporta comas
+// dentro de los nombres) o null si la lista está vacía.
+export const serializeLista = (arr) =>
+  arr && arr.length ? JSON.stringify(arr.map((x) => String(x).trim()).filter(Boolean)) : null;
+
+// Compat: alias del parser anterior.
+export const parseCsv = parseLista;
 
 // Devuelve un Map: tarea.id -> { fecha_inicio, fecha_fin, dias } (ISO YYYY-MM-DD).
 // - fecha_inicio / fecha_fin: primer y último día trabajado de la tarea.

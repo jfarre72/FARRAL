@@ -15,6 +15,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtDate } from "@/components/Money";
 import { getCache, setCache } from "@/lib/dataCache";
+import { parseLista, serializeLista } from "@/lib/fechasReales";
 
 // Causas frecuentes de jornada no trabajada.
 const CAUSAS = ["Lluvia", "Falta de personal", "Falta de materiales", "Feriado", "Otra"];
@@ -41,9 +42,11 @@ function diaSemana(isoStr) {
   const d = new Date(isoStr + "T00:00:00");
   return isNaN(d) ? "" : DIAS[d.getDay()];
 }
-// Las etapas se guardan como texto separado por comas. Helpers de ida y vuelta.
-const parseEtapas = (s) => (s ? s.split(",").map(x => x.trim()).filter(Boolean) : []);
-const joinEtapas = (arr) => (arr && arr.length ? arr.join(", ") : null);
+// Las etapas y tareas se guardan como JSON (soporta nombres con comas, como
+// "Instalaciones bajo platea (agua, cloaca, electricidad)"). El parser tolera
+// además el formato anterior (separado por comas) de los registros viejos.
+const parseEtapas = parseLista;
+const joinEtapas = serializeLista;
 
 // ¿Una tarea de hito está finalizada? Una tarea se marca finalizada desde
 // Línea de tiempo seteando completado=true / avance=100 (sin tocar 'estado', que

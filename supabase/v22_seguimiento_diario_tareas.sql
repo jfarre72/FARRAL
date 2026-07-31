@@ -6,6 +6,7 @@
 
 -- Permite asociar a un día del Diario una o varias tareas de la(s)
 -- etapa(s) seleccionada(s). Es solo informativo: NO marca nada como
--- realizado en Planificación. Se guarda como texto separado por comas.
+-- realizado en Planificación. Se guarda como JSON (arreglo de nombres); los
+-- registros viejos separados por comas se siguen leyendo por compatibilidad.
 alter table public.seguimiento_diario
   add column if not exists tareas text;
