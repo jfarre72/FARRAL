@@ -45,10 +45,12 @@ function diaSemana(isoStr) {
 const parseEtapas = (s) => (s ? s.split(",").map(x => x.trim()).filter(Boolean) : []);
 const joinEtapas = (arr) => (arr && arr.length ? arr.join(", ") : null);
 
-// ¿Una tarea de hito está finalizada? Mismo criterio que Cronograma:
-// estado "finalizado", o completado, o avance 100.
+// ¿Una tarea de hito está finalizada? Una tarea se marca finalizada desde
+// Línea de tiempo seteando completado=true / avance=100 (sin tocar 'estado', que
+// puede quedar en 'no_iniciado'). Por eso NO alcanza con mirar 'estado': la damos
+// por finalizada si CUALQUIER señal lo indica (estado, completado o avance 100).
 const tareaFinalizada = (t) => {
-  if (t?.estado) return t.estado === "finalizado";
+  if (t?.estado === "finalizado") return true;
   if (t?.completado) return true;
   const av = t?.avance != null ? Number(t.avance) : 0;
   return av >= 100;
