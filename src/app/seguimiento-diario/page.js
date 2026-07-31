@@ -45,6 +45,15 @@ function diaSemana(isoStr) {
 const parseEtapas = (s) => (s ? s.split(",").map(x => x.trim()).filter(Boolean) : []);
 const joinEtapas = (arr) => (arr && arr.length ? arr.join(", ") : null);
 
+// ¿Una tarea de hito está finalizada? Mismo criterio que Cronograma:
+// estado "finalizado", o completado, o avance 100.
+const tareaFinalizada = (t) => {
+  if (t?.estado) return t.estado === "finalizado";
+  if (t?.completado) return true;
+  const av = t?.avance != null ? Number(t.avance) : 0;
+  return av >= 100;
+};
+
 // --- Gráfico de barras verticales liviano (SVG-free, con divs) ---
 // Ocupa todo el alto disponible: la zona de barras crece para que las
 // barras queden ancladas al borde inferior del recuadro.
@@ -109,6 +118,8 @@ export default function SeguimientoDiarioPage() {
   const [registros, setRegistros] = useState(() => getCache("seguimiento-diario", proyecto?.id) ?? []);
   const [etapas, setEtapas] = useState([]);
   const [tareasPorEtapa, setTareasPorEtapa] = useState({}); // { nombreEtapa: [nombreTarea, ...] }
+  const [etapasCompletas, setEtapasCompletas] = useState(() => new Set()); // etapas al 100% (se ocultan del selector)
+  const [tareasCompletas, setTareasCompletas] = useState(() => new Set()); // tareas finalizadas
   const [loading, setLoading] = useState(true);
 
   const today = new Date();
@@ -134,26 +145,41 @@ export default function SeguimientoDiarioPage() {
     setLoading(!cached);
     const [{ data: regs }, { data: hs }] = await Promise.all([
       supabase.from("seguimiento_diario").select("*").eq("proyecto_id", proyecto.id),
-      supabase.from("hitos").select("id,nombre,orden").eq("proyecto_id", proyecto.id).order("orden"),
+      supabase.from("hitos").select("id,nombre,orden,completado").eq("proyecto_id", proyecto.id).order("orden"),
     ]);
     setCache("seguimiento-diario", proyecto.id, regs ?? []);
     setRegistros(regs ?? []);
     setEtapas((hs ?? []).map(h => h.nombre));
 
-    // Tareas (subtareas) de cada etapa/hito, sólo para asociar (no marca avance)
+    // Tareas (subtareas) de cada etapa/hito, para asociar y para saber el avance
+    // (así podemos ocultar del selector las etapas/tareas ya terminadas).
     const ids = (hs ?? []).map(h => h.id);
     const mapa = {};
+    const tareasFin = new Set();      // tareas finalizadas (por nombre)
+    const tareasPorId = {};           // hito_id -> [tareas]
     if (ids.length) {
       const { data: ts } = await supabase
-        .from("hito_tareas").select("hito_id,nombre,orden").in("hito_id", ids).order("orden");
+        .from("hito_tareas").select("hito_id,nombre,orden,avance,completado,estado").in("hito_id", ids).order("orden");
       const idToNombre = Object.fromEntries((hs ?? []).map(h => [h.id, h.nombre]));
       for (const t of ts ?? []) {
         const et = idToNombre[t.hito_id];
         if (!et) continue;
         (mapa[et] ??= []).push(t.nombre);
+        (tareasPorId[t.hito_id] ??= []).push(t);
+        if (tareaFinalizada(t)) tareasFin.add(t.nombre);
       }
     }
+    // Una etapa está completa si tiene tareas y todas están finalizadas, o si no
+    // tiene tareas y el hito quedó marcado como completado (mismo criterio que Cronograma).
+    const etapasFin = new Set();
+    for (const h of hs ?? []) {
+      const ts = tareasPorId[h.id] ?? [];
+      const fin = ts.length > 0 ? ts.every(tareaFinalizada) : !!h.completado;
+      if (fin) etapasFin.add(h.nombre);
+    }
     setTareasPorEtapa(mapa);
+    setEtapasCompletas(etapasFin);
+    setTareasCompletas(tareasFin);
     setLoading(false);
   };
 
@@ -560,10 +586,13 @@ export default function SeguimientoDiarioPage() {
                 renderValue={(sel) => sel.join(", ")}
                 MenuProps={{ PaperProps: { sx: { maxHeight: 360 } } }}
               >
-                {etapas.map(et => (
+                {etapas
+                  .filter(et => !etapasCompletas.has(et) || form.etapas.includes(et))
+                  .map(et => (
                   <MenuItem key={et} value={et}>
                     <Checkbox checked={form.etapas.indexOf(et) > -1} />
-                    <ListItemText primary={et} />
+                    <ListItemText primary={et}
+                      secondary={etapasCompletas.has(et) ? "terminada" : undefined} />
                   </MenuItem>
                 ))}
                 <Box sx={{ position: "sticky", bottom: 0, bgcolor: "background.paper", p: 1, borderTop: "1px solid", borderColor: "divider", display: "flex", justifyContent: "flex-end" }}>
@@ -576,7 +605,9 @@ export default function SeguimientoDiarioPage() {
 
             {/* Tareas de las etapas elegidas (opcional, sólo informativo) */}
             {(() => {
-              const tareasDisponibles = [...new Set(form.etapas.flatMap(et => tareasPorEtapa[et] ?? []))];
+              const tareasDisponibles = [...new Set(form.etapas.flatMap(et => tareasPorEtapa[et] ?? []))]
+                // Oculto las tareas ya finalizadas, salvo que estén elegidas (editar días viejos).
+                .filter(t => !tareasCompletas.has(t) || form.tareas.includes(t));
               if (tareasDisponibles.length === 0) return null;
               return (
                 <FormControl fullWidth>
