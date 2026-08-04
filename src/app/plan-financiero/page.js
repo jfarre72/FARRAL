@@ -59,6 +59,12 @@ export default function PlanFinancieroPage() {
   const [tareas, setTareas] = useState([]); // ya con fechas/estado del Diario
   const [saldos, setSaldos] = useState({ ars: 0, usd: 0 }); // saldos reales de Caja
   const [loading, setLoading] = useState(true);
+  const [verOcultas, setVerOcultas] = useState(() => new Set()); // etapas con las ocultas desplegadas
+  const toggleVerOcultas = (hitoId) => setVerOcultas(prev => {
+    const s = new Set(prev);
+    s.has(hitoId) ? s.delete(hitoId) : s.add(hitoId);
+    return s;
+  });
 
   // El dólar de venta queda guardado en el proyecto; se edita y persiste al salir del campo.
   const [tc, setTc] = useState("");
@@ -115,13 +121,17 @@ export default function PlanFinancieroPage() {
   const tareaIncluida = (h, t) => h.plan_incluir !== false && t.plan_incluir !== false;
 
   // Tareas por etapa (en orden de etapa y de tarea). El subtotal sólo suma las
-  // tareas incluidas de una etapa incluida.
+  // tareas incluidas de una etapa incluida. Las tareas ocultas (quitadas con el
+  // "-") se separan: no borran nada ni afectan el total, y quedan disponibles
+  // para restaurar (así se conserva el historial de lo pagado en la actividad).
   const porEtapa = useMemo(() => {
     return hitos.map(h => {
       const etapaIncl = h.plan_incluir !== false;
-      const ts = tareas.filter(t => t.hito_id === h.id).sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
-      const subtotal = ts.reduce((s, t) => s + (etapaIncl && t.plan_incluir !== false ? totalTarea(t) : 0), 0);
-      return { hito: h, tareas: ts, subtotal, etapaIncl };
+      const todas = tareas.filter(t => t.hito_id === h.id).sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+      const ts = todas.filter(t => t.plan_incluir !== false);
+      const ocultas = todas.filter(t => t.plan_incluir === false);
+      const subtotal = ts.reduce((s, t) => s + (etapaIncl ? totalTarea(t) : 0), 0);
+      return { hito: h, tareas: ts, ocultas, subtotal, etapaIncl };
     });
   }, [hitos, tareas]);
 
@@ -251,7 +261,7 @@ export default function PlanFinancieroPage() {
           )}
 
           <Box>
-            {porEtapa.map(({ hito, tareas: ts, subtotal, etapaIncl }) => {
+            {porEtapa.map(({ hito, tareas: ts, ocultas, subtotal, etapaIncl }) => {
               const objetivo = num(hito.valor_plan);
               const estimadoUSD = tcNum > 0 ? subtotal / tcNum : null;
               const dif = (etapaIncl && objetivo > 0 && estimadoUSD != null) ? objetivo - estimadoUSD : null;
@@ -305,19 +315,18 @@ export default function PlanFinancieroPage() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {ts.length === 0 && (
+                    {ts.length === 0 && ocultas.length === 0 && (
                       <TableRow><TableCell colSpan={10}>
                         <Typography variant="body2" color="text.secondary">Esta etapa no tiene tareas cargadas.</Typography>
                       </TableCell></TableRow>
                     )}
                     {ts.map((t) => {
                       const est = ESTADO_CHIP[t.estado] || ESTADO_CHIP.no_iniciado;
-                      const incl = etapaIncl && t.plan_incluir !== false;
                       return (
-                        <TableRow key={t.id} hover sx={{ opacity: incl ? 1 : 0.45 }}>
+                        <TableRow key={t.id} hover>
                           <TableCell sx={{ whiteSpace: "nowrap" }}>{t.fecha_inicio ? fmtDate(t.fecha_inicio) : "—"}</TableCell>
                           <TableCell>
-                            <Typography variant="body2" sx={{ fontWeight: 500, textDecoration: t.plan_incluir === false ? "line-through" : "none" }}>{t.nombre}</Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>{t.nombre}</Typography>
                             <Chip size="small" variant="outlined" color={est.color} label={est.label} sx={{ height: 18, mt: 0.25 }} />
                           </TableCell>
                           <TableCell><NoteCell value={t.est_notas} placeholder="Hierro, arena, cemento…" onCommit={(v) => setEst(t.id, { est_notas: v })} /></TableCell>
@@ -330,15 +339,48 @@ export default function PlanFinancieroPage() {
                             {fmtMoney(totalTarea(t), "ARS")}
                           </TableCell>
                           <TableCell align="center">
-                            <Tooltip title={t.plan_incluir === false ? "Volver a incluir la tarea" : "Quitar tarea del plan"}>
-                              <IconButton size="small" onClick={() => setTareaIncluir(t, t.plan_incluir === false)}>
-                                {t.plan_incluir === false ? <AddCircleOutlineIcon fontSize="small" /> : <RemoveCircleOutlineIcon fontSize="small" />}
+                            <Tooltip title="Ocultar tarea del plan (no la borra: conserva el historial)">
+                              <IconButton size="small" onClick={() => setTareaIncluir(t, false)}>
+                                <RemoveCircleOutlineIcon fontSize="small" />
                               </IconButton>
                             </Tooltip>
                           </TableCell>
                         </TableRow>
                       );
                     })}
+
+                    {/* Tareas ocultas: plegables, no suman al total, restaurables. */}
+                    {ocultas.length > 0 && (
+                      <TableRow>
+                        <TableCell colSpan={10} sx={{ py: 0.5, bgcolor: "action.hover" }}>
+                          <Button size="small" color="inherit" onClick={() => toggleVerOcultas(hito.id)}
+                            sx={{ textTransform: "none", color: "text.secondary" }}>
+                            {verOcultas.has(hito.id) ? "▾" : "▸"} Ocultas ({ocultas.length})
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    {verOcultas.has(hito.id) && ocultas.map((t) => (
+                      <TableRow key={t.id} hover sx={{ opacity: 0.6 }}>
+                        <TableCell sx={{ whiteSpace: "nowrap" }}>{t.fecha_inicio ? fmtDate(t.fecha_inicio) : "—"}</TableCell>
+                        <TableCell>
+                          <Typography variant="body2" sx={{ fontWeight: 500, textDecoration: "line-through" }}>{t.nombre}</Typography>
+                        </TableCell>
+                        <TableCell colSpan={6}>
+                          <Typography variant="caption" color="text.secondary">Oculta del plan</Typography>
+                        </TableCell>
+                        <TableCell align="right" sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", color: "text.secondary" }}>
+                          {fmtMoney(totalTarea(t), "ARS")}
+                        </TableCell>
+                        <TableCell align="center">
+                          <Tooltip title="Restaurar tarea al plan">
+                            <IconButton size="small" onClick={() => setTareaIncluir(t, true)}>
+                              <AddCircleOutlineIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    ))}
                   </TableBody>
                 </Table>
                 </AccordionDetails>

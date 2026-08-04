@@ -1,7 +1,7 @@
 "use client";
 import {
   Card, CardContent, Stack, Typography, Alert, Box, TextField,
-  Button, LinearProgress, Divider, Chip, Grid
+  Button, LinearProgress, Divider, Chip, Grid, FormGroup, FormControlLabel, Checkbox
 } from "@mui/material";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import { useEffect, useMemo, useState } from "react";
@@ -71,6 +71,16 @@ export default function ReporteriaPage() {
   const [movs, setMovs] = useState([]);
   const [fotos, setFotos] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Qué secciones incluir en el reporte (vista previa y PDF). Todo activo por defecto.
+  const [inc, setInc] = useState({ resumen: true, tareas: true, grafico: true, fotos: true });
+  const toggle = (k) => setInc((s) => ({ ...s, [k]: !s[k] }));
+  const SECCIONES = [
+    { key: "resumen", label: "Resumen (avance y gastos)" },
+    { key: "tareas", label: "Tareas realizadas / en curso" },
+    { key: "grafico", label: "Gráfico económico" },
+    { key: "fotos", label: "Fotos" },
+  ];
 
   const reload = async () => {
     if (!proyecto) return;
@@ -176,27 +186,28 @@ export default function ReporteriaPage() {
         ).join("")}</div>`
       : `<p class="muted">Sin fotos cargadas para este período.</p>`;
 
-    const body = `
+    const partes = [];
+    if (inc.resumen) partes.push(`
       <h2>Resumen del período</h2>
       <table><tbody>
         <tr><td>Avance estimado del proyecto</td><td style="text-align:right">${rep.avance}%</td></tr>
         <tr><td>Gastado en el período</td><td style="text-align:right">${esc(fmtMoney(Math.round(rep.gastoRango), "USD"))}</td></tr>
         <tr><td>Gastado acumulado (hasta ${fmtDate(hasta)})</td><td style="text-align:right">${esc(fmtMoney(Math.round(rep.acumHasta), "USD"))}</td></tr>
         <tr><td>Tareas completadas en el período</td><td style="text-align:right">${rep.nTareasRango}</td></tr>
-      </tbody></table>
-
+      </tbody></table>`);
+    if (inc.tareas) partes.push(`
       <h2>Tareas realizadas (${esc(rangoLabel)})</h2>
       ${tareasHtml}
 
       <h2>Tareas en curso (${esc(rangoLabel)})</h2>
-      ${enCursoHtml}
-
+      ${enCursoHtml}`);
+    if (inc.grafico) partes.push(`
       <h2>Evolución de gastos (USD acumulado)</h2>
-      ${svgChart(rep.serie, rep.hastaKey)}
-
+      ${svgChart(rep.serie, rep.hastaKey)}`);
+    if (inc.fotos) partes.push(`
       <h2>Fotos del período</h2>
-      ${fotosHtml}
-    `;
+      ${fotosHtml}`);
+    const body = partes.join("\n");
     printDocument({
       title: `Reporte de avance — ${rangoLabel}`,
       subtitle: `${esc(proyecto.nombre)} · Generado el ${fmtDate(new Date().toISOString())}`,
@@ -226,14 +237,30 @@ export default function ReporteriaPage() {
           value={hasta} onChange={(e) => setHasta(e.target.value)}
           sx={{ width: 160 }}
         />
-        <Button variant="contained" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={generarPdf}>
+        <Button variant="contained" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={generarPdf}
+          disabled={!SECCIONES.some(s => inc[s.key])}>
           Generar PDF
         </Button>
       </Stack>
 
+      {/* Selector de secciones a incluir en el reporte */}
+      <Card>
+        <CardContent sx={{ py: 1.5 }}>
+          <Typography variant="subtitle2" gutterBottom>Incluir en el reporte</Typography>
+          <FormGroup row>
+            {SECCIONES.map(s => (
+              <FormControlLabel key={s.key}
+                control={<Checkbox size="small" checked={inc[s.key]} onChange={() => toggle(s.key)} />}
+                label={s.label} />
+            ))}
+          </FormGroup>
+        </CardContent>
+      </Card>
+
       {loading && <LinearProgress />}
 
       {/* Vista previa */}
+      {inc.resumen && (
       <Grid container spacing={2}>
         <Grid item xs={6} sm={3}>
           <Card><CardContent>
@@ -260,7 +287,9 @@ export default function ReporteriaPage() {
           </CardContent></Card>
         </Grid>
       </Grid>
+      )}
 
+      {inc.tareas && (
       <Card>
         <CardContent>
           <Typography variant="subtitle1" gutterBottom>Tareas realizadas ({rangoLabel})</Typography>
@@ -298,7 +327,13 @@ export default function ReporteriaPage() {
             ))
           )}
 
-          <Divider sx={{ my: 2 }} />
+        </CardContent>
+      </Card>
+      )}
+
+      {inc.fotos && (
+      <Card>
+        <CardContent>
           <Typography variant="subtitle1" gutterBottom>Fotos del período</Typography>
           {rep.fotosRango.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
@@ -316,6 +351,7 @@ export default function ReporteriaPage() {
           )}
         </CardContent>
       </Card>
+      )}
     </Stack>
   );
 }
