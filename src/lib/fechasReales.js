@@ -10,9 +10,29 @@
 // etapa esté presente en el día para desambiguar tareas homónimas de distintas
 // etapas.
 
-// Convierte el texto separado por comas (etapas / tareas) en un arreglo limpio.
-export const parseCsv = (s) =>
-  s ? s.split(",").map((x) => x.trim()).filter(Boolean) : [];
+// Serializa una lista de nombres (etapas / tareas) al texto que se guarda en la
+// columna. Usa JSON para que los nombres que contienen comas —p.ej.
+// "Instalaciones bajo platea (agua, cloaca, electricidad)"— sobrevivan el ida y
+// vuelta. Devuelve null si la lista está vacía.
+export const serializeLista = (arr) =>
+  arr && arr.length ? JSON.stringify(arr) : null;
+
+// Convierte el texto de la columna (etapas / tareas) en un arreglo limpio.
+// Soporta el formato nuevo (JSON, tolera comas dentro de cada nombre) y el
+// legado (separado por comas).
+export const parseCsv = (s) => {
+  if (!s) return [];
+  const txt = String(s).trim();
+  if (txt.startsWith("[")) {
+    try {
+      const arr = JSON.parse(txt);
+      if (Array.isArray(arr)) return arr.map((x) => String(x).trim()).filter(Boolean);
+    } catch {
+      /* formato inválido: cae al modo legado */
+    }
+  }
+  return txt.split(",").map((x) => x.trim()).filter(Boolean);
+};
 
 // Devuelve un Map: tarea.id -> { fecha_inicio, fecha_fin, dias } (ISO YYYY-MM-DD).
 // - fecha_inicio / fecha_fin: primer y último día trabajado de la tarea.
