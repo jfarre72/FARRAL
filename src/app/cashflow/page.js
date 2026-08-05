@@ -117,9 +117,9 @@ export default function CashflowPage() {
   }, [hitos, tareas]);
 
   // ---- Tab 2: cashflow manual ----
-  const addItem = async () => {
+  const addItem = async ({ fecha, concepto, monto }) => {
     if (!proyecto) return;
-    const payload = { proyecto_id: proyecto.id, fecha: hoyISO(), concepto: "", monto: 0 };
+    const payload = { proyecto_id: proyecto.id, fecha: fecha || hoyISO(), concepto: concepto || "", monto: monto || 0 };
     const { data, error } = await supabase.from("cashflow_items").insert(payload).select().single();
     if (error) { alert(error.message); return; }
     setItems(prev => [...prev, data]);
@@ -351,6 +351,18 @@ function CashflowManual({
   addItem, updItem, delItem, setTcSemana, planTareas,
   chartUSD, setChartUSD, pagados, verPagados, setVerPagados,
 }) {
+  // Formulario de alta (fuera de las semanas, para no "perder" el ítem recién
+  // creado): se cargan fecha, concepto y monto y al Guardar se ubica en su semana.
+  const [nFecha, setNFecha] = useState(hoyISO());
+  const [nConcepto, setNConcepto] = useState("");
+  const [nMonto, setNMonto] = useState("");
+  const guardarNuevo = () => {
+    if (!nFecha) return;
+    addItem({ fecha: nFecha, concepto: nConcepto.trim(), monto: parseMonto(nMonto) });
+    setNConcepto("");
+    setNMonto("");
+    // La fecha se mantiene para agregar varios pagos de la misma semana seguido.
+  };
   return (
     <Stack spacing={3}>
       {/* Saldos de Caja + USD a vender total */}
@@ -406,11 +418,9 @@ function CashflowManual({
           <WeeklyBars
             moneda={chartUSD ? "USD" : "ARS"}
             data={semanas.map(s => ({
-              key: s.key, label: fmtDate(toISO(s.ini)),
+              key: s.key, label: fmtDate(toISO(addDays(s.ini, 4))), // viernes (fin de semana de pago)
               value: chartUSD ? (s.totalUSD ?? 0) : s.total,
-              sub: chartUSD
-                ? null
-                : (s.usdVender != null ? fmtMoney(s.usdVender, "USD") : null),
+              sub: null,
             }))}
             color="#1E5AA8"
           />
@@ -425,14 +435,42 @@ function CashflowManual({
       {/* Ítems por semana */}
       <Card>
         <CardContent sx={{ p: { xs: 1, sm: 2 } }}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-            <Typography variant="subtitle1" fontWeight={700}>Ítems a pagar</Typography>
-            <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={addItem}>Agregar ítem</Button>
-          </Stack>
+          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>Ítems a pagar</Typography>
           <Typography variant="caption" color="text.secondary" sx={{ mb: 1.5, display: "block" }}>
             Cargá cada pago con su fecha, concepto y monto (p. ej. “Pago a Emiliano”, “Adelanto 50% Losa radiante”).
-            Se agrupan por semana y se convierten a USD con el tipo de cambio que cargues en cada una.
+            Al guardar se ubica en su semana y se convierte a USD con el tipo de cambio que cargues en cada una.
           </Typography>
+
+          {/* Formulario de alta */}
+          <Box sx={{ p: 1.5, mb: 2, borderRadius: 1, bgcolor: "action.hover", border: "1px solid", borderColor: "divider" }}>
+            <Grid container spacing={1.5} alignItems="flex-end">
+              <Grid item xs={6} sm={3}>
+                <TextField
+                  type="date" label="Fecha" size="small" fullWidth
+                  InputLabelProps={{ shrink: true }}
+                  value={nFecha} onChange={(e) => setNFecha(e.target.value)}
+                />
+              </Grid>
+              <Grid item xs={12} sm={5}>
+                <TextField
+                  label="Concepto" size="small" fullWidth placeholder="Pago a Emiliano…"
+                  value={nConcepto} onChange={(e) => setNConcepto(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") guardarNuevo(); }}
+                />
+              </Grid>
+              <Grid item xs={6} sm={2}>
+                <TextField
+                  label="Monto (ARS)" size="small" fullWidth placeholder="1.000.000"
+                  value={nMonto} onChange={(e) => setNMonto(agruparMiles(e.target.value))}
+                  onKeyDown={(e) => { if (e.key === "Enter") guardarNuevo(); }}
+                  inputProps={{ inputMode: "numeric", style: { textAlign: "right", fontVariantNumeric: "tabular-nums" } }}
+                />
+              </Grid>
+              <Grid item xs={6} sm={2}>
+                <Button variant="contained" fullWidth startIcon={<AddIcon />} onClick={guardarNuevo}>Guardar</Button>
+              </Grid>
+            </Grid>
+          </Box>
 
           {semanas.length === 0 && (
             <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
