@@ -124,6 +124,11 @@ export default function ReporteriaPage() {
       avance += peso * fracc(h);
     });
 
+    // % de avance de cada etapa (0-100), para mostrarlo junto al nombre en el
+    // reporte y colorearlo (verde=terminada, naranja=en curso).
+    const avanceEtapa = {};
+    for (const h of hitos) avanceEtapa[h.nombre] = Math.round(fracc(h) * 100);
+
     // Orden de las etapas tal como se configuran en Ajustes (por 'orden').
     // "—" (tareas sin etapa) queda al final.
     const ordenHito = (nombre) => {
@@ -196,28 +201,36 @@ export default function ReporteriaPage() {
     // Fotos del rango (por fecha de carga)
     const fotosRango = fotos.filter(f => inRango(f.fecha));
 
-    return { avance: Math.round(avance), tareasPorHito: ordenarPorEtapa(tareasPorHito), nTareasRango: tareasRango.length, enCursoPorHito: ordenarPorEtapa(enCursoPorHito), nEnCurso: tareasEnCurso.length, planPorHito: ordenarPorEtapa(planPorHito), nPlan: tareasPlanificadas.length, planDesde, planHasta, gastoRango, totalUSD, acumHasta, serie, hastaKey, fotosRango };
+    return { avance: Math.round(avance), tareasPorHito: ordenarPorEtapa(tareasPorHito), nTareasRango: tareasRango.length, enCursoPorHito: ordenarPorEtapa(enCursoPorHito), nEnCurso: tareasEnCurso.length, planPorHito: ordenarPorEtapa(planPorHito), nPlan: tareasPlanificadas.length, planDesde, planHasta, avanceEtapa, gastoRango, totalUSD, acumHasta, serie, hastaKey, fotosRango };
   }, [hitos, tareas, registros, movs, fotos, desde, hasta]);
 
   const rangoLabel = `${fmtDate(desde)} a ${fmtDate(hasta)}`;
 
   const generarPdf = () => {
+    // Encabezado de etapa con su % de avance coloreado (verde=100%, naranja=en curso).
+    const hitoHeader = (hito) => {
+      const pct = rep.avanceEtapa[hito] ?? 0;
+      const color = pct >= 100 ? "#1B8A3A" : pct > 0 ? "#E07A1F" : "#8a97a8";
+      const check = pct >= 100 ? " ✓" : "";
+      return `<p style="margin:6px 0 2px"><b>${esc(hito)}</b> <span style="color:${color};font-weight:600">${pct}%${check}</span></p>`;
+    };
+
     const tareasHtml = Object.keys(rep.tareasPorHito).length
       ? Object.entries(rep.tareasPorHito).map(([hito, ts]) =>
-          `<p style="margin:6px 0 2px"><b>${esc(hito)}</b></p><ul style="margin:0">${ts.map(n => `<li>${esc(n)}</li>`).join("")}</ul>`
+          `${hitoHeader(hito)}<ul style="margin:0">${ts.map(n => `<li>${esc(n)}</li>`).join("")}</ul>`
         ).join("")
       : `<p class="muted">No se registraron tareas completadas en el período.</p>`;
 
     const enCursoHtml = Object.keys(rep.enCursoPorHito).length
       ? Object.entries(rep.enCursoPorHito).map(([hito, ts]) =>
-          `<p style="margin:6px 0 2px"><b>${esc(hito)}</b></p><ul style="margin:0">${ts.map(t => `<li>${esc(t.nombre)}${t.avance ? ` <span class="muted">(${t.avance}%)</span>` : ""}</li>`).join("")}</ul>`
+          `${hitoHeader(hito)}<ul style="margin:0">${ts.map(t => `<li>${esc(t.nombre)}${t.avance ? ` <span class="muted">(${t.avance}%)</span>` : ""}</li>`).join("")}</ul>`
         ).join("")
       : `<p class="muted">No hay tareas en curso en el período.</p>`;
 
     const planLabel = `${fmtDate(rep.planDesde)} a ${fmtDate(rep.planHasta)}`;
     const planHtml = Object.keys(rep.planPorHito).length
       ? Object.entries(rep.planPorHito).map(([hito, ts]) =>
-          `<p style="margin:6px 0 2px"><b>${esc(hito)}</b></p><ul style="margin:0">${ts.map(t => `<li>${esc(t.nombre)} <span class="muted">(${fmtDate(t.fecha_inicio)})</span></li>`).join("")}</ul>`
+          `${hitoHeader(hito)}<ul style="margin:0">${ts.map(t => `<li>${esc(t.nombre)} <span class="muted">(${fmtDate(t.fecha_inicio)})</span></li>`).join("")}</ul>`
         ).join("")
       : `<p class="muted">No hay tareas planificadas para las próximas 2 semanas.</p>`;
 
@@ -259,6 +272,20 @@ export default function ReporteriaPage() {
       bodyHtml: body,
       logoUrl: `${window.location.origin}/logo-farral.png`,
     });
+  };
+
+  // Título de etapa con su % de avance coloreado (verde=100%, naranja=en curso).
+  const EtapaTitulo = ({ hito }) => {
+    const pct = rep.avanceEtapa[hito] ?? 0;
+    const color = pct >= 100 ? "success.main" : pct > 0 ? "warning.main" : "text.secondary";
+    return (
+      <Typography variant="body2" fontWeight={700}>
+        {hito}{" "}
+        <Typography component="span" variant="body2" fontWeight={700} sx={{ color }}>
+          {pct}%{pct >= 100 ? " ✓" : ""}
+        </Typography>
+      </Typography>
+    );
   };
 
   if (!proyecto) return <Alert severity="info">Seleccioná un proyecto.</Alert>;
@@ -343,7 +370,7 @@ export default function ReporteriaPage() {
           ) : (
             Object.entries(rep.tareasPorHito).map(([hito, ts]) => (
               <Box key={hito} sx={{ mb: 1 }}>
-                <Typography variant="body2" fontWeight={700}>{hito}</Typography>
+                <EtapaTitulo hito={hito} />
                 <ul style={{ margin: "2px 0" }}>
                   {ts.map((n, i) => <li key={i}><Typography variant="body2" component="span">{n}</Typography></li>)}
                 </ul>
@@ -358,7 +385,7 @@ export default function ReporteriaPage() {
           ) : (
             Object.entries(rep.enCursoPorHito).map(([hito, ts]) => (
               <Box key={hito} sx={{ mb: 1 }}>
-                <Typography variant="body2" fontWeight={700}>{hito}</Typography>
+                <EtapaTitulo hito={hito} />
                 <ul style={{ margin: "2px 0" }}>
                   {ts.map((t, i) => (
                     <li key={i}>
@@ -381,7 +408,7 @@ export default function ReporteriaPage() {
           ) : (
             Object.entries(rep.planPorHito).map(([hito, ts]) => (
               <Box key={hito} sx={{ mb: 1 }}>
-                <Typography variant="body2" fontWeight={700}>{hito}</Typography>
+                <EtapaTitulo hito={hito} />
                 <ul style={{ margin: "2px 0" }}>
                   {ts.map((t, i) => (
                     <li key={i}>

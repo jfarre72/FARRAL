@@ -13,8 +13,8 @@ export function printDocument({ title, subtitle = "", bodyHtml, logoUrl }) {
   const styles = `
     * { box-sizing: border-box; }
     body { font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #0F2A4A; margin: 32px; }
-    .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-    .head img.logo { height: 56px; width: auto; }
+    .head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .head img.logo { height: 96px; width: auto; max-width: 260px; object-fit: contain; }
     h1 { font-size: 20px; margin: 0 0 4px; }
     .sub { color: #5b6b80; font-size: 12px; margin-bottom: 20px; }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -39,9 +39,29 @@ export function printDocument({ title, subtitle = "", bodyHtml, logoUrl }) {
       ${logo}
     </div>
     ${bodyHtml}
-    <script>window.onload = function(){ setTimeout(function(){ window.print(); }, 300); };<\/script>
     </body></html>`);
   win.document.close();
+
+  // Imprime recién cuando terminaron de cargar las imágenes (logo y fotos). Si
+  // se imprime antes, Chrome puede fallar con "Error de impresión". Se usa un
+  // timeout de resguardo para no quedar esperando una imagen que nunca carga.
+  const imprimir = () => { try { win.focus(); win.print(); } catch (e) { /* ventana cerrada */ } };
+  const esperarImagenes = () => {
+    const imgs = Array.from(win.document.images || []);
+    const pendientes = imgs.filter((im) => !im.complete);
+    if (pendientes.length === 0) { imprimir(); return; }
+    let restantes = pendientes.length;
+    let listo = false;
+    const finalizar = () => { if (listo) return; listo = true; imprimir(); };
+    pendientes.forEach((im) => {
+      const cont = () => { if (--restantes <= 0) finalizar(); };
+      im.addEventListener("load", cont);
+      im.addEventListener("error", cont);
+    });
+    setTimeout(finalizar, 4000);
+  };
+  if (win.document.readyState === "complete") esperarImagenes();
+  else win.addEventListener("load", esperarImagenes);
 }
 
 // Escapa texto para insertarlo en HTML.
