@@ -53,7 +53,7 @@ const NAV = [
   ]},
   { section: "Finanzas", items: [
     { label: "Caja",            href: "/caja",          icon: <PointOfSaleIcon /> },
-    { label: "Plan financiero", href: "/plan-financiero", icon: <SavingsIcon /> },
+    { label: "Cashflow",        href: "/cashflow",      icon: <SavingsIcon /> },
     { label: "Presupuestos",    href: "/presupuestos",  icon: <RequestQuoteIcon /> },
     { label: "Materiales",      href: "/materiales",    icon: <Inventory2Icon /> },
     { label: "Plan vs Real",    href: "/economico",     icon: <AccountTreeIcon /> },
