@@ -3,11 +3,13 @@ import {
   Card, CardContent, Stack, Typography, Alert, Box, Grid, TextField,
   LinearProgress, Table, TableHead, TableBody, TableRow, TableCell, Chip,
   Tooltip, Accordion, AccordionSummary, AccordionDetails, IconButton, Button,
-  Tabs, Tab,
+  Tabs, Tab, FormControlLabel, Switch,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import AddIcon from "@mui/icons-material/Add";
+import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
+import UndoIcon from "@mui/icons-material/Undo";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
@@ -64,6 +66,8 @@ export default function CashflowPage() {
   const [items, setItems] = useState([]);   // ítems de cashflow manual
   const [tcSem, setTcSem] = useState({});    // { semanaISO(lunes): tc }
   const [loading, setLoading] = useState(true);
+  const [chartUSD, setChartUSD] = useState(false); // gráfico en USD (true) o ARS (false)
+  const [verPagados, setVerPagados] = useState(false);
 
   const reload = async () => {
     if (!proyecto) return;
@@ -144,10 +148,11 @@ export default function CashflowPage() {
   };
 
   // Ítems agrupados por semana (lunes-domingo), con TC de la semana y USD a vender.
+  // Los ítems pagados no cuentan (dejan de aparecer para ver siempre lo próximo).
   const semanas = useMemo(() => {
     const map = new Map();
     for (const it of items) {
-      if (!it.fecha) continue;
+      if (!it.fecha || it.pagado) continue;
       const ini = lunesDe(String(it.fecha).slice(0, 10));
       const key = toISO(ini);
       if (!map.has(key)) map.set(key, { key, ini, fin: addDays(ini, 6), total: 0, items: [] });
@@ -167,10 +172,17 @@ export default function CashflowPage() {
       const deficit = Math.max(0, s.total - cubierto);
       const tc = parseMonto(tcSem[s.key]);
       const usdVender = tc > 0 ? deficit / tc : null;
+      const totalUSD = tc > 0 ? s.total / tc : null;
       if (usdVender != null) acumUSD += usdVender;
-      return { ...s, cubierto, deficit, tc, usdVender, acumUSD: usdVender != null ? acumUSD : null };
+      return { ...s, cubierto, deficit, tc, usdVender, totalUSD, acumUSD: usdVender != null ? acumUSD : null };
     });
   }, [items, saldos.ars, tcSem]);
+
+  // Ítems pagados (para revisar / desmarcar).
+  const pagados = useMemo(
+    () => items.filter(it => it.pagado).sort((a, b) => (String(a.fecha) < String(b.fecha) ? 1 : -1)),
+    [items]
+  );
 
   const usdVenderTotal = semanas.reduce((s, w) => s + (w.usdVender || 0), 0);
   const totalARS = semanas.reduce((s, w) => s + w.total, 0);
@@ -186,21 +198,11 @@ export default function CashflowPage() {
         id: t.id, nombre: t.nombre, etapa: hitoNombre[t.hito_id] || "—",
         ini: String(t.fecha_inicio).slice(0, 10),
         fin: t.fecha_fin ? String(t.fecha_fin).slice(0, 10) : String(t.fecha_inicio).slice(0, 10),
+        mod: parseMonto(t.est_mod), mat: parseMonto(t.est_mat), maq: parseMonto(t.est_maq),
         total: totalTarea(t),
       }))
       .sort((a, b) => (a.ini < b.ini ? -1 : a.ini > b.ini ? 1 : 0));
   }, [tareas, hitos]);
-
-  const planPorSemana = useMemo(() => {
-    const map = new Map();
-    for (const t of planTareas) {
-      const ini = lunesDe(t.ini);
-      const key = toISO(ini);
-      if (!map.has(key)) map.set(key, { key, ini, fin: addDays(ini, 6), total: 0 });
-      map.get(key).total += t.total;
-    }
-    return [...map.values()].sort((a, b) => (a.key < b.key ? -1 : 1));
-  }, [planTareas]);
 
   if (!proyecto) return <Alert severity="info">Seleccioná un proyecto.</Alert>;
 
@@ -230,7 +232,9 @@ export default function CashflowPage() {
           semanas={semanas} totalARS={totalARS} usdVenderTotal={usdVenderTotal}
           algunSinTc={algunSinTc}
           addItem={addItem} updItem={updItem} delItem={delItem} setTcSemana={setTcSemana}
-          planTareas={planTareas} planPorSemana={planPorSemana}
+          planTareas={planTareas}
+          chartUSD={chartUSD} setChartUSD={setChartUSD}
+          pagados={pagados} verPagados={verPagados} setVerPagados={setVerPagados}
         />
       )}
     </Stack>
@@ -344,7 +348,8 @@ function CostosPorEtapa({ porEtapa, tcRef, setEst }) {
 // =====================================================================
 function CashflowManual({
   saldos, saldoUSDNum, semanas, totalARS, usdVenderTotal, algunSinTc,
-  addItem, updItem, delItem, setTcSemana, planTareas, planPorSemana,
+  addItem, updItem, delItem, setTcSemana, planTareas,
+  chartUSD, setChartUSD, pagados, verPagados, setVerPagados,
 }) {
   return (
     <Stack spacing={3}>
@@ -387,16 +392,33 @@ function CashflowManual({
       {/* Gráfico semanal de lo que hay que pagar */}
       <Card>
         <CardContent>
-          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>Cashflow semanal</Typography>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }} flexWrap="wrap">
+            <Typography variant="subtitle1" fontWeight={700}>Cashflow semanal</Typography>
+            <FormControlLabel
+              control={<Switch size="small" checked={chartUSD} onChange={(e) => setChartUSD(e.target.checked)} />}
+              label={<Typography variant="body2">{chartUSD ? "En USD" : "En pesos"}</Typography>}
+            />
+          </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: "block" }}>
             Lo que hay que pagar por semana según los ítems cargados. El saldo ARS de Caja cubre primero las semanas
             más cercanas; el resto se convierte a USD con el tipo de cambio de esa semana.
           </Typography>
           <WeeklyBars
-            data={semanas.map(s => ({ key: s.key, label: fmtDate(toISO(s.ini)), value: s.total,
-              sub: s.usdVender != null ? fmtMoney(s.usdVender, "USD") : null }))}
-            color="#C0392B"
+            moneda={chartUSD ? "USD" : "ARS"}
+            data={semanas.map(s => ({
+              key: s.key, label: fmtDate(toISO(s.ini)),
+              value: chartUSD ? (s.totalUSD ?? 0) : s.total,
+              sub: chartUSD
+                ? null
+                : (s.usdVender != null ? fmtMoney(s.usdVender, "USD") : null),
+            }))}
+            color="#1E5AA8"
           />
+          {chartUSD && algunSinTc && (
+            <Typography variant="caption" color="warning.main" sx={{ mt: 1, display: "block" }}>
+              Las semanas sin tipo de cambio cargado se muestran en 0 en USD.
+            </Typography>
+          )}
         </CardContent>
       </Card>
 
@@ -455,7 +477,7 @@ function CashflowManual({
                       <TableCell sx={{ width: 150 }}>Fecha</TableCell>
                       <TableCell>Concepto</TableCell>
                       <TableCell align="right" sx={{ width: 150 }}>Monto (ARS)</TableCell>
-                      <TableCell align="center" sx={{ width: 48 }}></TableCell>
+                      <TableCell align="center" sx={{ width: 92 }}></TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -473,7 +495,12 @@ function CashflowManual({
                           <NoteCell value={it.concepto} placeholder="Pago a…" onCommit={(v) => updItem(it.id, { concepto: v || "" })} />
                         </TableCell>
                         <TableCell align="right"><MoneyCell value={it.monto} onCommit={(v) => updItem(it.id, { monto: v })} /></TableCell>
-                        <TableCell align="center">
+                        <TableCell align="center" sx={{ whiteSpace: "nowrap" }}>
+                          <Tooltip title="Marcar como pagado (deja de aparecer)">
+                            <IconButton size="small" color="success" onClick={() => updItem(it.id, { pagado: true })}>
+                              <CheckCircleOutlineIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
                           <Tooltip title="Eliminar ítem">
                             <IconButton size="small" color="error" onClick={() => delItem(it.id)}>
                               <DeleteOutlineIcon fontSize="small" />
@@ -487,6 +514,37 @@ function CashflowManual({
               </Box>
             </Box>
           ))}
+
+          {pagados.length > 0 && (
+            <Box sx={{ mt: 1 }}>
+              <Button size="small" color="inherit" onClick={() => setVerPagados(v => !v)}
+                sx={{ textTransform: "none", color: "text.secondary" }}>
+                {verPagados ? "▾" : "▸"} Pagados ({pagados.length})
+              </Button>
+              {verPagados && (
+                <Box sx={{ overflowX: "auto" }}>
+                  <Table size="small" sx={{ minWidth: 560 }}>
+                    <TableBody>
+                      {pagados.map((it) => (
+                        <TableRow key={it.id} hover sx={{ opacity: 0.7 }}>
+                          <TableCell sx={{ width: 150, whiteSpace: "nowrap" }}>{fmtDate(String(it.fecha).slice(0, 10))}</TableCell>
+                          <TableCell><Typography variant="body2" sx={{ textDecoration: "line-through" }}>{it.concepto || "—"}</Typography></TableCell>
+                          <TableCell align="right" sx={{ width: 150, fontVariantNumeric: "tabular-nums", color: "text.secondary" }}>{fmtMoney(it.monto, "ARS")}</TableCell>
+                          <TableCell align="center" sx={{ width: 48 }}>
+                            <Tooltip title="Marcar como no pagado (vuelve a aparecer)">
+                              <IconButton size="small" onClick={() => updItem(it.id, { pagado: false })}>
+                                <UndoIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Box>
+              )}
+            </Box>
+          )}
         </CardContent>
       </Card>
 
@@ -499,41 +557,41 @@ function CashflowManual({
             para armar el cashflow.
           </Typography>
 
-          {planPorSemana.length === 0 ? (
+          {planTareas.length === 0 ? (
             <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
               No hay tareas planificadas con costo estimado. Cargalas en “Costos por etapa”.
             </Typography>
           ) : (
-            <>
-              <WeeklyBars
-                data={planPorSemana.map(s => ({ key: s.key, label: fmtDate(toISO(s.ini)), value: s.total }))}
-                color="#0F2A4A"
-              />
-              <Box sx={{ overflowX: "auto", mt: 2 }}>
-                <Table size="small" sx={{ minWidth: 560 }}>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Tarea</TableCell>
-                      <TableCell>Etapa</TableCell>
-                      <TableCell sx={{ whiteSpace: "nowrap" }}>Fechas</TableCell>
-                      <TableCell align="right">Total (ARS)</TableCell>
+            <Box sx={{ overflowX: "auto" }}>
+              <Table size="small" sx={{ minWidth: 720 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Tarea</TableCell>
+                    <TableCell>Etapa</TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>Fechas</TableCell>
+                    <TableCell align="right">MOD</TableCell>
+                    <TableCell align="right">MAT</TableCell>
+                    <TableCell align="right">MAQ</TableCell>
+                    <TableCell align="right">Total (ARS)</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {planTareas.map((t) => (
+                    <TableRow key={t.id} hover>
+                      <TableCell><Typography variant="body2" sx={{ fontWeight: 500 }}>{t.nombre}</Typography></TableCell>
+                      <TableCell><Typography variant="body2" color="text.secondary">{t.etapa}</Typography></TableCell>
+                      <TableCell sx={{ whiteSpace: "nowrap" }}>{fmtDate(t.ini)} – {fmtDate(t.fin)}</TableCell>
+                      <TableCell align="right" sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", color: "text.secondary" }}>{t.mod ? fmtMoney(t.mod, "ARS") : "—"}</TableCell>
+                      <TableCell align="right" sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", color: "text.secondary" }}>{t.mat ? fmtMoney(t.mat, "ARS") : "—"}</TableCell>
+                      <TableCell align="right" sx={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", color: "text.secondary" }}>{t.maq ? fmtMoney(t.maq, "ARS") : "—"}</TableCell>
+                      <TableCell align="right" sx={{ whiteSpace: "nowrap", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                        {fmtMoney(t.total, "ARS")}
+                      </TableCell>
                     </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {planTareas.map((t) => (
-                      <TableRow key={t.id} hover>
-                        <TableCell><Typography variant="body2" sx={{ fontWeight: 500 }}>{t.nombre}</Typography></TableCell>
-                        <TableCell><Typography variant="body2" color="text.secondary">{t.etapa}</Typography></TableCell>
-                        <TableCell sx={{ whiteSpace: "nowrap" }}>{fmtDate(t.ini)} – {fmtDate(t.fin)}</TableCell>
-                        <TableCell align="right" sx={{ whiteSpace: "nowrap", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-                          {fmtMoney(t.total, "ARS")}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </Box>
-            </>
+                  ))}
+                </TableBody>
+              </Table>
+            </Box>
           )}
         </CardContent>
       </Card>
@@ -542,7 +600,7 @@ function CashflowManual({
 }
 
 // --- Gráfico de barras verticales por semana (con divs, sin dependencias) ---
-function WeeklyBars({ data, color }) {
+function WeeklyBars({ data, color, moneda = "ARS" }) {
   if (!data || data.length === 0) {
     return <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>Sin datos todavía.</Typography>;
   }
@@ -552,10 +610,10 @@ function WeeklyBars({ data, color }) {
       {data.map((d) => (
         <Box key={d.key} sx={{ flex: "1 0 64px", minWidth: 64, display: "flex", flexDirection: "column", alignItems: "center" }}>
           <Typography variant="caption" sx={{ fontSize: 10, lineHeight: 1.1, height: 26, textAlign: "center", color: "text.secondary" }}>
-            {fmtMoney(d.value, "ARS")}
+            {fmtMoney(d.value, moneda)}
           </Typography>
           <Box sx={{ flexGrow: 1, width: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", borderBottom: "1px solid", borderColor: "divider" }}>
-            <Tooltip title={`${d.label}: ${fmtMoney(d.value, "ARS")}${d.sub ? ` · ${d.sub}` : ""}`} arrow disableInteractive>
+            <Tooltip title={`${d.label}: ${fmtMoney(d.value, moneda)}${d.sub ? ` · ${d.sub}` : ""}`} arrow disableInteractive>
               <Box sx={{ width: "62%", borderRadius: "4px 4px 0 0", height: `${(d.value / max) * 100}%`, minHeight: d.value > 0 ? 4 : 0, bgcolor: color, transition: "height .2s" }} />
             </Tooltip>
           </Box>
@@ -597,6 +655,12 @@ function NoteCell({ value, onCommit, placeholder }) {
 
 // Celda de monto (ARS) que guarda al salir del campo (blur/Enter). Muestra el
 // número crudo mientras se edita y el monto formateado cuando no está enfocado.
+// Agrupa dígitos de a miles con puntos ("1000000" -> "1.000.000").
+const agruparMiles = (s) => {
+  const digits = String(s).replace(/\D/g, "");
+  return digits ? digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".") : "";
+};
+
 function MoneyCell({ value, onCommit }) {
   const [local, setLocal] = useState("");
   const [focused, setFocused] = useState(false);
@@ -610,12 +674,12 @@ function MoneyCell({ value, onCommit }) {
     <TextField
       variant="standard" size="small" placeholder="—"
       value={display}
-      onFocus={() => { setFocused(true); setLocal(num(value) ? String(value) : ""); }}
-      onChange={(e) => setLocal(e.target.value)}
+      onFocus={() => { setFocused(true); setLocal(num(value) ? agruparMiles(Math.trunc(num(value))) : ""); }}
+      onChange={(e) => setLocal(agruparMiles(e.target.value))}
       onBlur={commit}
       onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
       InputProps={{ disableUnderline: true }}
-      inputProps={{ inputMode: "decimal", style: { textAlign: "right", fontSize: 13, fontVariantNumeric: "tabular-nums" } }}
+      inputProps={{ inputMode: "numeric", style: { textAlign: "right", fontSize: 13, fontVariantNumeric: "tabular-nums" } }}
       sx={{ width: 130 }}
     />
   );
