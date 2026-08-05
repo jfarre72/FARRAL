@@ -119,6 +119,18 @@ export default function ReporteriaPage() {
       avance += peso * fracc(h);
     });
 
+    // Orden de las etapas tal como se configuran en Ajustes (por 'orden').
+    // "—" (tareas sin etapa) queda al final.
+    const ordenHito = (nombre) => {
+      const i = sorted.findIndex(h => h.nombre === nombre);
+      return i === -1 ? Number.POSITIVE_INFINITY : i;
+    };
+    // Reordena un objeto {etapa: valor} según el orden de las etapas.
+    const ordenarPorEtapa = (obj) =>
+      Object.fromEntries(
+        Object.entries(obj).sort(([a], [b]) => ordenHito(a) - ordenHito(b))
+      );
+
     // Tareas completadas en el rango (por completado_at)
     const hitoNombre = Object.fromEntries(hitos.map(h => [h.id, h.nombre]));
     const tareasRango = tareas
@@ -161,7 +173,7 @@ export default function ReporteriaPage() {
     // Fotos del rango (por fecha de carga)
     const fotosRango = fotos.filter(f => inRango(f.fecha));
 
-    return { avance: Math.round(avance), tareasPorHito, nTareasRango: tareasRango.length, enCursoPorHito, nEnCurso: tareasEnCurso.length, gastoRango, totalUSD, acumHasta, serie, hastaKey, fotosRango };
+    return { avance: Math.round(avance), tareasPorHito: ordenarPorEtapa(tareasPorHito), nTareasRango: tareasRango.length, enCursoPorHito: ordenarPorEtapa(enCursoPorHito), nEnCurso: tareasEnCurso.length, gastoRango, totalUSD, acumHasta, serie, hastaKey, fotosRango };
   }, [hitos, tareas, movs, fotos, desde, hasta]);
 
   const rangoLabel = `${fmtDate(desde)} a ${fmtDate(hasta)}`;
