@@ -207,12 +207,15 @@ export default function ReporteriaPage() {
   const rangoLabel = `${fmtDate(desde)} a ${fmtDate(hasta)}`;
 
   const generarPdf = () => {
+    // Envuelve un bloque como sección con barra de título y recuadro.
+    const sec = (titulo, inner) => `<section class="section"><h2>${esc(titulo)}</h2><div class="section-body">${inner}</div></section>`;
+
     // Encabezado de etapa con su % de avance coloreado (verde=100%, naranja=en curso).
     const hitoHeader = (hito) => {
       const pct = rep.avanceEtapa[hito] ?? 0;
       const color = pct >= 100 ? "#1B8A3A" : pct > 0 ? "#E07A1F" : "#8a97a8";
       const check = pct >= 100 ? " ✓" : "";
-      return `<p style="margin:6px 0 2px"><b>${esc(hito)}</b> <span style="color:${color};font-weight:600">${pct}%${check}</span></p>`;
+      return `<p class="etapa"><b>${esc(hito)}</b> <span style="color:${color};font-weight:600">${pct}%${check}</span></p>`;
     };
 
     const tareasHtml = Object.keys(rep.tareasPorHito).length
@@ -242,29 +245,20 @@ export default function ReporteriaPage() {
       : `<p class="muted">Sin fotos cargadas para este período.</p>`;
 
     const partes = [];
-    if (inc.resumen) partes.push(`
-      <h2>Resumen del período</h2>
+    if (inc.resumen) partes.push(sec("Resumen del período", `
       <table><tbody>
         <tr><td>Avance estimado del proyecto</td><td style="text-align:right">${rep.avance}%</td></tr>
         <tr><td>Gastado en el período</td><td style="text-align:right">${esc(fmtMoney(Math.round(rep.gastoRango), "USD"))}</td></tr>
         <tr><td>Gastado acumulado (hasta ${fmtDate(hasta)})</td><td style="text-align:right">${esc(fmtMoney(Math.round(rep.acumHasta), "USD"))}</td></tr>
         <tr><td>Tareas completadas en el período</td><td style="text-align:right">${rep.nTareasRango}</td></tr>
-      </tbody></table>`);
-    if (inc.tareas) partes.push(`
-      <h2>Tareas realizadas (${esc(rangoLabel)})</h2>
-      ${tareasHtml}
-
-      <h2>Tareas en curso (${esc(rangoLabel)})</h2>
-      ${enCursoHtml}
-
-      <h2>Tareas planificadas · próximas 2 semanas (${esc(planLabel)})</h2>
-      ${planHtml}`);
-    if (inc.grafico) partes.push(`
-      <h2>Evolución de gastos (USD acumulado)</h2>
-      ${svgChart(rep.serie, rep.hastaKey)}`);
-    if (inc.fotos) partes.push(`
-      <h2>Fotos del período</h2>
-      ${fotosHtml}`);
+      </tbody></table>`));
+    if (inc.tareas) {
+      partes.push(sec(`Tareas realizadas (${rangoLabel})`, tareasHtml));
+      partes.push(sec(`Tareas en curso (${rangoLabel})`, enCursoHtml));
+      partes.push(sec(`Tareas planificadas · próximas 2 semanas (${planLabel})`, planHtml));
+    }
+    if (inc.grafico) partes.push(sec("Evolución de gastos (USD acumulado)", svgChart(rep.serie, rep.hastaKey)));
+    if (inc.fotos) partes.push(sec("Fotos del período", fotosHtml));
     const body = partes.join("\n");
     printDocument({
       title: `Reporte de avance — ${rangoLabel}`,
