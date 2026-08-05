@@ -9,12 +9,15 @@ import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtMoney, fmtDate, fmtPct } from "@/components/Money";
 import { printDocument, esc } from "@/lib/printPdf";
+import { aplicarFechasReales } from "@/lib/fechasReales";
 
 const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 const MES_CORTO = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
 const isoDe = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const hoyISO = () => isoDe(new Date());
+// Suma N días a una fecha ISO (YYYY-MM-DD) y devuelve otra fecha ISO.
+const sumarDiasISO = (iso, n) => { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return isoDe(d); };
 const inicioMesISO = () => { const d = new Date(); return isoDe(new Date(d.getFullYear(), d.getMonth(), 1)); };
 
 // USD gastado por un movimiento (misma convención que Caja/Indicadores).
@@ -68,6 +71,7 @@ export default function ReporteriaPage() {
   const [hasta, setHasta] = useState(hoyISO());
   const [hitos, setHitos] = useState([]);
   const [tareas, setTareas] = useState([]);
+  const [registros, setRegistros] = useState([]); // Diario (para derivar estados/fechas reales)
   const [movs, setMovs] = useState([]);
   const [fotos, setFotos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -85,10 +89,11 @@ export default function ReporteriaPage() {
   const reload = async () => {
     if (!proyecto) return;
     setLoading(true);
-    const [{ data: hs }, { data: mv }, { data: ft }] = await Promise.all([
+    const [{ data: hs }, { data: mv }, { data: ft }, { data: rg }] = await Promise.all([
       supabase.from("hitos").select("*").eq("proyecto_id", proyecto.id).order("orden"),
       supabase.from("movimientos_caja").select("*").eq("proyecto_id", proyecto.id),
       supabase.from("fotos").select("*").eq("proyecto_id", proyecto.id).order("fecha"),
+      supabase.from("seguimiento_diario").select("fecha,trabajado,etapa,tareas").eq("proyecto_id", proyecto.id),
     ]);
     const ids = (hs ?? []).map(h => h.id);
     let ts = [];
@@ -96,7 +101,7 @@ export default function ReporteriaPage() {
       const { data } = await supabase.from("hito_tareas").select("*").in("hito_id", ids).order("orden");
       ts = data ?? [];
     }
-    setHitos(hs ?? []); setTareas(ts); setMovs(mv ?? []); setFotos(ft ?? []);
+    setHitos(hs ?? []); setTareas(ts); setRegistros(rg ?? []); setMovs(mv ?? []); setFotos(ft ?? []);
     setLoading(false);
   };
 
@@ -139,14 +144,32 @@ export default function ReporteriaPage() {
     const tareasPorHito = {};
     for (const t of tareasRango) { (tareasPorHito[t.hito] ||= []).push(t.nombre); }
 
+    // Estados y fechas REALES derivados del Diario (igual que la Línea de tiempo).
+    // Los campos estado/fecha_inicio crudos de hito_tareas no reflejan lo cargado
+    // en el Diario, por eso acá los recalculamos.
+    const tareasReales = aplicarFechasReales(registros, tareas, hitos);
+
     // Tareas en curso dentro del período: estado en_curso e iniciadas a más
     // tardar al fin del rango (siguen activas durante el período reportado).
-    const estadoDe = (t) => t.estado || (t.completado ? "finalizado" : ((t.avance ?? 0) > 0 ? "en_curso" : "no_iniciado"));
-    const tareasEnCurso = tareas
-      .filter(t => estadoDe(t) === "en_curso" && t.fecha_inicio && String(t.fecha_inicio).slice(0, 10) <= hasta)
+    const tareasEnCurso = tareasReales
+      .filter(t => t.estado === "en_curso" && t.fecha_inicio && String(t.fecha_inicio).slice(0, 10) <= hasta)
       .map(t => ({ nombre: t.nombre, hito: hitoNombre[t.hito_id] || "—", avance: t.avance ?? 0 }));
     const enCursoPorHito = {};
     for (const t of tareasEnCurso) { (enCursoPorHito[t.hito] ||= []).push(t); }
+
+    // Tareas planificadas para las próximas 2 semanas, tomando como referencia el
+    // fin del período reportado (arranca al día siguiente de 'hasta').
+    const planDesde = sumarDiasISO(hasta, 1);
+    const planHasta = sumarDiasISO(hasta, 14);
+    const tareasPlanificadas = tareasReales
+      .filter(t => {
+        const ini = t.fecha_inicio ? String(t.fecha_inicio).slice(0, 10) : null;
+        return ini && ini >= planDesde && ini <= planHasta;
+      })
+      .sort((a, b) => String(a.fecha_inicio).localeCompare(String(b.fecha_inicio)))
+      .map(t => ({ nombre: t.nombre, hito: hitoNombre[t.hito_id] || "—", fecha_inicio: String(t.fecha_inicio).slice(0, 10) }));
+    const planPorHito = {};
+    for (const t of tareasPlanificadas) { (planPorHito[t.hito] ||= []).push(t); }
 
     // Gasto del rango, total acumulado + serie mensual (historial completo)
     const porMes = new Map();
@@ -173,8 +196,8 @@ export default function ReporteriaPage() {
     // Fotos del rango (por fecha de carga)
     const fotosRango = fotos.filter(f => inRango(f.fecha));
 
-    return { avance: Math.round(avance), tareasPorHito: ordenarPorEtapa(tareasPorHito), nTareasRango: tareasRango.length, enCursoPorHito: ordenarPorEtapa(enCursoPorHito), nEnCurso: tareasEnCurso.length, gastoRango, totalUSD, acumHasta, serie, hastaKey, fotosRango };
-  }, [hitos, tareas, movs, fotos, desde, hasta]);
+    return { avance: Math.round(avance), tareasPorHito: ordenarPorEtapa(tareasPorHito), nTareasRango: tareasRango.length, enCursoPorHito: ordenarPorEtapa(enCursoPorHito), nEnCurso: tareasEnCurso.length, planPorHito: ordenarPorEtapa(planPorHito), nPlan: tareasPlanificadas.length, planDesde, planHasta, gastoRango, totalUSD, acumHasta, serie, hastaKey, fotosRango };
+  }, [hitos, tareas, registros, movs, fotos, desde, hasta]);
 
   const rangoLabel = `${fmtDate(desde)} a ${fmtDate(hasta)}`;
 
@@ -190,6 +213,13 @@ export default function ReporteriaPage() {
           `<p style="margin:6px 0 2px"><b>${esc(hito)}</b></p><ul style="margin:0">${ts.map(t => `<li>${esc(t.nombre)}${t.avance ? ` <span class="muted">(${t.avance}%)</span>` : ""}</li>`).join("")}</ul>`
         ).join("")
       : `<p class="muted">No hay tareas en curso en el período.</p>`;
+
+    const planLabel = `${fmtDate(rep.planDesde)} a ${fmtDate(rep.planHasta)}`;
+    const planHtml = Object.keys(rep.planPorHito).length
+      ? Object.entries(rep.planPorHito).map(([hito, ts]) =>
+          `<p style="margin:6px 0 2px"><b>${esc(hito)}</b></p><ul style="margin:0">${ts.map(t => `<li>${esc(t.nombre)} <span class="muted">(${fmtDate(t.fecha_inicio)})</span></li>`).join("")}</ul>`
+        ).join("")
+      : `<p class="muted">No hay tareas planificadas para las próximas 2 semanas.</p>`;
 
     const fotosHtml = rep.fotosRango.length
       ? `<div style="display:flex;flex-wrap:wrap;gap:8px">${rep.fotosRango.map(f =>
@@ -212,7 +242,10 @@ export default function ReporteriaPage() {
       ${tareasHtml}
 
       <h2>Tareas en curso (${esc(rangoLabel)})</h2>
-      ${enCursoHtml}`);
+      ${enCursoHtml}
+
+      <h2>Tareas planificadas · próximas 2 semanas (${esc(planLabel)})</h2>
+      ${planHtml}`);
     if (inc.grafico) partes.push(`
       <h2>Evolución de gastos (USD acumulado)</h2>
       ${svgChart(rep.serie, rep.hastaKey)}`);
@@ -331,6 +364,29 @@ export default function ReporteriaPage() {
                     <li key={i}>
                       <Typography variant="body2" component="span">
                         {t.nombre}{t.avance ? ` (${t.avance}%)` : ""}
+                      </Typography>
+                    </li>
+                  ))}
+                </ul>
+              </Box>
+            ))
+          )}
+
+          <Divider sx={{ my: 2 }} />
+          <Typography variant="subtitle1" gutterBottom>
+            Tareas planificadas · próximas 2 semanas ({fmtDate(rep.planDesde)} a {fmtDate(rep.planHasta)})
+          </Typography>
+          {Object.keys(rep.planPorHito).length === 0 ? (
+            <Typography variant="body2" color="text.secondary">No hay tareas planificadas para las próximas 2 semanas.</Typography>
+          ) : (
+            Object.entries(rep.planPorHito).map(([hito, ts]) => (
+              <Box key={hito} sx={{ mb: 1 }}>
+                <Typography variant="body2" fontWeight={700}>{hito}</Typography>
+                <ul style={{ margin: "2px 0" }}>
+                  {ts.map((t, i) => (
+                    <li key={i}>
+                      <Typography variant="body2" component="span">
+                        {t.nombre} <Typography variant="body2" component="span" color="text.secondary">({fmtDate(t.fecha_inicio)})</Typography>
                       </Typography>
                     </li>
                   ))}
