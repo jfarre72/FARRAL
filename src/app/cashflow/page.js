@@ -67,7 +67,6 @@ export default function CashflowPage() {
   const [tcSem, setTcSem] = useState({});    // { semanaISO(lunes): tc }
   const [loading, setLoading] = useState(true);
   const [chartUSD, setChartUSD] = useState(false); // gráfico en USD (true) o ARS (false)
-  const [verPagados, setVerPagados] = useState(false);
 
   const reload = async () => {
     if (!proyecto) return;
@@ -147,46 +146,47 @@ export default function CashflowPage() {
     }
   };
 
-  // Ítems agrupados por semana (lunes-domingo), con TC de la semana y USD a vender.
-  // Los ítems pagados no cuentan (dejan de aparecer para ver siempre lo próximo).
+  // Ítems agrupados por semana (lunes-domingo). Incluye pagados y pendientes: los
+  // pagados se muestran dentro de su semana; el "a pagar" y los USD a vender se
+  // calculan sólo sobre lo pendiente.
   const semanas = useMemo(() => {
     const map = new Map();
     for (const it of items) {
-      if (!it.fecha || it.pagado) continue;
+      if (!it.fecha) continue;
       const ini = lunesDe(String(it.fecha).slice(0, 10));
       const key = toISO(ini);
-      if (!map.has(key)) map.set(key, { key, ini, fin: addDays(ini, 6), total: 0, items: [] });
+      if (!map.has(key)) map.set(key, { key, ini, fin: addDays(ini, 6), totalAll: 0, totalPend: 0, totalPagado: 0, items: [] });
       const g = map.get(key);
       g.items.push(it);
-      g.total += parseMonto(it.monto);
+      const m = parseMonto(it.monto);
+      g.totalAll += m;
+      if (it.pagado) g.totalPagado += m; else g.totalPend += m;
     }
     const arr = [...map.values()].sort((a, b) => (a.key < b.key ? -1 : 1));
-    // Cada semana ordena sus ítems por fecha.
-    for (const s of arr) s.items.sort((a, b) => (String(a.fecha) < String(b.fecha) ? -1 : 1));
-    // El saldo ARS positivo cubre primero las semanas más cercanas.
+    // Cada semana ordena sus ítems: primero pendientes, luego pagados, por fecha.
+    for (const s of arr) s.items.sort((a, b) => {
+      if (!!a.pagado !== !!b.pagado) return a.pagado ? 1 : -1;
+      return String(a.fecha) < String(b.fecha) ? -1 : 1;
+    });
+    // El saldo ARS positivo cubre primero las semanas más cercanas (sólo pendiente).
     let saldoRest = Math.max(0, num(saldos.ars));
     let acumUSD = 0;
     return arr.map(s => {
-      const cubierto = Math.min(saldoRest, s.total);
+      const cubierto = Math.min(saldoRest, s.totalPend);
       saldoRest -= cubierto;
-      const deficit = Math.max(0, s.total - cubierto);
+      const deficit = Math.max(0, s.totalPend - cubierto);
       const tc = parseMonto(tcSem[s.key]);
       const usdVender = tc > 0 ? deficit / tc : null;
-      const totalUSD = tc > 0 ? s.total / tc : null;
+      const totalUSD = tc > 0 ? s.totalPend / tc : null;
+      const pagada = s.items.length > 0 && s.totalPend <= 0 && s.totalAll > 0;
       if (usdVender != null) acumUSD += usdVender;
-      return { ...s, cubierto, deficit, tc, usdVender, totalUSD, acumUSD: usdVender != null ? acumUSD : null };
+      return { ...s, cubierto, deficit, tc, usdVender, totalUSD, pagada, acumUSD: usdVender != null ? acumUSD : null };
     });
   }, [items, saldos.ars, tcSem]);
 
-  // Ítems pagados (para revisar / desmarcar).
-  const pagados = useMemo(
-    () => items.filter(it => it.pagado).sort((a, b) => (String(a.fecha) < String(b.fecha) ? 1 : -1)),
-    [items]
-  );
-
   const usdVenderTotal = semanas.reduce((s, w) => s + (w.usdVender || 0), 0);
-  const totalARS = semanas.reduce((s, w) => s + w.total, 0);
-  const algunSinTc = semanas.some(w => w.total > 0 && !(w.tc > 0));
+  const totalARS = semanas.reduce((s, w) => s + w.totalPend, 0);
+  const algunSinTc = semanas.some(w => w.totalPend > 0 && !(w.tc > 0));
   const saldoUSDNum = num(saldos.usd);
 
   // Planificado semana a semana (referencia): tareas con fecha y costo estimado.
@@ -234,7 +234,6 @@ export default function CashflowPage() {
           addItem={addItem} updItem={updItem} delItem={delItem} setTcSemana={setTcSemana}
           planTareas={planTareas}
           chartUSD={chartUSD} setChartUSD={setChartUSD}
-          pagados={pagados} verPagados={verPagados} setVerPagados={setVerPagados}
         />
       )}
     </Stack>
@@ -349,7 +348,7 @@ function CostosPorEtapa({ porEtapa, tcRef, setEst }) {
 function CashflowManual({
   saldos, saldoUSDNum, semanas, totalARS, usdVenderTotal, algunSinTc,
   addItem, updItem, delItem, setTcSemana, planTareas,
-  chartUSD, setChartUSD, pagados, verPagados, setVerPagados,
+  chartUSD, setChartUSD,
 }) {
   // Formulario de alta (fuera de las semanas, para no "perder" el ítem recién
   // creado): se cargan fecha, concepto y monto y al Guardar se ubica en su semana.
@@ -419,11 +418,16 @@ function CashflowManual({
             moneda={chartUSD ? "USD" : "ARS"}
             data={semanas.map(s => ({
               key: s.key, label: fmtDate(toISO(addDays(s.ini, 4))), // viernes (fin de semana de pago)
-              value: chartUSD ? (s.totalUSD ?? 0) : s.total,
+              value: chartUSD ? ((s.tc > 0 ? s.totalAll / s.tc : 0)) : s.totalAll,
+              color: s.pagada ? "#2E7D32" : "#1E5AA8", // verde si la semana está pagada
               sub: null,
             }))}
             color="#1E5AA8"
           />
+          <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
+            <LeyendaColor color="#1E5AA8" label="Pendiente" />
+            <LeyendaColor color="#2E7D32" label="Pagada" />
+          </Stack>
           {chartUSD && algunSinTc && (
             <Typography variant="caption" color="warning.main" sx={{ mt: 1, display: "block" }}>
               Las semanas sin tipo de cambio cargado se muestran en 0 en USD.
@@ -479,99 +483,106 @@ function CashflowManual({
           )}
 
           {semanas.map((s) => (
-            <Box key={s.key} sx={{ mb: 2, border: "1px solid", borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
-              <Box sx={{ bgcolor: "rgba(15,42,74,0.05)", borderLeft: "4px solid #0F2A4A", px: 1.5, py: 1 }}>
-                <Grid container spacing={1} alignItems="center">
-                  <Grid item xs={12} sm={5}>
-                    <Typography variant="subtitle2" fontWeight={800}>
-                      Semana {fmtDate(toISO(s.ini))} – {fmtDate(toISO(s.fin))}
-                    </Typography>
+            <Accordion key={s.key} disableGutters defaultExpanded={!s.pagada}
+              sx={{ "&:before": { display: "none" }, border: "1px solid", borderColor: "divider", borderRadius: 1, mb: 1, overflow: "hidden" }}>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}
+                sx={{ bgcolor: s.pagada ? "rgba(46,125,50,0.08)" : "rgba(15,42,74,0.05)", borderLeft: `4px solid ${s.pagada ? "#2E7D32" : "#0F2A4A"}` }}>
+                <Stack direction="row" alignItems="center" spacing={1.5} sx={{ width: "100%", pr: 1, flexWrap: "wrap" }} useFlexGap>
+                  <Typography variant="subtitle2" fontWeight={800} sx={{ flexGrow: 1, minWidth: 160 }}>
+                    Semana {fmtDate(toISO(s.ini))} – {fmtDate(toISO(s.fin))}
+                  </Typography>
+                  <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flexWrap: "wrap" }} useFlexGap>
+                    {s.pagada ? (
+                      <Chip size="small" color="success" variant="outlined" label={`Pagada · ${fmtMoney(s.totalPagado, "ARS")}`} />
+                    ) : (
+                      <>
+                        <Typography variant="body2">A pagar <b style={{ color: "#C0392B" }}>{fmtMoney(s.totalPend, "ARS")}</b></Typography>
+                        {s.usdVender != null && (
+                          <Typography variant="body2" color="text.secondary">
+                            Vender <b style={{ color: "#0F2A4A" }}>{fmtMoney(s.usdVender, "USD")}</b>
+                          </Typography>
+                        )}
+                        {s.totalPagado > 0 && (
+                          <Chip size="small" color="success" variant="outlined" label={`Pagado ${fmtMoney(s.totalPagado, "ARS")}`} />
+                        )}
+                      </>
+                    )}
+                  </Stack>
+                </Stack>
+              </AccordionSummary>
+              <AccordionDetails sx={{ p: 0 }}>
+                <Box sx={{ px: 1.5, py: 1.25, borderBottom: "1px solid", borderColor: "divider" }}>
+                  <Grid container spacing={1.5} alignItems="center">
+                    <Grid item xs={6} sm={3}>
+                      <TextField
+                        label="Dólar venta" size="small" fullWidth
+                        defaultValue={s.tc || ""}
+                        placeholder="1540"
+                        onBlur={(e) => setTcSemana(s.key, e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                        inputProps={{ inputMode: "decimal", style: { fontSize: 13 } }}
+                      />
+                    </Grid>
+                    <Grid item xs={6} sm={3}>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", lineHeight: 1.1 }}>USD a vender</Typography>
+                      <Typography variant="body2" fontWeight={700} sx={{ color: "#0F2A4A", fontVariantNumeric: "tabular-nums" }}>
+                        {s.usdVender != null ? fmtMoney(s.usdVender, "USD") : "—"}
+                      </Typography>
+                    </Grid>
                   </Grid>
-                  <Grid item xs={5} sm={3}>
-                    <Typography variant="body2">A pagar <b style={{ color: "#C0392B" }}>{fmtMoney(s.total, "ARS")}</b></Typography>
-                  </Grid>
-                  <Grid item xs={4} sm={2}>
-                    <TextField
-                      label="Dólar venta" size="small" fullWidth
-                      defaultValue={s.tc || ""}
-                      placeholder="1540"
-                      onBlur={(e) => setTcSemana(s.key, e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-                      inputProps={{ inputMode: "decimal", style: { fontSize: 13 } }}
-                    />
-                  </Grid>
-                  <Grid item xs={3} sm={2}>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", lineHeight: 1.1 }}>USD a vender</Typography>
-                    <Typography variant="body2" fontWeight={700} sx={{ color: "#0F2A4A", fontVariantNumeric: "tabular-nums" }}>
-                      {s.usdVender != null ? fmtMoney(s.usdVender, "USD") : "—"}
-                    </Typography>
-                  </Grid>
-                </Grid>
-              </Box>
-              <Box sx={{ overflowX: "auto" }}>
-                <Table size="small" sx={{ minWidth: 560 }}>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell sx={{ width: 150 }}>Fecha</TableCell>
-                      <TableCell>Concepto</TableCell>
-                      <TableCell align="right" sx={{ width: 150 }}>Monto (ARS)</TableCell>
-                      <TableCell align="center" sx={{ width: 92 }}></TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {s.items.map((it) => (
-                      <TableRow key={it.id} hover>
-                        <TableCell>
-                          <TextField
-                            type="date" variant="standard" size="small"
-                            defaultValue={String(it.fecha).slice(0, 10)}
-                            onBlur={(e) => { const v = e.target.value; if (v && v !== String(it.fecha).slice(0, 10)) updItem(it.id, { fecha: v }); }}
-                            InputProps={{ disableUnderline: true }} inputProps={{ style: { fontSize: 13 } }}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <NoteCell value={it.concepto} placeholder="Pago a…" onCommit={(v) => updItem(it.id, { concepto: v || "" })} />
-                        </TableCell>
-                        <TableCell align="right"><MoneyCell value={it.monto} onCommit={(v) => updItem(it.id, { monto: v })} /></TableCell>
-                        <TableCell align="center" sx={{ whiteSpace: "nowrap" }}>
-                          <Tooltip title="Marcar como pagado (deja de aparecer)">
-                            <IconButton size="small" color="success" onClick={() => updItem(it.id, { pagado: true })}>
-                              <CheckCircleOutlineIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Eliminar ítem">
-                            <IconButton size="small" color="error" onClick={() => delItem(it.id)}>
-                              <DeleteOutlineIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </Box>
-            </Box>
-          ))}
-
-          {pagados.length > 0 && (
-            <Box sx={{ mt: 1 }}>
-              <Button size="small" color="inherit" onClick={() => setVerPagados(v => !v)}
-                sx={{ textTransform: "none", color: "text.secondary" }}>
-                {verPagados ? "▾" : "▸"} Pagados ({pagados.length})
-              </Button>
-              {verPagados && (
+                </Box>
                 <Box sx={{ overflowX: "auto" }}>
                   <Table size="small" sx={{ minWidth: 560 }}>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ width: 150 }}>Fecha</TableCell>
+                        <TableCell>Concepto</TableCell>
+                        <TableCell align="right" sx={{ width: 150 }}>Monto (ARS)</TableCell>
+                        <TableCell align="center" sx={{ width: 92 }}></TableCell>
+                      </TableRow>
+                    </TableHead>
                     <TableBody>
-                      {pagados.map((it) => (
-                        <TableRow key={it.id} hover sx={{ opacity: 0.7 }}>
-                          <TableCell sx={{ width: 150, whiteSpace: "nowrap" }}>{fmtDate(String(it.fecha).slice(0, 10))}</TableCell>
+                      {s.items.map((it) => it.pagado ? (
+                        <TableRow key={it.id} hover sx={{ opacity: 0.65 }}>
+                          <TableCell sx={{ whiteSpace: "nowrap", fontSize: 13 }}>{fmtDate(String(it.fecha).slice(0, 10))}</TableCell>
                           <TableCell><Typography variant="body2" sx={{ textDecoration: "line-through" }}>{it.concepto || "—"}</Typography></TableCell>
-                          <TableCell align="right" sx={{ width: 150, fontVariantNumeric: "tabular-nums", color: "text.secondary" }}>{fmtMoney(it.monto, "ARS")}</TableCell>
-                          <TableCell align="center" sx={{ width: 48 }}>
-                            <Tooltip title="Marcar como no pagado (vuelve a aparecer)">
+                          <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums", color: "text.secondary" }}>{fmtMoney(it.monto, "ARS")}</TableCell>
+                          <TableCell align="center" sx={{ whiteSpace: "nowrap" }}>
+                            <Tooltip title="Marcar como no pagado">
                               <IconButton size="small" onClick={() => updItem(it.id, { pagado: false })}>
                                 <UndoIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Eliminar ítem">
+                              <IconButton size="small" color="error" onClick={() => delItem(it.id)}>
+                                <DeleteOutlineIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        <TableRow key={it.id} hover>
+                          <TableCell>
+                            <TextField
+                              type="date" variant="standard" size="small"
+                              defaultValue={String(it.fecha).slice(0, 10)}
+                              onBlur={(e) => { const v = e.target.value; if (v && v !== String(it.fecha).slice(0, 10)) updItem(it.id, { fecha: v }); }}
+                              InputProps={{ disableUnderline: true }} inputProps={{ style: { fontSize: 13 } }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <NoteCell value={it.concepto} placeholder="Pago a…" onCommit={(v) => updItem(it.id, { concepto: v || "" })} />
+                          </TableCell>
+                          <TableCell align="right"><MoneyCell value={it.monto} onCommit={(v) => updItem(it.id, { monto: v })} /></TableCell>
+                          <TableCell align="center" sx={{ whiteSpace: "nowrap" }}>
+                            <Tooltip title="Marcar como pagado">
+                              <IconButton size="small" color="success" onClick={() => updItem(it.id, { pagado: true })}>
+                                <CheckCircleOutlineIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Eliminar ítem">
+                              <IconButton size="small" color="error" onClick={() => delItem(it.id)}>
+                                <DeleteOutlineIcon fontSize="small" />
                               </IconButton>
                             </Tooltip>
                           </TableCell>
@@ -580,9 +591,9 @@ function CashflowManual({
                     </TableBody>
                   </Table>
                 </Box>
-              )}
-            </Box>
-          )}
+              </AccordionDetails>
+            </Accordion>
+          ))}
         </CardContent>
       </Card>
 
@@ -652,7 +663,7 @@ function WeeklyBars({ data, color, moneda = "ARS" }) {
           </Typography>
           <Box sx={{ flexGrow: 1, width: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", borderBottom: "1px solid", borderColor: "divider" }}>
             <Tooltip title={`${d.label}: ${fmtMoney(d.value, moneda)}${d.sub ? ` · ${d.sub}` : ""}`} arrow disableInteractive>
-              <Box sx={{ width: "62%", borderRadius: "4px 4px 0 0", height: `${(d.value / max) * 100}%`, minHeight: d.value > 0 ? 4 : 0, bgcolor: color, transition: "height .2s" }} />
+              <Box sx={{ width: "62%", borderRadius: "4px 4px 0 0", height: `${(d.value / max) * 100}%`, minHeight: d.value > 0 ? 4 : 0, bgcolor: d.color || color, transition: "height .2s" }} />
             </Tooltip>
           </Box>
           <Typography variant="caption" sx={{ fontSize: 9.5, lineHeight: 1.1, mt: 0.5, textAlign: "center", color: "text.secondary" }}>
@@ -666,6 +677,16 @@ function WeeklyBars({ data, color, moneda = "ARS" }) {
         </Box>
       ))}
     </Box>
+  );
+}
+
+// Referencia de color para el gráfico.
+function LeyendaColor({ color, label }) {
+  return (
+    <Stack direction="row" spacing={0.75} alignItems="center">
+      <Box sx={{ width: 12, height: 12, borderRadius: 0.5, bgcolor: color }} />
+      <Typography variant="caption" color="text.secondary">{label}</Typography>
+    </Stack>
   );
 }
 
