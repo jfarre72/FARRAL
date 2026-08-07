@@ -4,7 +4,7 @@ import {
   Button, IconButton, Tooltip, LinearProgress, Dialog, DialogTitle, DialogContent,
   DialogActions, Accordion, AccordionSummary, AccordionDetails, Table, TableHead,
   TableBody, TableRow, TableCell, Chip, Link, ToggleButton, ToggleButtonGroup,
-  Divider, FormControlLabel, Switch, useMediaQuery, Tabs, Tab,
+  Divider, FormControlLabel, Switch, useMediaQuery, Tabs, Tab, Autocomplete,
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
@@ -1450,7 +1450,7 @@ export default function MaterialesPage() {
                       <Box>
                         <Typography variant="body2" fontWeight={600}>Materiales del remito</Typography>
                         <Typography variant="caption" color="text.secondary">
-                          Detalle de lo que salió. La IA lee las cantidades y las multiplica por el precio de la lista del acopio; el Monto es la suma.
+                          Detalle de lo que salió. Podés leerlo con IA o cargarlo a mano: al elegir el material de la lista del acopio se trae el precio y se multiplica por la cantidad; el Monto es la suma.
                         </Typography>
                       </Box>
                       <Button size="small" variant="outlined" startIcon={<AutoAwesomeIcon />}
@@ -1490,9 +1490,50 @@ export default function MaterialesPage() {
                         <Box key={idx} sx={{ p: 1, border: "1px solid", borderColor: "rgba(15,42,74,0.10)", borderRadius: 1 }}>
                           <Grid container spacing={1} alignItems="center">
                             <Grid item xs={8} sm={5}>
-                              <TextField label="Material" fullWidth size="small"
-                                value={it.material ?? ""} onChange={(e) => setMatItem(c.id, idx, { material: e.target.value })}
-                                helperText={it.codigo ? `Cód. ${it.codigo}` : " "} />
+                              <Autocomplete
+                                freeSolo size="small" fullWidth
+                                options={listaDe(listaSel)}
+                                value={it.material ?? ""}
+                                getOptionLabel={(o) => (typeof o === "string" ? o : (o.material || ""))}
+                                isOptionEqualToValue={(o, v) => (o?.material || "") === (typeof v === "string" ? v : v?.material)}
+                                filterOptions={(opts, state) => {
+                                  const q = state.inputValue.trim().toLowerCase();
+                                  const base = q
+                                    ? opts.filter(o => (o.material || "").toLowerCase().includes(q) || (o.codigo || "").toLowerCase().includes(q))
+                                    : opts;
+                                  return base.slice(0, 50);
+                                }}
+                                onChange={(e, val) => {
+                                  if (val && typeof val === "object") {
+                                    setMatItem(c.id, idx, {
+                                      material: val.material || "",
+                                      codigo: val.codigo || "",
+                                      unidad: val.unidad || it.unidad || "unidad",
+                                      categoria: CATEGORIAS_MAT.includes(val.categoria) ? val.categoria : (it.categoria || "Otros"),
+                                      precio: val.precio != null ? String(val.precio) : (it.precio ?? ""),
+                                    });
+                                  } else {
+                                    setMatItem(c.id, idx, { material: val || "" });
+                                  }
+                                }}
+                                onInputChange={(e, val, reason) => { if (reason === "input") setMatItem(c.id, idx, { material: val }); }}
+                                renderOption={(props, o) => (
+                                  <li {...props} key={(o.codigo || "") + "·" + o.material}>
+                                    <Box>
+                                      <Typography variant="body2">{o.material}</Typography>
+                                      <Typography variant="caption" color="text.secondary">
+                                        {o.codigo ? `Cód. ${o.codigo} · ` : ""}
+                                        {o.precio != null && o.precio !== "" ? fmtMoney(o.precio, c.moneda) : "sin precio"}
+                                        {o.unidad ? ` · ${o.unidad}` : ""}
+                                      </Typography>
+                                    </Box>
+                                  </li>
+                                )}
+                                renderInput={(params) => (
+                                  <TextField {...params} label="Material"
+                                    helperText={it.codigo ? `Cód. ${it.codigo}` : (listaDe(listaSel).length ? "Elegí de la lista para traer el precio" : " ")} />
+                                )}
+                              />
                             </Grid>
                             <Grid item xs={4} sm={2}>
                               <TextField select label="Categoría" fullWidth size="small"
