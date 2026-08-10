@@ -27,11 +27,12 @@ export function daysBetween(fromISO, toISO) {
   return Math.max(0, diff);
 }
 
-export function computePonderacion({ proyecto, aportes = [], inversores = [], fechaCorteOverride, fechaFaltanteOverride } = {}) {
-  // Permite hacer "what if" con una fecha distinta a la de fin del proyecto.
+export function computePonderacion({ proyecto, aportes = [], inversores = [], fechaCorteOverride, fechaFaltanteOverride, ventaOverride, costoOverride } = {}) {
+  // Permite hacer "what if" con una fecha distinta a la de fin del proyecto y/o
+  // con una venta / costo simulados (ventaOverride, costoOverride).
   const fechaCorte = fechaCorteOverride || proyecto?.fecha_fin || todayISO();
-  const venta = Number(proyecto?.precio_venta_estimado || 0);
-  const costo = Number(proyecto?.costo_total_estimado  || 0);
+  const venta = ventaOverride != null ? Number(ventaOverride) : Number(proyecto?.precio_venta_estimado || 0);
+  const costo = costoOverride != null ? Number(costoOverride) : Number(proyecto?.costo_total_estimado  || 0);
   const gananciaTotal = venta - costo;
 
   // --- Aportes reales (USD) ---

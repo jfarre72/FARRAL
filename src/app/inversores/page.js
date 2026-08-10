@@ -4,7 +4,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableRow, IconButton, Dialog,
   DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Box,
   Chip, Tooltip, Divider, LinearProgress, FormControlLabel, Switch,
-  TableSortLabel, useMediaQuery, ToggleButton, ToggleButtonGroup,
+  TableSortLabel, useMediaQuery, ToggleButton, ToggleButtonGroup, Slider,
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
@@ -359,6 +359,7 @@ export default function InversoresPage() {
           <Tab label="Inversores" />
           <Tab label="Aportes" />
           <Tab label="Composición" />
+          <Tab label="What if" />
         </Tabs>
         <Divider />
       </Box>
@@ -693,6 +694,10 @@ export default function InversoresPage() {
             })()}
           </CardContent>
         </Card>
+      )}
+
+      {tab === 4 && (
+        <WhatIf proyecto={proyecto} aportes={aportes} inversores={inversores} />
       )}
 
       {/* Dialog inversor */}
@@ -1041,6 +1046,265 @@ function DetalleInversor({ r, aportesC, totProy }) {
           </Typography>
         )}
       </Box>
+    </Box>
+  );
+}
+
+// =====================================================================
+// SOLAPA "What if" — simulador de venta / costo / % ganancia y fechas
+// =====================================================================
+function WhatIf({ proyecto, aportes, inversores }) {
+  const baseVenta = Number(proyecto?.precio_venta_estimado || 0);
+  const baseCosto = Number(proyecto?.costo_total_estimado || 0);
+  const baseFEntrega = proyecto?.fecha_fin || "";
+  const baseFVenta = proyecto?.fecha_inversor_faltante || proyecto?.fecha_fin || "";
+  const basePctGan = baseCosto > 0 ? ((baseVenta - baseCosto) / baseCosto) * 100 : 0;
+
+  const [venta, setVenta] = useState(baseVenta ? String(baseVenta) : "");
+  const [costo, setCosto] = useState(baseCosto ? String(baseCosto) : "");
+  const [pctStr, setPctStr] = useState("");
+  const [fEntrega, setFEntrega] = useState(baseFEntrega);
+  const [fVenta, setFVenta] = useState(baseFVenta);
+  const [expanded, setExpanded] = useState(new Set());
+  const toggle = (id) => setExpanded(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const resetAll = () => {
+    setVenta(baseVenta ? String(baseVenta) : "");
+    setCosto(baseCosto ? String(baseCosto) : "");
+    setPctStr("");
+    setFEntrega(baseFEntrega);
+    setFVenta(baseFVenta);
+  };
+  useEffect(() => { resetAll(); /* eslint-disable-next-line */ }, [proyecto?.id]);
+
+  const ventaN = Number(venta || 0);
+  const costoN = Number(costo || 0);
+  const gananciaN = ventaN - costoN;
+  const pctGan = costoN > 0 ? (gananciaN / costoN) * 100 : 0;
+
+  // Editar % ganancia objetivo: mantiene el costo fijo y recalcula el precio de
+  // venta, redondeado a un valor entero "prolijo" (múltiplo de 100).
+  const aplicarPct = (g) => { const gg = Number(g || 0); if (costoN > 0) setVenta(String(Math.round(costoN * (1 + gg / 100) / 100) * 100)); };
+
+  const sim = useMemo(
+    () => computePonderacion({ proyecto, aportes, inversores, fechaCorteOverride: fEntrega || undefined, fechaFaltanteOverride: fVenta || undefined, ventaOverride: ventaN, costoOverride: costoN }),
+    [proyecto, aportes, inversores, fEntrega, fVenta, ventaN, costoN]
+  );
+  const base = useMemo(
+    () => computePonderacion({ proyecto, aportes, inversores }),
+    [proyecto, aportes, inversores]
+  );
+
+  const resumen = sim.faltante.aportesUSD > 0 ? [...sim.porInversor, sim.faltante] : sim.porInversor;
+  const totProy = {
+    venta: sim.venta, costo: sim.costo, ganancia: sim.gananciaTotal,
+    pctRecaudado: sim.pctRecaudado, fechaCorte: sim.fechaCorte, diasProyecto: sim.diasProyecto,
+  };
+  const roi = totProy.costo > 0 ? (totProy.ganancia / totProy.costo) * 100 : 0;
+  const anual = anualizada(roi, totProy.diasProyecto);
+
+  const delta = (v) => (v > 0 ? "+" : "") + fmtMoney(v, "USD");
+  const hayCambio = ventaN !== baseVenta || costoN !== baseCosto
+    || (fEntrega || "") !== baseFEntrega || (fVenta || "") !== baseFVenta;
+
+  const t = resumen.reduce((acc, r) => {
+    acc.aportesUSD += Number(r.aportesUSD || 0);
+    acc.ponderado += Number(r.ponderado || 0);
+    acc.participacion += Number(r.participacion || 0);
+    acc.ganancia += Number(r.ganancia || 0);
+    acc.totalDevolver += Number(totProy.ganancia > 0 ? r.totalDevolver : r.aportesUSD) || 0;
+    return acc;
+  }, { aportesUSD: 0, ponderado: 0, participacion: 0, ganancia: 0, totalDevolver: 0 });
+
+  return (
+    <Card>
+      <CardContent>
+        <Stack direction="row" justifyContent="space-between" alignItems="baseline" flexWrap="wrap" sx={{ mb: 1 }}>
+          <Box>
+            <Typography variant="h6">Simulador “What if”</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Cambiá el precio de venta, el costo total, el % de ganancia o las fechas y mirá el impacto en el proyecto y en cada inversor.
+            </Typography>
+          </Box>
+          <Button size="small" variant="outlined" disabled={!hayCambio} onClick={resetAll}>Restablecer</Button>
+        </Stack>
+
+        {/* Inputs de simulación */}
+        <Box sx={{ p: 1.5, borderRadius: 2, border: "1px dashed", borderColor: "divider", bgcolor: "rgba(15,42,74,0.025)", mb: 2 }}>
+          <Grid container spacing={2.5}>
+            <Grid item xs={12} md={4}>
+              <SliderVar
+                label="Precio de venta (USD)" base={baseVenta} value={ventaN}
+                onChange={(v) => { setVenta(String(v)); setPctStr(""); }}
+                fmt={(v) => fmtMoney(v, "USD")}
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <SliderVar
+                label="Costo total (USD)" base={baseCosto} value={costoN}
+                onChange={(v) => { setCosto(String(v)); setPctStr(""); }}
+                fmt={(v) => fmtMoney(v, "USD")}
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <SliderPct
+                label="% ganancia (s/ costo)" base={basePctGan} value={pctGan}
+                disabled={!(costoN > 0)}
+                onChange={(p) => { setPctStr(String(p)); aplicarPct(p); }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={4}>
+              <TextField label="Fecha de entrega (sim.)" type="date" size="small" fullWidth InputLabelProps={{ shrink: true }}
+                value={fEntrega} onChange={(e) => setFEntrega(e.target.value)} />
+            </Grid>
+            <Grid item xs={12} sm={6} md={4}>
+              <TextField label="Fecha de venta (sim.)" type="date" size="small" fullWidth InputLabelProps={{ shrink: true }}
+                value={fVenta} onChange={(e) => setFVenta(e.target.value)} />
+            </Grid>
+          </Grid>
+        </Box>
+
+        {/* KPIs simulados con delta vs actual */}
+        <Grid container spacing={2}>
+          <KPI title="Venta (sim.)" value={fmtMoney(totProy.venta, "USD")} hint={hayCambio ? `vs actual ${delta(totProy.venta - base.venta)}` : " "} />
+          <KPI title="Costo (sim.)" value={fmtMoney(totProy.costo, "USD")} hint={hayCambio ? `vs actual ${delta(totProy.costo - base.costo)}` : " "} />
+          <KPI title="Ganancia (sim.)" value={fmtMoney(totProy.ganancia, "USD")} hint={hayCambio ? `vs actual ${delta(totProy.ganancia - base.gananciaTotal)}` : (anual != null ? `Anualizado ${fmtPct(anual, 2)}` : " ")} />
+          <KPI title="% ganancia (s/ costo)" value={fmtPct(roi, 1)} hint={anual != null ? `Anualizado ${fmtPct(anual, 2)}` : " "} />
+        </Grid>
+
+        <Divider sx={{ my: 3 }} />
+        <Typography variant="subtitle2" sx={{ mb: 1 }}>Ganancia por inversor (simulada)</Typography>
+
+        <Box sx={{ overflowX: "auto" }}>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell sx={{ width: 40 }} />
+                <TableCell>Inversor</TableCell>
+                <TableCell align="right">Aporte (USD)</TableCell>
+                <TableCell align="right">Ponderado</TableCell>
+                <TableCell align="right">% participación</TableCell>
+                <TableCell align="right">Ganancia estim.</TableCell>
+                <TableCell align="right">% ganancia</TableCell>
+                <TableCell align="right">Total a devolver</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {resumen.map(r => {
+                const isOpen = expanded.has(r.id);
+                return (
+                  <React.Fragment key={r.id}>
+                    <TableRow hover onClick={() => toggle(r.id)}
+                      sx={{ cursor: "pointer", "& > td": { borderBottom: isOpen ? "none" : undefined }, ...(r.es_faltante ? { bgcolor: "rgba(15,42,74,0.04)" } : {}) }}>
+                      <TableCell sx={{ width: 40, pr: 0 }}>
+                        <IconButton size="small" sx={{ pointerEvents: "none" }}>
+                          {isOpen ? <KeyboardArrowDownIcon fontSize="small" /> : <KeyboardArrowRightIcon fontSize="small" />}
+                        </IconButton>
+                      </TableCell>
+                      <TableCell>
+                        <Stack direction="row" alignItems="center" spacing={1}>
+                          <Typography fontWeight={600} sx={{ fontStyle: r.es_faltante ? "italic" : "normal" }}>{r.nombre}</Typography>
+                          {r.es_faltante && <Chip size="small" label="virtual" variant="outlined" />}
+                        </Stack>
+                      </TableCell>
+                      <TableCell align="right">{fmtMoney(r.aportesUSD, "USD")}</TableCell>
+                      <TableCell align="right">{fmtNum(r.ponderado, 0)}</TableCell>
+                      <TableCell align="right">{fmtPct(r.participacion)}</TableCell>
+                      <TableCell align="right">{totProy.ganancia > 0 ? fmtMoney(r.ganancia, "USD") : "—"}</TableCell>
+                      <TableCell align="right">{totProy.ganancia > 0 && r.aportesUSD > 0 ? fmtPct(r.gananciaPct) : "—"}</TableCell>
+                      <TableCell align="right"><Typography fontWeight={700}>{totProy.ganancia > 0 ? fmtMoney(r.totalDevolver, "USD") : fmtMoney(r.aportesUSD, "USD")}</Typography></TableCell>
+                    </TableRow>
+                    {isOpen && (
+                      <TableRow sx={{ height: "auto !important", "&:hover": { bgcolor: "transparent" }, "& > td": { p: 0, border: 0 } }}>
+                        <TableCell colSpan={8}>
+                          <DetalleInversor r={r} aportesC={sim.aportes} totProy={totProy} />
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+              {resumen.length > 0 && (
+                <TableRow sx={{ "& > td": { borderTop: "2px solid", borderColor: "divider", fontWeight: 700 } }}>
+                  <TableCell />
+                  <TableCell><Typography fontWeight={700}>Totales</Typography></TableCell>
+                  <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(t.aportesUSD, "USD")}</Typography></TableCell>
+                  <TableCell align="right"><Typography fontWeight={700}>{fmtNum(t.ponderado, 0)}</Typography></TableCell>
+                  <TableCell align="right"><Typography fontWeight={700}>{fmtPct(t.participacion)}</Typography></TableCell>
+                  <TableCell align="right"><Typography fontWeight={700}>{totProy.ganancia > 0 ? fmtMoney(t.ganancia, "USD") : "—"}</Typography></TableCell>
+                  <TableCell align="right" />
+                  <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(t.totalDevolver, "USD")}</Typography></TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </Box>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Paso "prolijo" (entero, redondo) según la magnitud del valor base.
+function niceStepMoney(base) {
+  const b = Math.abs(base);
+  if (b >= 100000) return 1000;
+  if (b >= 20000) return 500;
+  if (b >= 5000) return 100;
+  if (b >= 500) return 10;
+  return 1;
+}
+
+// Slider de un valor de dinero centrado en el valor actual (base). El centro es
+// el valor actual; a la derecha suma y a la izquierda resta, en pasos enteros
+// redondos. El resultado siempre es un entero múltiplo del paso.
+function SliderVar({ label, base, value, onChange, fmt }) {
+  const disabled = !(base > 0);
+  const step = niceStepMoney(base || 0);
+  const N = Math.max(20, Math.round((base * 0.5) / step)); // rango ±50%
+  const k = disabled ? 0 : Math.max(-N, Math.min(N, Math.round((value - base) / step)));
+  const deltaPct = base > 0 ? ((value - base) / base) * 100 : 0;
+  return (
+    <Box>
+      <Typography variant="caption" color="text.secondary">{label}</Typography>
+      <Typography sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", lineHeight: 1.2 }}>
+        {fmt(value)}
+      </Typography>
+      <Slider
+        size="small" disabled={disabled}
+        min={-N} max={N} step={1} value={k}
+        onChange={(_, kk) => onChange(base + kk * step)}
+        marks={[{ value: 0 }]}
+        sx={{ mt: 0.5 }}
+      />
+      <Typography variant="caption" color="text.secondary">
+        Actual: {fmt(base)}{k !== 0 ? ` · ${deltaPct > 0 ? "+" : ""}${fmtNum(deltaPct, 1)}%` : " (centro)"}
+      </Typography>
+    </Box>
+  );
+}
+
+// Slider de % ganancia centrado en el % actual (base), en puntos enteros.
+function SliderPct({ label, base, value, onChange, disabled }) {
+  const N = 30; // ±30 puntos alrededor del % actual
+  const center = Math.round(base);
+  const min = center - N, max = center + N;
+  const v = disabled ? center : Math.max(min, Math.min(max, Math.round(value)));
+  return (
+    <Box>
+      <Typography variant="caption" color="text.secondary">{label}</Typography>
+      <Typography sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", lineHeight: 1.2 }}>
+        {fmtPct(value, 1)}
+      </Typography>
+      <Slider
+        size="small" disabled={disabled}
+        min={min} max={max} step={1} value={v}
+        onChange={(_, p) => onChange(p)}
+        marks={[{ value: center }]}
+        sx={{ mt: 0.5 }}
+      />
+      <Typography variant="caption" color="text.secondary">
+        Actual: {fmtPct(base, 1)}{Math.round(value) !== center ? " · recalcula el precio de venta" : " (centro)"}
+      </Typography>
     </Box>
   );
 }
