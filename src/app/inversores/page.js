@@ -1067,6 +1067,12 @@ function WhatIf({ proyecto, aportes, inversores }) {
   const [fVenta, setFVenta] = useState(baseFVenta);
   const [expanded, setExpanded] = useState(new Set());
   const toggle = (id) => setExpanded(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const [orderBy, setOrderBy] = useState("aportesUSD");
+  const [orderDir, setOrderDir] = useState("desc");
+  const handleSort = (col) => {
+    if (orderBy === col) setOrderDir(d => d === "asc" ? "desc" : "asc");
+    else { setOrderBy(col); setOrderDir("desc"); }
+  };
 
   const resetAll = () => {
     setVenta(baseVenta ? String(baseVenta) : "");
@@ -1102,6 +1108,12 @@ function WhatIf({ proyecto, aportes, inversores }) {
   };
   const roi = totProy.costo > 0 ? (totProy.ganancia / totProy.costo) * 100 : 0;
   const anual = anualizada(roi, totProy.diasProyecto);
+
+  // Duración de la obra: desde el inicio del proyecto hasta la entrega simulada.
+  const diasObra = (proyecto?.fecha_inicio && fEntrega)
+    ? Math.max(0, Math.round((new Date(fEntrega + "T00:00:00") - new Date(proyecto.fecha_inicio + "T00:00:00")) / 86400000))
+    : null;
+  const mesesObra = diasObra != null ? diasObra / 30.44 : null;
 
   const delta = (v) => (v > 0 ? "+" : "") + fmtMoney(v, "USD");
   const hayCambio = ventaN !== baseVenta || costoN !== baseCosto
@@ -1170,6 +1182,9 @@ function WhatIf({ proyecto, aportes, inversores }) {
           <KPI title="Costo (sim.)" value={fmtMoney(totProy.costo, "USD")} hint={hayCambio ? `vs actual ${delta(totProy.costo - base.costo)}` : " "} />
           <KPI title="Ganancia (sim.)" value={fmtMoney(totProy.ganancia, "USD")} hint={hayCambio ? `vs actual ${delta(totProy.ganancia - base.gananciaTotal)}` : (anual != null ? `Anualizado ${fmtPct(anual, 2)}` : " ")} />
           <KPI title="% ganancia (s/ costo)" value={fmtPct(roi, 1)} hint={anual != null ? `Anualizado ${fmtPct(anual, 2)}` : " "} />
+          <KPI title="Meses de obra"
+            value={mesesObra != null ? `${fmtNum(mesesObra, 1)} meses` : "—"}
+            hint={diasObra != null ? `${fmtDate(proyecto.fecha_inicio)} → ${fmtDate(fEntrega)}` : "Cargá la fecha de inicio del proyecto"} />
         </Grid>
 
         <Divider sx={{ my: 3 }} />
@@ -1180,17 +1195,27 @@ function WhatIf({ proyecto, aportes, inversores }) {
             <TableHead>
               <TableRow>
                 <TableCell sx={{ width: 40 }} />
-                <TableCell>Inversor</TableCell>
-                <TableCell align="right">Aporte (USD)</TableCell>
-                <TableCell align="right">Ponderado</TableCell>
-                <TableCell align="right">% participación</TableCell>
-                <TableCell align="right">Ganancia estim.</TableCell>
-                <TableCell align="right">% ganancia</TableCell>
-                <TableCell align="right">Total a devolver</TableCell>
+                <SortHeader col="nombre"        label="Inversor"         orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                <SortHeader col="aportesUSD"    label="Aporte (USD)"     align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                <SortHeader col="ponderado"     label="Ponderado"        align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                <SortHeader col="participacion" label="% participación"  align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                <SortHeader col="ganancia"      label="Ganancia estim."  align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                <SortHeader col="gananciaPct"   label="% ganancia"       align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                <SortHeader col="totalDevolver" label="Total a devolver" align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
               </TableRow>
             </TableHead>
             <TableBody>
-              {resumen.map(r => {
+              {[...resumen].sort((a, b) => {
+                if (a.es_faltante && !b.es_faltante) return 1;
+                if (b.es_faltante && !a.es_faltante) return -1;
+                const av = a[orderBy], bv = b[orderBy];
+                if (typeof av === "string") {
+                  return orderDir === "asc"
+                    ? String(av || "").localeCompare(String(bv || ""))
+                    : String(bv || "").localeCompare(String(av || ""));
+                }
+                return orderDir === "asc" ? Number(av || 0) - Number(bv || 0) : Number(bv || 0) - Number(av || 0);
+              }).map(r => {
                 const isOpen = expanded.has(r.id);
                 return (
                   <React.Fragment key={r.id}>
@@ -1277,7 +1302,10 @@ function SliderVar({ label, base, value, onChange, fmt }) {
         sx={{ mt: 0.5 }}
       />
       <Typography variant="caption" color="text.secondary">
-        Actual: {fmt(base)}{k !== 0 ? ` · ${deltaPct > 0 ? "+" : ""}${fmtNum(deltaPct, 1)}%` : " (centro)"}
+        Actual: {fmt(base)}
+        {k !== 0
+          ? ` · ${deltaPct > 0 ? "+" : ""}${fmtNum(deltaPct, 1)}% · ${value - base > 0 ? "+" : "-"}${fmt(Math.abs(value - base))}`
+          : " (centro)"}
       </Typography>
     </Box>
   );
