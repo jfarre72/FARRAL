@@ -22,6 +22,22 @@ import { fmtMoney, fmtNum, fmtPct, fmtDate, anualizada } from "@/components/Mone
 import { printDocument, esc } from "@/lib/printPdf";
 import DonutChart from "@/components/DonutChart";
 import { computePonderacion } from "@/lib/ponderacion";
+import { aplicarFechasReales } from "@/lib/fechasReales";
+
+const MES_CORTO = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+const estTotal = (t) => Number(t.est_mod || 0) + Number(t.est_maq || 0) + Number(t.est_mat || 0);
+const dISO = (iso) => new Date(String(iso).slice(0, 10) + "T00:00:00");
+const diasEntre = (a, b) => Math.max(0, Math.round((b - a) / 86400000));
+// Puntos mensuales entre dos fechas (incluye inicio y fin exactos).
+function puntosMensuales(startISO, endISO) {
+  const s = dISO(startISO), e = dISO(endISO);
+  if (isNaN(s) || isNaN(e) || e <= s) return [];
+  const pts = [new Date(s)];
+  let d = new Date(s.getFullYear(), s.getMonth() + 1, 1);
+  while (d < e) { pts.push(new Date(d)); d = new Date(d.getFullYear(), d.getMonth() + 1, 1); }
+  pts.push(new Date(e));
+  return pts;
+}
 
 // Paleta para segmentos de inversores en el gráfico
 const PALETTE = ["#0F2A4A", "#E07A1F", "#1E8E3E", "#7B61FF", "#0EA5A4", "#C0392B", "#E0A21F", "#5C6470"];
@@ -1073,6 +1089,27 @@ function WhatIf({ proyecto, aportes, inversores }) {
     if (orderBy === col) setOrderDir(d => d === "asc" ? "desc" : "asc");
     else { setOrderBy(col); setOrderDir("desc"); }
   };
+  // Vista: gráfico de proyección (principal) o detalle de inversores.
+  const [view, setView] = useState("grafico");
+  // Tareas con costo estimado y fecha (del Diario), para la curva de gasto.
+  const [tareasCosto, setTareasCosto] = useState([]);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      if (!proyecto) return;
+      const { data: hs } = await supabase.from("hitos").select("id,nombre,orden").eq("proyecto_id", proyecto.id).order("orden");
+      const ids = (hs ?? []).map(h => h.id);
+      let ts = [];
+      if (ids.length) {
+        const { data } = await supabase.from("hito_tareas").select("*").in("hito_id", ids).order("orden");
+        ts = data ?? [];
+      }
+      const { data: dr } = await supabase.from("seguimiento_diario").select("fecha,trabajado,etapa,tareas").eq("proyecto_id", proyecto.id);
+      const conFechas = aplicarFechasReales(dr ?? [], ts, hs ?? []);
+      if (vivo) setTareasCosto(conFechas.filter(t => t.fecha_inicio && estTotal(t) > 0).map(t => ({ fecha: String(t.fecha_inicio).slice(0, 10), total: estTotal(t) })));
+    })();
+    return () => { vivo = false; };
+  }, [proyecto?.id]);
 
   const resetAll = () => {
     setVenta(baseVenta ? String(baseVenta) : "");
@@ -1114,6 +1151,36 @@ function WhatIf({ proyecto, aportes, inversores }) {
     ? Math.max(0, Math.round((new Date(fEntrega + "T00:00:00") - new Date(proyecto.fecha_inicio + "T00:00:00")) / 86400000))
     : null;
   const mesesObra = diasObra != null ? diasObra / 30.44 : null;
+
+  // Proyección mensual: cómo evolucionan venta, costo acumulado, ganancia y % anualizada
+  // desde el inicio de obra hasta la entrega. El costo se acumula según el
+  // cronograma por etapa (fechas del Diario), escalado al costo simulado; si no
+  // hay cronograma cargado, se reparte lineal.
+  const proyeccion = useMemo(() => {
+    const inicio = proyecto?.fecha_inicio;
+    if (!inicio || !fEntrega) return null;
+    const pts = puntosMensuales(inicio, fEntrega);
+    if (pts.length < 2) return null;
+    const s = dISO(inicio);
+    const totalDias = diasEntre(s, dISO(fEntrega)) || 1;
+    const placed = [...tareasCosto].sort((a, b) => (a.fecha < b.fecha ? -1 : 1));
+    const planTotal = placed.reduce((x, t) => x + t.total, 0);
+    const ratio = costoN > 0 ? ventaN / costoN : 0; // = 1 + %ganancia
+    const rows = pts.map(d => {
+      const raw = placed.reduce((x, t) => (dISO(t.fecha) <= d ? x + t.total : x), 0);
+      const elapsed = diasEntre(s, d);
+      const costoAcum = planTotal > 0 ? Math.min(costoN, (raw / planTotal) * costoN) : costoN * (elapsed / totalDias);
+      const venta = costoAcum * ratio;
+      const ganancia = venta - costoAcum;
+      const roi = costoAcum > 0 ? (ganancia / costoAcum) * 100 : 0;
+      return {
+        label: `${MES_CORTO[d.getMonth()]} '${String(d.getFullYear()).slice(2)}`,
+        fecha: fmtDate(d.toISOString()),
+        venta, costo: costoAcum, ganancia, anual: anualizada(roi, elapsed),
+      };
+    });
+    return { rows, modo: planTotal > 0 ? "plan" : "lineal" };
+  }, [proyecto?.fecha_inicio, fEntrega, ventaN, costoN, tareasCosto]);
 
   const delta = (v) => (v > 0 ? "+" : "") + fmtMoney(v, "USD");
   const hayCambio = ventaN !== baseVenta || costoN !== baseCosto
@@ -1188,8 +1255,24 @@ function WhatIf({ proyecto, aportes, inversores }) {
         </Grid>
 
         <Divider sx={{ my: 3 }} />
-        <Typography variant="subtitle2" sx={{ mb: 1 }}>Ganancia por inversor (simulada)</Typography>
 
+        <Stack direction="row" justifyContent="center" sx={{ mb: 2 }}>
+          <ToggleButtonGroup exclusive size="small" color="primary" value={view}
+            onChange={(_, v) => { if (v) setView(v); }}>
+            <ToggleButton value="grafico" sx={{ px: 2.5 }}>Gráfico</ToggleButton>
+            <ToggleButton value="inversores" sx={{ px: 2.5 }}>Inversores</ToggleButton>
+          </ToggleButtonGroup>
+        </Stack>
+
+        {view === "grafico" && (
+          proyeccion
+            ? <ProyeccionChart data={proyeccion.rows} modo={proyeccion.modo} />
+            : <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: "center" }}>
+                Cargá la fecha de inicio del proyecto (y una fecha de entrega) para ver la proyección.
+              </Typography>
+        )}
+
+        {view === "inversores" && (
         <Box sx={{ overflowX: "auto" }}>
           <Table size="small">
             <TableHead>
@@ -1264,8 +1347,152 @@ function WhatIf({ proyecto, aportes, inversores }) {
             </TableBody>
           </Table>
         </Box>
+        )}
       </CardContent>
     </Card>
+  );
+}
+
+// Máximo "prolijo" para un eje (1/2/2.5/5 × 10^n).
+function niceMax(v) {
+  if (!(v > 0)) return 1;
+  const exp = Math.floor(Math.log10(v));
+  const base = Math.pow(10, exp);
+  const f = v / base;
+  const nice = f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10;
+  return nice * base;
+}
+const kUSD = (v) => {
+  const a = Math.abs(v);
+  if (a >= 1000000) return `${(v / 1000000).toFixed(a >= 10000000 ? 0 : 1)}M`;
+  if (a >= 1000) return `${Math.round(v / 1000)}k`;
+  return String(Math.round(v));
+};
+
+// Gráfico de proyección: líneas de Precio de venta, Costo acumulado, Ganancia
+// (eje USD, izquierda) y % anualizada (eje %, derecha) a lo largo de la obra.
+function ProyeccionChart({ data, modo }) {
+  const theme = useTheme();
+  const [hi, setHi] = useState(null);
+  const svgRef = React.useRef(null);
+
+  const W = 820, H = 360, padL = 60, padR = 58, padT = 18, padB = 44;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const n = data.length;
+
+  const SERIES = [
+    { key: "venta", label: "Precio de venta", color: "#1E8E3E", axis: "usd" },
+    { key: "costo", label: "Costo acumulado", color: "#E07A1F", axis: "usd" },
+    { key: "ganancia", label: "Ganancia", color: "#1E5AA8", axis: "usd" },
+    { key: "anual", label: "% anualizada", color: "#7B61FF", axis: "pct", dash: true },
+  ];
+
+  const maxUSD = niceMax(Math.max(1, ...data.map(d => d.venta)));
+  const maxPct = niceMax(Math.max(1, ...data.map(d => (d.anual != null ? d.anual : 0))));
+  const xAt = (i) => padL + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const yUSD = (v) => padT + plotH - (Math.max(0, v) / maxUSD) * plotH;
+  const yPct = (v) => padT + plotH - (Math.max(0, v) / maxPct) * plotH;
+  const yOf = (s, v) => (s.axis === "usd" ? yUSD(v) : yPct(v));
+
+  const linePath = (s) => {
+    let d = "", started = false;
+    data.forEach((row, i) => {
+      const v = row[s.key];
+      if (v == null) return;
+      const x = xAt(i), y = yOf(s, v);
+      d += (started ? " L" : "M") + `${x.toFixed(1)},${y.toFixed(1)}`;
+      started = true;
+    });
+    return d;
+  };
+
+  const onMove = (e) => {
+    const el = svgRef.current; if (!el) return;
+    const r = el.getBoundingClientRect();
+    const x = ((e.clientX - r.left) / r.width) * W;
+    const i = Math.round(((x - padL) / plotW) * (n - 1));
+    setHi(Math.max(0, Math.min(n - 1, i)));
+  };
+
+  const ticks = 4;
+  const axisColor = theme.palette.divider;
+  const textColor = theme.palette.text.secondary;
+  const labelStep = Math.max(1, Math.ceil(n / 9));
+
+  return (
+    <Box>
+      {/* Leyenda */}
+      <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap justifyContent="center" sx={{ mb: 1 }}>
+        {SERIES.map(s => (
+          <Stack key={s.key} direction="row" spacing={0.75} alignItems="center">
+            <Box sx={{ width: 16, height: 0, borderTop: `3px ${s.dash ? "dashed" : "solid"} ${s.color}` }} />
+            <Typography variant="caption" color="text.secondary">{s.label}</Typography>
+          </Stack>
+        ))}
+      </Stack>
+
+      <Box sx={{ width: "100%", overflowX: "auto" }}>
+        <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 520, display: "block" }}
+          onMouseMove={onMove} onMouseLeave={() => setHi(null)}>
+          {/* Grilla + eje USD (izq) */}
+          {Array.from({ length: ticks + 1 }).map((_, i) => {
+            const v = (maxUSD / ticks) * i, y = yUSD(v);
+            return (
+              <g key={`g${i}`}>
+                <line x1={padL} y1={y} x2={W - padR} y2={y} stroke={axisColor} strokeWidth="1" />
+                <text x={padL - 8} y={y + 3} textAnchor="end" fontSize="10" fill={textColor}>US$ {kUSD(v)}</text>
+              </g>
+            );
+          })}
+          {/* Eje % (der) */}
+          {Array.from({ length: ticks + 1 }).map((_, i) => {
+            const v = (maxPct / ticks) * i, y = yPct(v);
+            return <text key={`p${i}`} x={W - padR + 8} y={y + 3} textAnchor="start" fontSize="10" fill="#7B61FF">{Math.round(v)}%</text>;
+          })}
+          {/* Etiquetas X */}
+          {data.map((row, i) => (i % labelStep === 0 || i === n - 1) && (
+            <text key={`x${i}`} x={xAt(i)} y={H - padB + 16} textAnchor="middle" fontSize="10" fill={textColor}>{row.label}</text>
+          ))}
+          {/* Líneas */}
+          {SERIES.map(s => (
+            <path key={s.key} d={linePath(s)} fill="none" stroke={s.color} strokeWidth="2.5"
+              strokeDasharray={s.dash ? "5 4" : "0"} strokeLinejoin="round" strokeLinecap="round" />
+          ))}
+          {/* Guía + puntos + tooltip en hover */}
+          {hi != null && (() => {
+            const row = data[hi]; const gx = xAt(hi);
+            const lines = [
+              { c: "#1E8E3E", t: `Venta ${fmtMoney(row.venta, "USD")}` },
+              { c: "#E07A1F", t: `Costo ${fmtMoney(row.costo, "USD")}` },
+              { c: "#1E5AA8", t: `Ganancia ${fmtMoney(row.ganancia, "USD")}` },
+              { c: "#7B61FF", t: `Anualizada ${row.anual != null ? fmtPct(row.anual, 1) : "—"}` },
+            ];
+            const bw = 168, bh = 20 + lines.length * 15;
+            const bx = Math.max(padL, Math.min(W - padR - bw, gx + 10));
+            const by = padT + 4;
+            return (
+              <g>
+                <line x1={gx} y1={padT} x2={gx} y2={padT + plotH} stroke={axisColor} strokeWidth="1" strokeDasharray="3 3" />
+                {SERIES.map(s => row[s.key] != null && (
+                  <circle key={s.key} cx={gx} cy={yOf(s, row[s.key])} r="3.5" fill="#fff" stroke={s.color} strokeWidth="2" />
+                ))}
+                <rect x={bx} y={by} width={bw} height={bh} rx="6" fill={theme.palette.background.paper} stroke={axisColor} />
+                <text x={bx + 10} y={by + 15} fontSize="10.5" fontWeight="700" fill={theme.palette.text.primary}>{row.fecha}</text>
+                {lines.map((l, k) => (
+                  <g key={k}>
+                    <rect x={bx + 10} y={by + 24 + k * 15} width="8" height="8" rx="2" fill={l.c} />
+                    <text x={bx + 22} y={by + 31 + k * 15} fontSize="10.5" fill={theme.palette.text.secondary}>{l.t}</text>
+                  </g>
+                ))}
+              </g>
+            );
+          })()}
+        </svg>
+      </Box>
+      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5, textAlign: "center" }}>
+        Estimación: el costo se acumula {modo === "plan" ? "según el cronograma por etapa (fechas del Diario)" : "de forma lineal (sin cronograma cargado)"}, y el precio de venta mantiene el % de ganancia definido. La anualizada baja a medida que se alarga el plazo.
+      </Typography>
+    </Box>
   );
 }
 
