@@ -4,7 +4,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableRow, IconButton, Dialog,
   DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Box,
   Chip, Tooltip, Divider, LinearProgress, FormControlLabel, Switch,
-  TableSortLabel, useMediaQuery, ToggleButton, ToggleButtonGroup,
+  TableSortLabel, useMediaQuery, ToggleButton, ToggleButtonGroup, Slider,
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
@@ -1058,6 +1058,7 @@ function WhatIf({ proyecto, aportes, inversores }) {
   const baseCosto = Number(proyecto?.costo_total_estimado || 0);
   const baseFEntrega = proyecto?.fecha_fin || "";
   const baseFVenta = proyecto?.fecha_inversor_faltante || proyecto?.fecha_fin || "";
+  const basePctGan = baseCosto > 0 ? ((baseVenta - baseCosto) / baseCosto) * 100 : 0;
 
   const [venta, setVenta] = useState(baseVenta ? String(baseVenta) : "");
   const [costo, setCosto] = useState(baseCosto ? String(baseCosto) : "");
@@ -1081,10 +1082,9 @@ function WhatIf({ proyecto, aportes, inversores }) {
   const gananciaN = ventaN - costoN;
   const pctGan = costoN > 0 ? (gananciaN / costoN) * 100 : 0;
 
-  // Editar % ganancia objetivo: mantiene el costo fijo y recalcula el precio de venta.
-  const aplicarPct = (g) => { const gg = Number(g || 0); if (costoN > 0) setVenta(String(Math.round(costoN * (1 + gg / 100)))); };
-  // Ajuste rápido del costo en % (mantiene el precio de venta).
-  const ajustarCosto = (deltaPct) => { if (costoN > 0) setCosto(String(Math.round(costoN * (1 + deltaPct / 100)))); };
+  // Editar % ganancia objetivo: mantiene el costo fijo y recalcula el precio de
+  // venta, redondeado a un valor entero "prolijo" (múltiplo de 100).
+  const aplicarPct = (g) => { const gg = Number(g || 0); if (costoN > 0) setVenta(String(Math.round(costoN * (1 + gg / 100) / 100) * 100)); };
 
   const sim = useMemo(
     () => computePonderacion({ proyecto, aportes, inversores, fechaCorteOverride: fEntrega || undefined, fechaFaltanteOverride: fVenta || undefined, ventaOverride: ventaN, costoOverride: costoN }),
@@ -1131,41 +1131,35 @@ function WhatIf({ proyecto, aportes, inversores }) {
 
         {/* Inputs de simulación */}
         <Box sx={{ p: 1.5, borderRadius: 2, border: "1px dashed", borderColor: "divider", bgcolor: "rgba(15,42,74,0.025)", mb: 2 }}>
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={6} md={3}>
-              <TextField label="Precio de venta (USD)" type="number" size="small" fullWidth
-                value={venta} onChange={(e) => { setVenta(e.target.value); setPctStr(""); }}
-                helperText={`Actual: ${fmtMoney(baseVenta, "USD")}`} />
+          <Grid container spacing={2.5}>
+            <Grid item xs={12} md={4}>
+              <SliderVar
+                label="Precio de venta (USD)" base={baseVenta} value={ventaN}
+                onChange={(v) => { setVenta(String(v)); setPctStr(""); }}
+                fmt={(v) => fmtMoney(v, "USD")}
+              />
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <TextField label="Costo total (USD)" type="number" size="small" fullWidth
-                value={costo} onChange={(e) => { setCosto(e.target.value); setPctStr(""); }}
-                helperText={`Actual: ${fmtMoney(baseCosto, "USD")}`} />
-              <Stack direction="row" spacing={0.5} sx={{ mt: 0.5 }}>
-                {[-5, -1, +1, +5].map(d => (
-                  <Button key={d} size="small" variant="outlined" sx={{ minWidth: 0, px: 1 }}
-                    disabled={!(costoN > 0)} onClick={() => ajustarCosto(d)}>
-                    {d > 0 ? `+${d}%` : `${d}%`}
-                  </Button>
-                ))}
-              </Stack>
+            <Grid item xs={12} md={4}>
+              <SliderVar
+                label="Costo total (USD)" base={baseCosto} value={costoN}
+                onChange={(v) => { setCosto(String(v)); setPctStr(""); }}
+                fmt={(v) => fmtMoney(v, "USD")}
+              />
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <TextField label="% ganancia objetivo (s/ costo)" type="number" size="small" fullWidth
-                value={pctStr}
-                placeholder={fmtNum(pctGan, 1)}
-                onChange={(e) => setPctStr(e.target.value)}
-                onBlur={() => { if (pctStr !== "") aplicarPct(pctStr); }}
-                onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-                helperText={`Actual: ${fmtPct(pctGan, 1)} · recalcula el precio de venta`} />
+            <Grid item xs={12} md={4}>
+              <SliderPct
+                label="% ganancia (s/ costo)" base={basePctGan} value={pctGan}
+                disabled={!(costoN > 0)}
+                onChange={(p) => { setPctStr(String(p)); aplicarPct(p); }}
+              />
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <Stack spacing={1}>
-                <TextField label="Fecha de entrega (sim.)" type="date" size="small" fullWidth InputLabelProps={{ shrink: true }}
-                  value={fEntrega} onChange={(e) => setFEntrega(e.target.value)} />
-                <TextField label="Fecha de venta (sim.)" type="date" size="small" fullWidth InputLabelProps={{ shrink: true }}
-                  value={fVenta} onChange={(e) => setFVenta(e.target.value)} />
-              </Stack>
+            <Grid item xs={12} sm={6} md={4}>
+              <TextField label="Fecha de entrega (sim.)" type="date" size="small" fullWidth InputLabelProps={{ shrink: true }}
+                value={fEntrega} onChange={(e) => setFEntrega(e.target.value)} />
+            </Grid>
+            <Grid item xs={12} sm={6} md={4}>
+              <TextField label="Fecha de venta (sim.)" type="date" size="small" fullWidth InputLabelProps={{ shrink: true }}
+                value={fVenta} onChange={(e) => setFVenta(e.target.value)} />
             </Grid>
           </Grid>
         </Box>
@@ -1247,6 +1241,71 @@ function WhatIf({ proyecto, aportes, inversores }) {
         </Box>
       </CardContent>
     </Card>
+  );
+}
+
+// Paso "prolijo" (entero, redondo) según la magnitud del valor base.
+function niceStepMoney(base) {
+  const b = Math.abs(base);
+  if (b >= 100000) return 1000;
+  if (b >= 20000) return 500;
+  if (b >= 5000) return 100;
+  if (b >= 500) return 10;
+  return 1;
+}
+
+// Slider de un valor de dinero centrado en el valor actual (base). El centro es
+// el valor actual; a la derecha suma y a la izquierda resta, en pasos enteros
+// redondos. El resultado siempre es un entero múltiplo del paso.
+function SliderVar({ label, base, value, onChange, fmt }) {
+  const disabled = !(base > 0);
+  const step = niceStepMoney(base || 0);
+  const N = Math.max(20, Math.round((base * 0.5) / step)); // rango ±50%
+  const k = disabled ? 0 : Math.max(-N, Math.min(N, Math.round((value - base) / step)));
+  const deltaPct = base > 0 ? ((value - base) / base) * 100 : 0;
+  return (
+    <Box>
+      <Typography variant="caption" color="text.secondary">{label}</Typography>
+      <Typography sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", lineHeight: 1.2 }}>
+        {fmt(value)}
+      </Typography>
+      <Slider
+        size="small" disabled={disabled}
+        min={-N} max={N} step={1} value={k}
+        onChange={(_, kk) => onChange(base + kk * step)}
+        marks={[{ value: 0 }]}
+        sx={{ mt: 0.5 }}
+      />
+      <Typography variant="caption" color="text.secondary">
+        Actual: {fmt(base)}{k !== 0 ? ` · ${deltaPct > 0 ? "+" : ""}${fmtNum(deltaPct, 1)}%` : " (centro)"}
+      </Typography>
+    </Box>
+  );
+}
+
+// Slider de % ganancia centrado en el % actual (base), en puntos enteros.
+function SliderPct({ label, base, value, onChange, disabled }) {
+  const N = 30; // ±30 puntos alrededor del % actual
+  const center = Math.round(base);
+  const min = center - N, max = center + N;
+  const v = disabled ? center : Math.max(min, Math.min(max, Math.round(value)));
+  return (
+    <Box>
+      <Typography variant="caption" color="text.secondary">{label}</Typography>
+      <Typography sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", lineHeight: 1.2 }}>
+        {fmtPct(value, 1)}
+      </Typography>
+      <Slider
+        size="small" disabled={disabled}
+        min={min} max={max} step={1} value={v}
+        onChange={(_, p) => onChange(p)}
+        marks={[{ value: center }]}
+        sx={{ mt: 0.5 }}
+      />
+      <Typography variant="caption" color="text.secondary">
+        Actual: {fmtPct(base, 1)}{Math.round(value) !== center ? " · recalcula el precio de venta" : " (centro)"}
+      </Typography>
+    </Box>
   );
 }
 
