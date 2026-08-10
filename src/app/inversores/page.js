@@ -1103,6 +1103,12 @@ function WhatIf({ proyecto, aportes, inversores }) {
   const roi = totProy.costo > 0 ? (totProy.ganancia / totProy.costo) * 100 : 0;
   const anual = anualizada(roi, totProy.diasProyecto);
 
+  // Duración de la obra: desde el inicio del proyecto hasta la entrega simulada.
+  const diasObra = (proyecto?.fecha_inicio && fEntrega)
+    ? Math.max(0, Math.round((new Date(fEntrega + "T00:00:00") - new Date(proyecto.fecha_inicio + "T00:00:00")) / 86400000))
+    : null;
+  const mesesObra = diasObra != null ? diasObra / 30.44 : null;
+
   const delta = (v) => (v > 0 ? "+" : "") + fmtMoney(v, "USD");
   const hayCambio = ventaN !== baseVenta || costoN !== baseCosto
     || (fEntrega || "") !== baseFEntrega || (fVenta || "") !== baseFVenta;
@@ -1170,6 +1176,9 @@ function WhatIf({ proyecto, aportes, inversores }) {
           <KPI title="Costo (sim.)" value={fmtMoney(totProy.costo, "USD")} hint={hayCambio ? `vs actual ${delta(totProy.costo - base.costo)}` : " "} />
           <KPI title="Ganancia (sim.)" value={fmtMoney(totProy.ganancia, "USD")} hint={hayCambio ? `vs actual ${delta(totProy.ganancia - base.gananciaTotal)}` : (anual != null ? `Anualizado ${fmtPct(anual, 2)}` : " ")} />
           <KPI title="% ganancia (s/ costo)" value={fmtPct(roi, 1)} hint={anual != null ? `Anualizado ${fmtPct(anual, 2)}` : " "} />
+          <KPI title="Meses de obra"
+            value={mesesObra != null ? `${fmtNum(mesesObra, 1)} meses` : "—"}
+            hint={diasObra != null ? `${fmtDate(proyecto.fecha_inicio)} → ${fmtDate(fEntrega)}` : "Cargá la fecha de inicio del proyecto"} />
         </Grid>
 
         <Divider sx={{ my: 3 }} />
@@ -1277,7 +1286,10 @@ function SliderVar({ label, base, value, onChange, fmt }) {
         sx={{ mt: 0.5 }}
       />
       <Typography variant="caption" color="text.secondary">
-        Actual: {fmt(base)}{k !== 0 ? ` · ${deltaPct > 0 ? "+" : ""}${fmtNum(deltaPct, 1)}%` : " (centro)"}
+        Actual: {fmt(base)}
+        {k !== 0
+          ? ` · ${deltaPct > 0 ? "+" : ""}${fmtNum(deltaPct, 1)}% · ${value - base > 0 ? "+" : "-"}${fmt(Math.abs(value - base))}`
+          : " (centro)"}
       </Typography>
     </Box>
   );
