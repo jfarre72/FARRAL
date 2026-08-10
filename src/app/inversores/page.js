@@ -1067,6 +1067,12 @@ function WhatIf({ proyecto, aportes, inversores }) {
   const [fVenta, setFVenta] = useState(baseFVenta);
   const [expanded, setExpanded] = useState(new Set());
   const toggle = (id) => setExpanded(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const [orderBy, setOrderBy] = useState("aportesUSD");
+  const [orderDir, setOrderDir] = useState("desc");
+  const handleSort = (col) => {
+    if (orderBy === col) setOrderDir(d => d === "asc" ? "desc" : "asc");
+    else { setOrderBy(col); setOrderDir("desc"); }
+  };
 
   const resetAll = () => {
     setVenta(baseVenta ? String(baseVenta) : "");
@@ -1189,17 +1195,27 @@ function WhatIf({ proyecto, aportes, inversores }) {
             <TableHead>
               <TableRow>
                 <TableCell sx={{ width: 40 }} />
-                <TableCell>Inversor</TableCell>
-                <TableCell align="right">Aporte (USD)</TableCell>
-                <TableCell align="right">Ponderado</TableCell>
-                <TableCell align="right">% participación</TableCell>
-                <TableCell align="right">Ganancia estim.</TableCell>
-                <TableCell align="right">% ganancia</TableCell>
-                <TableCell align="right">Total a devolver</TableCell>
+                <SortHeader col="nombre"        label="Inversor"         orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                <SortHeader col="aportesUSD"    label="Aporte (USD)"     align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                <SortHeader col="ponderado"     label="Ponderado"        align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                <SortHeader col="participacion" label="% participación"  align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                <SortHeader col="ganancia"      label="Ganancia estim."  align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                <SortHeader col="gananciaPct"   label="% ganancia"       align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
+                <SortHeader col="totalDevolver" label="Total a devolver" align="right" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
               </TableRow>
             </TableHead>
             <TableBody>
-              {resumen.map(r => {
+              {[...resumen].sort((a, b) => {
+                if (a.es_faltante && !b.es_faltante) return 1;
+                if (b.es_faltante && !a.es_faltante) return -1;
+                const av = a[orderBy], bv = b[orderBy];
+                if (typeof av === "string") {
+                  return orderDir === "asc"
+                    ? String(av || "").localeCompare(String(bv || ""))
+                    : String(bv || "").localeCompare(String(av || ""));
+                }
+                return orderDir === "asc" ? Number(av || 0) - Number(bv || 0) : Number(bv || 0) - Number(av || 0);
+              }).map(r => {
                 const isOpen = expanded.has(r.id);
                 return (
                   <React.Fragment key={r.id}>
