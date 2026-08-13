@@ -27,9 +27,13 @@ export function daysBetween(fromISO, toISO) {
   return Math.max(0, diff);
 }
 
-export function computePonderacion({ proyecto, aportes = [], inversores = [], fechaCorteOverride, fechaFaltanteOverride, ventaOverride, costoOverride } = {}) {
+export function computePonderacion({ proyecto, aportes = [], inversores = [], fechaCorteOverride, fechaFaltanteOverride, ventaOverride, costoOverride, excluidos = [] } = {}) {
   // Permite hacer "what if" con una fecha distinta a la de fin del proyecto y/o
   // con una venta / costo simulados (ventaOverride, costoOverride).
+  // `excluidos`: ids de inversores que NO participan de la ganancia (p.ej. un
+  // arquitecto tomado como contratado). Su ponderado se anula, así no reciben
+  // ganancia y ésta se reparte entre el resto según su propio peso.
+  const exSet = new Set(excluidos || []);
   const fechaCorte = fechaCorteOverride || proyecto?.fecha_fin || todayISO();
   const venta = ventaOverride != null ? Number(ventaOverride) : Number(proyecto?.precio_venta_estimado || 0);
   const costo = costoOverride != null ? Number(costoOverride) : Number(proyecto?.costo_total_estimado  || 0);
@@ -44,8 +48,9 @@ export function computePonderacion({ proyecto, aportes = [], inversores = [], fe
     const start = a.fecha_inicio_calculo || a.fecha;
     const dias = daysBetween(start, fechaCorte);
     const monto = Number(a.monto || 0);
-    const ponderado = monto * dias;
-    return { ...a, _dias: dias, _ponderado: ponderado, _fechaInicioCalculo: start };
+    const excl = exSet.has(a.inversor_id);
+    const ponderado = excl ? 0 : monto * dias;
+    return { ...a, _dias: dias, _ponderado: ponderado, _excluido: excl, _fechaInicioCalculo: start };
   });
 
   const totalAportadoUSD = aportesConPonderado.reduce((s, a) => s + Number(a.monto || 0), 0);
@@ -82,6 +87,7 @@ export function computePonderacion({ proyecto, aportes = [], inversores = [], fe
       aportesUSD,
       ponderado, participacion, ganancia,
       totalDevolver, gananciaPct, diasProm,
+      excluido: exSet.has(inv.id),
     };
   });
 
