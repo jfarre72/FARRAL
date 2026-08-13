@@ -4,7 +4,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableRow, IconButton, Dialog,
   DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Box,
   Chip, Tooltip, Divider, LinearProgress, FormControlLabel, Switch,
-  TableSortLabel, useMediaQuery, ToggleButton, ToggleButtonGroup, Slider,
+  TableSortLabel, useMediaQuery, ToggleButton, ToggleButtonGroup, Slider, Checkbox,
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
@@ -85,6 +85,12 @@ export default function InversoresPage() {
     if (orderBy === col) setOrderDir(d => d === "asc" ? "desc" : "asc");
     else { setOrderBy(col); setOrderDir("desc"); }
   };
+
+  // Inversores excluidos de la ganancia en el Resumen (evaluar como contratado).
+  const [excluidos, setExcluidos] = useState(() => new Set());
+  const toggleExcluir = (id) => setExcluidos(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
+  });
 
   // Filas expandidas del Resumen por inversor
   const [expandedInv, setExpandedInv] = useState(new Set());
@@ -219,8 +225,8 @@ export default function InversoresPage() {
 
   // ---- Cálculo de ponderación (nuevo modelo)
   const calc = useMemo(
-    () => computePonderacion({ proyecto, aportes, inversores, fechaCorteOverride: fechaVentaOverride || undefined, fechaFaltanteOverride: fechaVentaSim || undefined }),
-    [proyecto, aportes, inversores, fechaVentaOverride, fechaVentaSim]
+    () => computePonderacion({ proyecto, aportes, inversores, fechaCorteOverride: fechaVentaOverride || undefined, fechaFaltanteOverride: fechaVentaSim || undefined, excluidos: [...excluidos] }),
+    [proyecto, aportes, inversores, fechaVentaOverride, fechaVentaSim, excluidos]
   );
   // Reales + faltante (este último al final). Si no hay faltante, no se incluye.
   const resumen   = calc.faltante.aportesUSD > 0
@@ -376,6 +382,7 @@ export default function InversoresPage() {
           <Tab label="Aportes" />
           <Tab label="Composición" />
           <Tab label="What if" />
+          <Tab label="Alquiler" />
         </Tabs>
         <Divider />
       </Box>
@@ -500,8 +507,16 @@ export default function InversoresPage() {
                         </TableCell>
                         <TableCell>
                           <Stack direction="row" alignItems="center" spacing={1}>
+                            {!r.es_faltante && (
+                              <Tooltip title={r.excluido ? "Tomar como inversor (participa de la ganancia)" : "Excluir de la ganancia (tomarlo como contratado)"}>
+                                <Checkbox size="small" sx={{ p: 0.5 }}
+                                  checked={!r.excluido}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={() => toggleExcluir(r.id)} />
+                              </Tooltip>
+                            )}
                             <Box>
-                              <Typography fontWeight={600} sx={{ fontStyle: r.es_faltante ? "italic" : "normal" }}>
+                              <Typography fontWeight={600} sx={{ fontStyle: r.es_faltante ? "italic" : "normal", textDecoration: r.excluido ? "line-through" : "none", color: r.excluido ? "text.secondary" : "inherit" }}>
                                 {r.nombre}
                               </Typography>
                               {r.contacto && <Typography variant="caption" color="text.secondary">{r.contacto}</Typography>}
@@ -512,13 +527,14 @@ export default function InversoresPage() {
                               )}
                             </Box>
                             {r.es_faltante && <Chip size="small" label="virtual" variant="outlined" />}
+                            {r.excluido && <Chip size="small" color="warning" label="contratado" variant="outlined" />}
                           </Stack>
                         </TableCell>
                         <TableCell align="right">{fmtMoney(r.aportesUSD, "USD")}</TableCell>
-                        <TableCell align="right">{fmtNum(r.ponderado, 0)}</TableCell>
-                        <TableCell align="right">{fmtPct(r.participacion)}</TableCell>
-                        <TableCell align="right">{totProy.ganancia > 0 ? fmtMoney(r.ganancia, "USD") : "—"}</TableCell>
-                        <TableCell align="right">{totProy.ganancia > 0 && r.aportesUSD > 0 ? fmtPct(r.gananciaPct) : "—"}</TableCell>
+                        <TableCell align="right">{r.excluido ? "—" : fmtNum(r.ponderado, 0)}</TableCell>
+                        <TableCell align="right">{r.excluido ? "—" : fmtPct(r.participacion)}</TableCell>
+                        <TableCell align="right">{r.excluido ? "—" : (totProy.ganancia > 0 ? fmtMoney(r.ganancia, "USD") : "—")}</TableCell>
+                        <TableCell align="right">{r.excluido ? "—" : (totProy.ganancia > 0 && r.aportesUSD > 0 ? fmtPct(r.gananciaPct) : "—")}</TableCell>
                         <TableCell align="right">
                           <Typography fontWeight={700}>
                             {totProy.ganancia > 0 ? fmtMoney(r.totalDevolver, "USD") : fmtMoney(r.aportesUSD, "USD")}
@@ -714,6 +730,11 @@ export default function InversoresPage() {
 
       {tab === 4 && (
         <WhatIf proyecto={proyecto} aportes={aportes} inversores={inversores} />
+      )}
+
+      {tab === 5 && (
+        <Alquiler proyecto={proyecto} aportes={aportes} inversores={inversores}
+          fechaCorte={fechaVentaOverride} fechaFaltante={fechaVentaSim} />
       )}
 
       {/* Dialog inversor */}
@@ -1347,6 +1368,96 @@ function WhatIf({ proyecto, aportes, inversores }) {
             </TableBody>
           </Table>
         </Box>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// =====================================================================
+// SOLAPA "Alquiler" — reparte un monto entre inversores según su ponderación
+// =====================================================================
+function Alquiler({ proyecto, aportes, inversores, fechaCorte, fechaFaltante }) {
+  const [montoStr, setMontoStr] = useState("");
+  const [excluidos, setExcluidos] = useState(() => new Set());
+  const toggleExcluir = (id) => setExcluidos(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const monto = Number(String(montoStr).replace(/[^\d.-]/g, "")) || 0;
+
+  const calc = useMemo(
+    () => computePonderacion({ proyecto, aportes, inversores, fechaCorteOverride: fechaCorte || undefined, fechaFaltanteOverride: fechaFaltante || undefined, excluidos: [...excluidos] }),
+    [proyecto, aportes, inversores, fechaCorte, fechaFaltante, excluidos]
+  );
+  // Sólo inversores reales (el alquiler no va al "Faltante" virtual).
+  const reales = calc.porInversor;
+  const baseReal = reales.reduce((s, r) => s + (r.excluido ? 0 : r.ponderado), 0);
+  const rows = reales.map(r => {
+    const share = !r.excluido && baseReal > 0 ? r.ponderado / baseReal : 0;
+    return { ...r, share: share * 100, corresponde: monto * share };
+  });
+  const totCorresponde = rows.reduce((s, r) => s + r.corresponde, 0);
+
+  return (
+    <Card>
+      <CardContent>
+        <Box sx={{ mb: 1 }}>
+          <Typography variant="h6">Reparto de alquiler</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Repartí un monto (p. ej. un alquiler) entre los inversores según su ponderación (aporte × días).
+            Podés destildar inversores para excluirlos; mantiene las fechas de entrega y venta del Resumen.
+          </Typography>
+        </Box>
+
+        <Grid container spacing={2} sx={{ mb: 1 }}>
+          <Grid item xs={12} sm={4}>
+            <TextField label="Monto a repartir (USD)" type="number" size="small" fullWidth
+              value={montoStr} onChange={(e) => setMontoStr(e.target.value)} placeholder="2000" />
+          </Grid>
+        </Grid>
+
+        <Box sx={{ overflowX: "auto" }}>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Inversor</TableCell>
+                <TableCell align="right">Aporte (USD)</TableCell>
+                <TableCell align="right">Ponderado</TableCell>
+                <TableCell align="right">% participación</TableCell>
+                <TableCell align="right">Le corresponde</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {rows.map(r => (
+                <TableRow key={r.id} hover>
+                  <TableCell>
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <Tooltip title={r.excluido ? "Incluir en el reparto" : "Excluir del reparto"}>
+                        <Checkbox size="small" sx={{ p: 0.5 }} checked={!r.excluido} onChange={() => toggleExcluir(r.id)} />
+                      </Tooltip>
+                      <Typography fontWeight={600} sx={{ textDecoration: r.excluido ? "line-through" : "none", color: r.excluido ? "text.secondary" : "inherit" }}>
+                        {r.nombre}
+                      </Typography>
+                    </Stack>
+                  </TableCell>
+                  <TableCell align="right">{fmtMoney(r.aportesUSD, "USD")}</TableCell>
+                  <TableCell align="right">{r.excluido ? "—" : fmtNum(r.ponderado, 0)}</TableCell>
+                  <TableCell align="right">{r.excluido ? "—" : fmtPct(r.share)}</TableCell>
+                  <TableCell align="right"><Typography fontWeight={700}>{r.excluido ? "—" : fmtMoney(r.corresponde, "USD")}</Typography></TableCell>
+                </TableRow>
+              ))}
+              {rows.length > 0 && (
+                <TableRow sx={{ "& > td": { borderTop: "2px solid", borderColor: "divider", fontWeight: 700 } }}>
+                  <TableCell><Typography fontWeight={700}>Totales</Typography></TableCell>
+                  <TableCell />
+                  <TableCell align="right"><Typography fontWeight={700}>{fmtNum(baseReal, 0)}</Typography></TableCell>
+                  <TableCell align="right"><Typography fontWeight={700}>{baseReal > 0 ? fmtPct(100) : "—"}</Typography></TableCell>
+                  <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totCorresponde, "USD")}</Typography></TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </Box>
+        {reales.length === 0 && (
+          <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>Aún no hay inversores cargados.</Typography>
         )}
       </CardContent>
     </Card>
