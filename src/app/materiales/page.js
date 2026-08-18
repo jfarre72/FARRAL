@@ -5,6 +5,7 @@ import {
   DialogActions, Accordion, AccordionSummary, AccordionDetails, Table, TableHead,
   TableBody, TableRow, TableCell, Chip, Link, ToggleButton, ToggleButtonGroup,
   Divider, FormControlLabel, Switch, useMediaQuery, Tabs, Tab, Autocomplete,
+  Checkbox,
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
@@ -15,6 +16,8 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import AttachFileIcon from "@mui/icons-material/AttachFile";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
+import FileDownloadIcon from "@mui/icons-material/FileDownload";
+import * as XLSX from "xlsx";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
@@ -1016,6 +1019,50 @@ export default function MaterialesPage() {
     if (error) alert(error.message); else reload();
   };
 
+  // Tilda / destilda un retiro como "validado" (revisado / conciliado).
+  const toggleValidado = async (r) => {
+    const nuevo = !r.validado;
+    setRetiros(prev => prev.map(x => x.id === r.id ? { ...x, validado: nuevo } : x));
+    const { error } = await supabase.from("retiros_materiales")
+      .update({ validado: nuevo }).eq("id", r.id);
+    if (error) {
+      alert(error.message);
+      setRetiros(prev => prev.map(x => x.id === r.id ? { ...x, validado: !nuevo } : x));
+    }
+  };
+
+  // Descarga a Excel los retiros de una cuenta de materiales.
+  const exportarRetirosExcel = (c) => {
+    const rs = retirosDe(c.id);
+    const filas = rs.map((r) => {
+      const neto = netoRetiro(r);
+      const netoUSD = usdDe(c, neto, r.tipo_cambio);
+      const brutoUSD = usdDe(c, Number(r.monto || 0), r.tipo_cambio);
+      const recUSD = usdDe(c, Number(r.monto || 0) - neto, r.tipo_cambio);
+      const detalle = [
+        r.descripcion || "",
+        ...(Array.isArray(r.materiales_items) ? r.materiales_items.map(it =>
+          `${it.cantidad != null ? fmtNum0(it.cantidad) + " " + (it.unidad || "") + " · " : ""}${it.material || ""}`) : []),
+      ].filter(Boolean).join(" | ");
+      return {
+        "Fecha": r.fecha ? fmtDate(r.fecha) : "",
+        "Remito Nº": r.remito_nro || "",
+        "Etapa": r.etapa || "",
+        "Detalle": detalle,
+        [`Monto (${c.moneda})`]: Number(r.monto || 0),
+        "Bruto USD": brutoUSD,
+        "A recuperar USD": recUSD,
+        "Neto USD": netoUSD,
+        "Validado": r.validado ? "Sí" : "No",
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(filas);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Retiros");
+    const safe = (c.proveedor || "cuenta").replace(/[^\w\-]+/g, "_").slice(0, 40);
+    XLSX.writeFile(wb, `retiros_${safe}_${hoyISO()}.xlsx`);
+  };
+
   // Cuenta corriente de una cuenta: anticipos / devoluciones (+) y retiros (−)
   // en orden cronológico, con saldo acumulado fila por fila.
   const ledgerDe = (cuentaId) => {
@@ -1260,10 +1307,16 @@ export default function MaterialesPage() {
                   </Box>
 
                   {/* Botón que abre el diálogo de nuevo retiro */}
+                  <Stack direction="row" spacing={1} sx={{ mb: 1.5, flexWrap: "wrap", gap: 1 }}>
                   <Button variant="contained" color="secondary" size="small" startIcon={<AddIcon />}
-                    onClick={() => openNuevoRetiro(c.id)} sx={{ mb: 1.5 }}>
+                    onClick={() => openNuevoRetiro(c.id)}>
                     Nuevo retiro
                   </Button>
+                  <Button variant="outlined" color="secondary" size="small" startIcon={<FileDownloadIcon />}
+                    disabled={rs.length === 0} onClick={() => exportarRetirosExcel(c)}>
+                    Descargar Excel
+                  </Button>
+                  </Stack>
                   <Dialog open={retiroOpen === c.id} onClose={() => cancelEditRetiro(c.id)} fullWidth maxWidth="md" fullScreen={fullScreen}>
                   <DialogTitle>{editRet && editRet.cuenta_id === c.id ? "Editar retiro" : "Nuevo retiro"} · {c.proveedor}</DialogTitle>
                   <DialogContent dividers>
@@ -1614,13 +1667,14 @@ export default function MaterialesPage() {
                           <TableCell align="right">Bruto USD</TableCell>
                           <TableCell align="right">A recuperar USD</TableCell>
                           <TableCell align="right">Neto USD</TableCell>
+                          <TableCell align="center" sx={{ width: 80 }}>Validado</TableCell>
                           <TableCell align="center" sx={{ width: 80 }}>Remito</TableCell>
                           <TableCell align="right" sx={{ width: 56 }}></TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
                         {rs.length === 0 && (
-                          <TableRow><TableCell colSpan={10}>
+                          <TableRow><TableCell colSpan={11}>
                             <Typography variant="body2" color="text.secondary">Todavía no hay retiros en esta cuenta.</Typography>
                           </TableCell></TableRow>
                         )}
@@ -1662,6 +1716,12 @@ export default function MaterialesPage() {
                             </TableCell>
                             <TableCell align="right" sx={{ whiteSpace: "nowrap", fontWeight: 600, color: "#0F2A4A" }}>
                               {fmtMoney(netoUSD, "USD")}
+                            </TableCell>
+                            <TableCell align="center">
+                              <Tooltip title={r.validado ? "Retiro validado" : "Marcar como validado"}>
+                                <Checkbox size="small" color="success" checked={!!r.validado}
+                                  onChange={() => toggleValidado(r)} />
+                              </Tooltip>
                             </TableCell>
                             <TableCell align="center">
                               {r.remito_url
