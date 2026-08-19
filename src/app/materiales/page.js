@@ -201,7 +201,7 @@ export default function MaterialesPage() {
   const [recuperos, setRecuperos] = useState([]); // ingresos de caja marcados como recupero
   const [hitos, setHitos] = useState([]); // nombres de etapas del proyecto
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState(0); // 0 = Cuentas, 1 = Cuenta corriente, 2 = Por etapa, 3 = Consumo
+  const [tab, setTab] = useState(0); // 0 = Cuentas, 1 = Cuenta corriente, 2 = Por etapa, 3 = Consumo, 4 = Control por lista
   const [cuentaSel, setCuentaSel] = useState(""); // cuenta elegida en la solapa de cuenta corriente
   const [consumoEtapa, setConsumoEtapa] = useState(""); // filtro de etapa en la solapa de consumo
   const [leyendoIA, setLeyendoIA] = useState(null); // cuentaId con lectura de remito en curso
@@ -305,6 +305,14 @@ export default function MaterialesPage() {
   const listaDe = (anticipoId) => {
     const a = anticipos.find(x => x.id === anticipoId);
     return Array.isArray(a?.lista_precios) ? a.lista_precios : [];
+  };
+  // Nº de lista (acopio) legible de un anticipo por id. Cae al Nº de acopio
+  // cargado; si no hay, muestra los últimos 4 caracteres del id como referencia.
+  const listaNroDe = (anticipoId) => {
+    if (!anticipoId) return "";
+    const a = anticipos.find(x => x.id === anticipoId);
+    if (!a) return "";
+    return a.acopio_nro ? String(a.acopio_nro) : `#${String(a.id).slice(-4)}`;
   };
 
   // USD de un monto en la moneda de la cuenta, usando el TC dado o el de la cuenta.
@@ -925,6 +933,57 @@ export default function MaterialesPage() {
     // eslint-disable-next-line
   }, [cuentas, retiros, consumoEtapa]);
 
+  // Control por lista (acopio): para cada anticipo con lista de precios, arma el
+  // detalle de lo retirado imputado a esa lista — artículo, cantidad, precio
+  // unitario y total retirado — más el total y el saldo (anticipo − retirado).
+  const controlPorLista = useMemo(() => {
+    const out = [];
+    for (const c of cuentas) {
+      const rsCta = retiros.filter(x => x.cuenta_id === c.id);
+      for (const a of anticiposReales(c.id)) {
+        const tieneLista = Array.isArray(a.lista_precios) && a.lista_precios.length;
+        const rsLista = rsCta.filter(r => r.lista_anticipo_id === a.id);
+        if (!tieneLista && rsLista.length === 0) continue;
+        const map = {};
+        for (const r of rsLista) {
+          const its = Array.isArray(r.materiales_items) ? r.materiales_items : [];
+          for (const it of its) {
+            const material = (it.material || "").trim() || "(sin nombre)";
+            const codigo = (it.codigo != null ? String(it.codigo) : "").trim();
+            const unidad = (it.unidad || "unidad").toString().trim().toLowerCase();
+            const precio = Number(it.precio || 0);
+            const cantidad = Number(it.cantidad || 0);
+            const total = it.total != null ? Number(it.total) : cantidad * precio;
+            const key = `${codigo}||${material.toLowerCase()}||${unidad}`;
+            (map[key] ??= { codigo, material, unidad, cantidad: 0, precio, total: 0 });
+            map[key].cantidad += cantidad;
+            map[key].total += total;
+            if (precio > 0) map[key].precio = precio;
+          }
+        }
+        const items = Object.values(map).sort((x, y) => x.material.localeCompare(y.material));
+        const totalRetirado = rsLista.reduce((s, r) => s + Number(r.monto || 0), 0);
+        const anticipoMonto = Number(a.monto || 0);
+        out.push({
+          key: a.id,
+          cuenta: c,
+          anticipo: a,
+          nro: a.acopio_nro ? String(a.acopio_nro) : `#${String(a.id).slice(-4)}`,
+          fecha: a.fecha,
+          moneda: c.moneda,
+          items,
+          nRetiros: rsLista.length,
+          totalRetirado,
+          anticipoMonto,
+          saldo: anticipoMonto - totalRetirado,
+        });
+      }
+    }
+    return out.sort((x, y) => (x.cuenta.proveedor || "").localeCompare(y.cuenta.proveedor || "")
+      || String(x.fecha || "").localeCompare(String(y.fecha || "")));
+    // eslint-disable-next-line
+  }, [cuentas, retiros, anticipos]);
+
   const addRetiro = async (cuentaId) => {
     const f = nuevoRetiro[cuentaId] || {};
     const monto = Number(f.monto || 0);
@@ -1047,6 +1106,7 @@ export default function MaterialesPage() {
       return {
         "Fecha": r.fecha ? fmtDate(r.fecha) : "",
         "Remito Nº": r.remito_nro || "",
+        "Lista Nº": listaNroDe(r.lista_anticipo_id),
         "Etapa": r.etapa || "",
         "Detalle": detalle,
         [`Monto (${c.moneda})`]: Number(r.monto || 0),
@@ -1124,6 +1184,7 @@ export default function MaterialesPage() {
           <Tab label="Cuenta corriente" />
           <Tab label="Por etapa (USD)" />
           <Tab label="Consumo" />
+          <Tab label="Control por lista" />
         </Tabs>
       )}
 
@@ -1661,6 +1722,7 @@ export default function MaterialesPage() {
                         <TableRow>
                           <TableCell sx={{ width: 110 }}>Fecha</TableCell>
                           <TableCell sx={{ width: 100 }}>Remito Nº</TableCell>
+                          <TableCell sx={{ width: 90 }}>Lista Nº</TableCell>
                           <TableCell sx={{ width: 130 }}>Etapa</TableCell>
                           <TableCell>Detalle</TableCell>
                           <TableCell align="right">Monto</TableCell>
@@ -1674,7 +1736,7 @@ export default function MaterialesPage() {
                       </TableHead>
                       <TableBody>
                         {rs.length === 0 && (
-                          <TableRow><TableCell colSpan={11}>
+                          <TableRow><TableCell colSpan={12}>
                             <Typography variant="body2" color="text.secondary">Todavía no hay retiros en esta cuenta.</Typography>
                           </TableCell></TableRow>
                         )}
@@ -1687,6 +1749,11 @@ export default function MaterialesPage() {
                           <TableRow key={r.id} hover>
                             <TableCell sx={{ whiteSpace: "nowrap" }}>{fmtDate(r.fecha)}</TableCell>
                             <TableCell sx={{ whiteSpace: "nowrap" }}>{r.remito_nro || "—"}</TableCell>
+                            <TableCell sx={{ whiteSpace: "nowrap" }}>
+                              {listaNroDe(r.lista_anticipo_id)
+                                ? <Chip size="small" variant="outlined" color="secondary" label={listaNroDe(r.lista_anticipo_id)} />
+                                : <Typography variant="body2" color="text.disabled">—</Typography>}
+                            </TableCell>
                             <TableCell>
                               {r.etapa
                                 ? <Chip size="small" variant="outlined" color="primary" label={r.etapa} />
@@ -2131,6 +2198,98 @@ export default function MaterialesPage() {
               </Table>
             </Box>
           </CardContent></Card>
+        </Stack>
+      )}
+
+      {tab === 4 && (
+        <Stack spacing={2}>
+          <Card><CardContent>
+            <Box>
+              <Typography variant="subtitle2" fontWeight={800} sx={{ textTransform: "uppercase", letterSpacing: 0.6 }}>
+                Control por lista (acopio)
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Por cada lista / acopio: el detalle de lo retirado (artículo, cantidad, precio unitario y total), el total retirado y el saldo de la lista (anticipo − retirado).
+              </Typography>
+            </Box>
+          </CardContent></Card>
+
+          {controlPorLista.length === 0 && (
+            <Alert severity="info">
+              Todavía no hay listas de precios cargadas ni retiros imputados a una lista. Cargá la lista de precios en un acopio y elegí esa lista al registrar un retiro.
+            </Alert>
+          )}
+
+          {controlPorLista.map((L) => (
+            <Card key={L.key}><CardContent sx={{ p: { xs: 1, sm: 2 } }}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2} justifyContent="space-between" alignItems={{ sm: "center" }} sx={{ mb: 1 }}>
+                <Box>
+                  <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap" }} useFlexGap>
+                    <Chip size="small" color="secondary" label={`Lista Nº ${L.nro}`} />
+                    <Typography variant="subtitle2" fontWeight={700}>{L.cuenta.proveedor}</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {L.fecha ? fmtDate(L.fecha) : "sin fecha"} · {L.nRetiros} retiro{L.nRetiros === 1 ? "" : "s"}
+                    </Typography>
+                  </Stack>
+                </Box>
+                <Stack direction="row" spacing={3}>
+                  <Box sx={{ textAlign: "right" }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", textTransform: "uppercase", fontSize: 10 }}>Anticipo</Typography>
+                    <Typography fontWeight={700} sx={{ color: "#0F2A4A" }}>{fmtMoney(L.anticipoMonto, L.moneda)}</Typography>
+                  </Box>
+                  <Box sx={{ textAlign: "right" }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", textTransform: "uppercase", fontSize: 10 }}>Retirado</Typography>
+                    <Typography fontWeight={700} color="error.main">{fmtMoney(L.totalRetirado, L.moneda)}</Typography>
+                  </Box>
+                  <Box sx={{ textAlign: "right" }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", textTransform: "uppercase", fontSize: 10 }}>Saldo lista</Typography>
+                    <Typography fontWeight={700} sx={{ color: L.saldo < 0 ? "#C0392B" : "#1E8449" }}>{fmtMoney(L.saldo, L.moneda)}</Typography>
+                  </Box>
+                </Stack>
+              </Stack>
+              <Box sx={{ overflowX: "auto" }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ width: 80 }}>Código</TableCell>
+                      <TableCell>Artículo</TableCell>
+                      <TableCell align="right" sx={{ width: 110 }}>Cantidad</TableCell>
+                      <TableCell sx={{ width: 80 }}>Unidad</TableCell>
+                      <TableCell align="right" sx={{ width: 130 }}>Precio unit.</TableCell>
+                      <TableCell align="right" sx={{ width: 140 }}>Total retirado</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {L.items.length === 0 && (
+                      <TableRow><TableCell colSpan={6}>
+                        <Typography variant="body2" color="text.secondary" sx={{ py: 1.5, textAlign: "center" }}>
+                          Todavía no hay artículos retirados imputados a esta lista.
+                        </Typography>
+                      </TableCell></TableRow>
+                    )}
+                    {L.items.map((it, i) => (
+                      <TableRow key={i} hover>
+                        <TableCell sx={{ color: "text.secondary" }}>{it.codigo || "—"}</TableCell>
+                        <TableCell>{it.material}</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmtNum0(it.cantidad)}</TableCell>
+                        <TableCell sx={{ color: "text.secondary" }}>{it.unidad}</TableCell>
+                        <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>{it.precio > 0 ? fmtMoney(it.precio, L.moneda) : "—"}</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700, color: "#0F2A4A", fontVariantNumeric: "tabular-nums" }}>{fmtMoney(it.total, L.moneda)}</TableCell>
+                      </TableRow>
+                    ))}
+                    {L.items.length > 0 && (
+                      <TableRow>
+                        <TableCell colSpan={5} align="right" sx={{ fontWeight: 700 }}>Total retirado (detalle)</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 800, color: "#0F2A4A", fontVariantNumeric: "tabular-nums" }}>
+                          {fmtMoney(L.items.reduce((s, it) => s + it.total, 0), L.moneda)}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </Box>
+            </CardContent></Card>
+          ))}
         </Stack>
       )}
 
