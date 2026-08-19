@@ -127,6 +127,17 @@ async function archivoABase64(file) {
   return { base64, mediaType: file.type || "application/octet-stream" };
 }
 
+// Detecta si un ítem del remito es un envase retornable (pallet / bolsón que se
+// devuelve). Se basa en el texto: "retornable", "devolución", "con boleta"…
+// No marca los bolsones que son producto (ej. "ARENA X BOLSON").
+const esRetornable = (it) => {
+  const t = `${it?.material || ""} ${it?.unidad || ""}`.toLowerCase();
+  return /(retornab|devoluc|retorno|con boleta)/.test(t);
+};
+// Unidad de recupero (pallet o bolsón) inferida del texto del ítem.
+const unidadRecupero = (it) =>
+  /pallet|palet|tarima/.test(`${it?.material || ""} ${it?.unidad || ""}`.toLowerCase()) ? "pallet" : "bolson";
+
 // Devuelve los ítems de recupero de un retiro como arreglo normalizado.
 // Usa recupero_items (V28) si existe; si no, sintetiza el ítem único de la V27.
 const itemsRecupero = (r) => {
@@ -892,11 +903,23 @@ export default function MaterialesPage() {
       }));
       // Sincroniza el monto con Σ(P×Q) si vinieron precios de la lista.
       setMatItems(cuentaId, items.length ? items : [emptyMatItem()]);
+      // Autodetección de retornables: los pallets / bolsones marcados como
+      // devolución / retornables se cargan también en "¿Presenta recupero?",
+      // así se descuentan del neto imputado a la etapa.
+      const recFromRemito = items.filter(esRetornable).map(it => ({
+        unidad: unidadRecupero(it),
+        cantidad: it.cantidad || "",
+        precio: it.precio || "",
+      }));
+      if (recFromRemito.length) setRet(cuentaId, { recupero: true, recupero_items: recFromRemito });
       if (data.remito_nro && !f.remito_nro) setRet(cuentaId, { remito_nro: String(data.remito_nro) });
       const sinPrecio = items.filter(it => !(Number(it.precio) > 0)).length;
+      const avisoRec = recFromRemito.length
+        ? `\n\nDetecté ${recFromRemito.length} ítem/s retornable/s (pallet/bolsón) y los cargué en "¿Presenta recupero?": se descuentan del neto imputado a la etapa. Revisá cantidad y precio.`
+        : "";
       if (!items.length) alert("No pude leer materiales del remito. Cargalos a mano.");
-      else if (lista.length && sinPrecio) alert(`Leí ${items.length} materiales. ${sinPrecio} no encontraron precio en la lista del acopio: revisalos y cargá el precio a mano.` + (data.nota ? "\n\nNota IA: " + data.nota : ""));
-      else if (data.nota) alert("Nota IA: " + data.nota);
+      else if (lista.length && sinPrecio) alert(`Leí ${items.length} materiales. ${sinPrecio} no encontraron precio en la lista del acopio: revisalos y cargá el precio a mano.` + (data.nota ? "\n\nNota IA: " + data.nota : "") + avisoRec);
+      else if (data.nota || avisoRec) alert((data.nota ? "Nota IA: " + data.nota : "").trim() + avisoRec);
     } catch (e) {
       alert("No se pudo procesar la imagen: " + (e?.message || e));
     } finally {
@@ -940,6 +963,26 @@ export default function MaterialesPage() {
     const out = [];
     for (const c of cuentas) {
       const rsCta = retiros.filter(x => x.cuenta_id === c.id);
+      // Devoluciones a saldo (recuperos cobrados como saldo) de la cuenta:
+      // pallets / bolsones que volvieron. Se muestran como renglones aparte y
+      // NO descuentan del total retirado. Son a nivel cuenta, así que se
+      // adjuntan una sola vez, en la primera lista de la cuenta.
+      const devsCta = devolucionesDe(c.id).flatMap(d =>
+        (Array.isArray(d.rec_items) ? d.rec_items : []).map(it => {
+          const cantidad = Number(it.cantidad || 0);
+          const precio = Number(it.precio || 0);
+          return {
+            unidad: it.unidad === "bolson" ? "bolson" : "pallet",
+            material: it.unidad === "bolson" ? "Bolsón (devolución a saldo)" : "Pallet (devolución a saldo)",
+            fecha: d.fecha,
+            cantidad,
+            precio,
+            total: cantidad * precio,
+          };
+        })
+      );
+      const totalDevuelto = devsCta.reduce((s, it) => s + it.total, 0);
+      let devAsignada = false;
       for (const a of anticiposReales(c.id)) {
         const tieneLista = Array.isArray(a.lista_precios) && a.lista_precios.length;
         const rsLista = rsCta.filter(r => r.lista_anticipo_id === a.id);
@@ -964,6 +1007,10 @@ export default function MaterialesPage() {
         const items = Object.values(map).sort((x, y) => x.material.localeCompare(y.material));
         const totalRetirado = rsLista.reduce((s, r) => s + Number(r.monto || 0), 0);
         const anticipoMonto = Number(a.monto || 0);
+        // Adjunto las devoluciones a saldo de la cuenta a su primera lista.
+        const devoluciones = devAsignada ? [] : devsCta;
+        const devTotal = devAsignada ? 0 : totalDevuelto;
+        devAsignada = true;
         out.push({
           key: a.id,
           cuenta: c,
@@ -972,6 +1019,8 @@ export default function MaterialesPage() {
           fecha: a.fecha,
           moneda: c.moneda,
           items,
+          devoluciones,
+          devTotal,
           nRetiros: rsLista.length,
           totalRetirado,
           anticipoMonto,
@@ -2209,7 +2258,7 @@ export default function MaterialesPage() {
                 Control por lista (acopio)
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                Por cada lista / acopio: el detalle de lo retirado (artículo, cantidad, precio unitario y total), el total retirado y el saldo de la lista (anticipo − retirado).
+                Por cada lista / acopio: el detalle de lo retirado (artículo, cantidad, precio unitario y total), el total retirado y el saldo de la lista (anticipo − retirado). Los recuperos cargados en "Devolución a saldo" aparecen como renglones aparte (no descuentan del retirado).
               </Typography>
             </Box>
           </CardContent></Card>
@@ -2241,6 +2290,12 @@ export default function MaterialesPage() {
                     <Typography variant="caption" color="text.secondary" sx={{ display: "block", textTransform: "uppercase", fontSize: 10 }}>Retirado</Typography>
                     <Typography fontWeight={700} color="error.main">{fmtMoney(L.totalRetirado, L.moneda)}</Typography>
                   </Box>
+                  {L.devTotal > 0 && (
+                    <Box sx={{ textAlign: "right" }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", textTransform: "uppercase", fontSize: 10 }}>Devuelto a saldo</Typography>
+                      <Typography fontWeight={700} sx={{ color: "#8E44AD" }}>{fmtMoney(L.devTotal, L.moneda)}</Typography>
+                    </Box>
+                  )}
                   <Box sx={{ textAlign: "right" }}>
                     <Typography variant="caption" color="text.secondary" sx={{ display: "block", textTransform: "uppercase", fontSize: 10 }}>Saldo lista</Typography>
                     <Typography fontWeight={700} sx={{ color: L.saldo < 0 ? "#C0392B" : "#1E8449" }}>{fmtMoney(L.saldo, L.moneda)}</Typography>
@@ -2282,6 +2337,33 @@ export default function MaterialesPage() {
                         <TableCell colSpan={5} align="right" sx={{ fontWeight: 700 }}>Total retirado (detalle)</TableCell>
                         <TableCell align="right" sx={{ fontWeight: 800, color: "#0F2A4A", fontVariantNumeric: "tabular-nums" }}>
                           {fmtMoney(L.items.reduce((s, it) => s + it.total, 0), L.moneda)}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    {L.devoluciones.length > 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} sx={{ borderBottom: "none", pt: 2 }}>
+                          <Typography variant="caption" fontWeight={700} sx={{ color: "#8E44AD", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                            Devoluciones a saldo (recupero) — no descuentan del retirado
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    {L.devoluciones.map((it, i) => (
+                      <TableRow key={"dev" + i} hover>
+                        <TableCell sx={{ color: "text.secondary" }}>—</TableCell>
+                        <TableCell sx={{ color: "#8E44AD" }}>{it.material}</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmtNum0(it.cantidad)}</TableCell>
+                        <TableCell sx={{ color: "text.secondary" }}>{it.unidad === "bolson" ? "bolsón" : "pallet"}</TableCell>
+                        <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>{it.precio > 0 ? fmtMoney(it.precio, L.moneda) : "—"}</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700, color: "#8E44AD", fontVariantNumeric: "tabular-nums" }}>{fmtMoney(it.total, L.moneda)}</TableCell>
+                      </TableRow>
+                    ))}
+                    {L.devoluciones.length > 0 && (
+                      <TableRow>
+                        <TableCell colSpan={5} align="right" sx={{ fontWeight: 700 }}>Total devuelto a saldo</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 800, color: "#8E44AD", fontVariantNumeric: "tabular-nums" }}>
+                          {fmtMoney(L.devTotal, L.moneda)}
                         </TableCell>
                       </TableRow>
                     )}
