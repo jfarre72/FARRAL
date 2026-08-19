@@ -127,6 +127,17 @@ async function archivoABase64(file) {
   return { base64, mediaType: file.type || "application/octet-stream" };
 }
 
+// Detecta si un ítem del remito es un envase retornable (pallet / bolsón que se
+// devuelve). Se basa en el texto: "retornable", "devolución", "con boleta"…
+// No marca los bolsones que son producto (ej. "ARENA X BOLSON").
+const esRetornable = (it) => {
+  const t = `${it?.material || ""} ${it?.unidad || ""}`.toLowerCase();
+  return /(retornab|devoluc|retorno|con boleta)/.test(t);
+};
+// Unidad de recupero (pallet o bolsón) inferida del texto del ítem.
+const unidadRecupero = (it) =>
+  /pallet|palet|tarima/.test(`${it?.material || ""} ${it?.unidad || ""}`.toLowerCase()) ? "pallet" : "bolson";
+
 // Devuelve los ítems de recupero de un retiro como arreglo normalizado.
 // Usa recupero_items (V28) si existe; si no, sintetiza el ítem único de la V27.
 const itemsRecupero = (r) => {
@@ -892,11 +903,23 @@ export default function MaterialesPage() {
       }));
       // Sincroniza el monto con Σ(P×Q) si vinieron precios de la lista.
       setMatItems(cuentaId, items.length ? items : [emptyMatItem()]);
+      // Autodetección de retornables: los pallets / bolsones marcados como
+      // devolución / retornables se cargan también en "¿Presenta recupero?",
+      // así se descuentan del neto imputado a la etapa.
+      const recFromRemito = items.filter(esRetornable).map(it => ({
+        unidad: unidadRecupero(it),
+        cantidad: it.cantidad || "",
+        precio: it.precio || "",
+      }));
+      if (recFromRemito.length) setRet(cuentaId, { recupero: true, recupero_items: recFromRemito });
       if (data.remito_nro && !f.remito_nro) setRet(cuentaId, { remito_nro: String(data.remito_nro) });
       const sinPrecio = items.filter(it => !(Number(it.precio) > 0)).length;
+      const avisoRec = recFromRemito.length
+        ? `\n\nDetecté ${recFromRemito.length} ítem/s retornable/s (pallet/bolsón) y los cargué en "¿Presenta recupero?": se descuentan del neto imputado a la etapa. Revisá cantidad y precio.`
+        : "";
       if (!items.length) alert("No pude leer materiales del remito. Cargalos a mano.");
-      else if (lista.length && sinPrecio) alert(`Leí ${items.length} materiales. ${sinPrecio} no encontraron precio en la lista del acopio: revisalos y cargá el precio a mano.` + (data.nota ? "\n\nNota IA: " + data.nota : ""));
-      else if (data.nota) alert("Nota IA: " + data.nota);
+      else if (lista.length && sinPrecio) alert(`Leí ${items.length} materiales. ${sinPrecio} no encontraron precio en la lista del acopio: revisalos y cargá el precio a mano.` + (data.nota ? "\n\nNota IA: " + data.nota : "") + avisoRec);
+      else if (data.nota || avisoRec) alert((data.nota ? "Nota IA: " + data.nota : "").trim() + avisoRec);
     } catch (e) {
       alert("No se pudo procesar la imagen: " + (e?.message || e));
     } finally {
