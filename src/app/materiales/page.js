@@ -670,7 +670,9 @@ export default function MaterialesPage() {
   const [devOpen, setDevOpen] = useState(null); // cuentaId del diálogo de recupero
   const openNuevoDev = (cuentaId) => {
     setEditDev(null);
-    setNuevaDevolucion(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), items: [emptyRecItem()], remito_nro: "", file: null } }));
+    const reales = anticiposReales(cuentaId);
+    const listaDefault = anticipoVigenteId(cuentaId) || (reales[0]?.id ?? "");
+    setNuevaDevolucion(prev => ({ ...prev, [cuentaId]: { fecha: hoyISO(), items: [emptyRecItem()], remito_nro: "", file: null, lista_anticipo_id: listaDefault } }));
     setDevOpen(cuentaId);
   };
   const setDev = (cuentaId, patch) =>
@@ -716,6 +718,7 @@ export default function MaterialesPage() {
         descripcion: "Devolución de material a saldo",
         remito_nro: (f.remito_nro || "").trim() || null,
         es_devolucion: true, rec_items: items, rec_pallets: pallets, rec_bolsones: bolsones,
+        lista_anticipo_id: f.lista_anticipo_id || null,
       };
       const editing = editDev && editDev.cuenta_id === cuentaId;
       let error;
@@ -743,6 +746,7 @@ export default function MaterialesPage() {
     setNuevaDevolucion(prev => ({ ...prev, [a.cuenta_id]: {
       fecha: a.fecha || hoyISO(),
       remito_nro: a.remito_nro || "",
+      lista_anticipo_id: a.lista_anticipo_id || "",
       file: null,
       items: its.map(it => ({ unidad: it.unidad || "pallet", cantidad: String(it.cantidad ?? ""), precio: it.precio != null ? String(it.precio) : "" })),
     } }));
@@ -965,28 +969,37 @@ export default function MaterialesPage() {
       const rsCta = retiros.filter(x => x.cuenta_id === c.id);
       // Devoluciones a saldo (recuperos cobrados como saldo) de la cuenta:
       // pallets / bolsones que volvieron. Se muestran como renglones aparte y
-      // NO descuentan del total retirado. Son a nivel cuenta, así que se
-      // adjuntan una sola vez, en la primera lista de la cuenta.
-      const devsCta = devolucionesDe(c.id).flatMap(d =>
-        (Array.isArray(d.rec_items) ? d.rec_items : []).map(it => {
-          const cantidad = Number(it.cantidad || 0);
-          const precio = Number(it.precio || 0);
-          return {
-            unidad: it.unidad === "bolson" ? "bolson" : "pallet",
-            material: it.unidad === "bolson" ? "Bolsón (devolución a saldo)" : "Pallet (devolución a saldo)",
-            fecha: d.fecha,
-            cantidad,
-            precio,
-            total: cantidad * precio,
-          };
-        })
-      );
-      const totalDevuelto = devsCta.reduce((s, it) => s + it.total, 0);
-      let devAsignada = false;
-      for (const a of anticiposReales(c.id)) {
+      // NO descuentan del retirado, pero SÍ suman al saldo de la lista
+      // (anticipo − retirado + recupero). Cada devolución se imputa al acopio /
+      // lista que representa (lista_anticipo_id); las viejas sin asignar se
+      // adjuntan a la primera lista de la cuenta.
+      const reales = anticiposReales(c.id);
+      const idsReales = new Set(reales.map(a => a.id));
+      const devLineas = (d) => (Array.isArray(d.rec_items) ? d.rec_items : []).map(it => {
+        const cantidad = Number(it.cantidad || 0);
+        const precio = Number(it.precio || 0);
+        return {
+          unidad: it.unidad === "bolson" ? "bolson" : "pallet",
+          material: it.unidad === "bolson" ? "Bolsón (devolución a saldo)" : "Pallet (devolución a saldo)",
+          fecha: d.fecha,
+          cantidad,
+          precio,
+          total: cantidad * precio,
+        };
+      });
+      const devsPorLista = {}; // anticipoId -> [líneas]
+      const devsLegacy = [];   // sin asignar (o asignadas a un acopio inexistente)
+      for (const d of devolucionesDe(c.id)) {
+        const dest = d.lista_anticipo_id && idsReales.has(d.lista_anticipo_id) ? d.lista_anticipo_id : null;
+        if (dest) (devsPorLista[dest] ??= []).push(...devLineas(d));
+        else devsLegacy.push(...devLineas(d));
+      }
+      let legacyAsignada = false;
+      for (const a of reales) {
         const tieneLista = Array.isArray(a.lista_precios) && a.lista_precios.length;
         const rsLista = rsCta.filter(r => r.lista_anticipo_id === a.id);
-        if (!tieneLista && rsLista.length === 0) continue;
+        const devsPropias = devsPorLista[a.id] || [];
+        if (!tieneLista && rsLista.length === 0 && devsPropias.length === 0 && (legacyAsignada || devsLegacy.length === 0)) continue;
         const map = {};
         for (const r of rsLista) {
           const its = Array.isArray(r.materiales_items) ? r.materiales_items : [];
@@ -1007,10 +1020,10 @@ export default function MaterialesPage() {
         const items = Object.values(map).sort((x, y) => x.material.localeCompare(y.material));
         const totalRetirado = rsLista.reduce((s, r) => s + Number(r.monto || 0), 0);
         const anticipoMonto = Number(a.monto || 0);
-        // Adjunto las devoluciones a saldo de la cuenta a su primera lista.
-        const devoluciones = devAsignada ? [] : devsCta;
-        const devTotal = devAsignada ? 0 : totalDevuelto;
-        devAsignada = true;
+        // Devoluciones imputadas a esta lista + las legado (a la primera lista).
+        const devoluciones = [...devsPropias, ...(legacyAsignada ? [] : devsLegacy)];
+        legacyAsignada = true;
+        const devTotal = devoluciones.reduce((s, it) => s + it.total, 0);
         out.push({
           key: a.id,
           cuenta: c,
@@ -1024,7 +1037,7 @@ export default function MaterialesPage() {
           nRetiros: rsLista.length,
           totalRetirado,
           anticipoMonto,
-          saldo: anticipoMonto - totalRetirado,
+          saldo: anticipoMonto - totalRetirado + devTotal,
         });
       }
     }
@@ -1898,6 +1911,26 @@ export default function MaterialesPage() {
                               </Button>
                             </Grid>
                           </Grid>
+                          {(() => {
+                            const reales = anticiposReales(c.id);
+                            const sel = reales.some(a => a.id === nd.lista_anticipo_id) ? nd.lista_anticipo_id : "";
+                            return (
+                              <TextField select label="Acopio / lista que representa" fullWidth size="small"
+                                value={sel}
+                                onChange={(e) => setDev(c.id, { lista_anticipo_id: e.target.value })}
+                                helperText={reales.length
+                                  ? "El recupero suma al saldo de este acopio (anticipo − retirado + recupero)."
+                                  : "Esta cuenta todavía no tiene acopios cargados."}>
+                                <MenuItem value="">(Sin asignar)</MenuItem>
+                                {reales.map(a => (
+                                  <MenuItem key={a.id} value={a.id}>
+                                    Lista Nº {a.acopio_nro ? String(a.acopio_nro) : `#${String(a.id).slice(-4)}`}
+                                    {" · "}{a.fecha ? fmtDate(a.fecha) : "s/f"} · {fmtMoney(a.monto, c.moneda)}
+                                  </MenuItem>
+                                ))}
+                              </TextField>
+                            );
+                          })()}
                           {items.map((it, idx) => {
                             const cant = Number(parseMiles(it.cantidad ?? "")) || 0;
                             const prec = Number(it.precio ?? 0) || 0;
