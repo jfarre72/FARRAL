@@ -10,6 +10,7 @@ import { useProjects } from "@/components/ProjectContext";
 import { fmtMoney, fmtDate, fmtPct } from "@/components/Money";
 import { printDocument, esc } from "@/lib/printPdf";
 import { aplicarFechasReales } from "@/lib/fechasReales";
+import { gastoUSD, buildMovsReales } from "@/lib/gastosReales";
 
 const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 const MES_CORTO = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
@@ -19,22 +20,6 @@ const hoyISO = () => isoDe(new Date());
 // Suma N días a una fecha ISO (YYYY-MM-DD) y devuelve otra fecha ISO.
 const sumarDiasISO = (iso, n) => { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return isoDe(d); };
 const inicioMesISO = () => { const d = new Date(); return isoDe(new Date(d.getFullYear(), d.getMonth(), 1)); };
-
-// USD gastado por un movimiento (misma convención que Caja/Indicadores).
-function gastoUSD(mv) {
-  const m = Number(mv.monto || 0);
-  if (mv.tipo === "egreso") {
-    if (mv.con_cambio) {
-      let g = 0;
-      if (mv.cambio_moneda_origen === "USD") g += Number(mv.cambio_monto_origen || 0);
-      if (m > 0 && mv.moneda === "USD") g += m;
-      return g;
-    }
-    return mv.moneda === "USD" ? m : 0;
-  }
-  if (mv.tipo === "cambio") return mv.moneda === "USD" ? m : 0;
-  return 0;
-}
 
 // Genera un <svg> (string) de líneas con la serie acumulada por mes.
 function svgChart(serie, hastaKey) {
@@ -74,6 +59,10 @@ export default function ReporteriaPage() {
   const [registros, setRegistros] = useState([]); // Diario (para derivar estados/fechas reales)
   const [movs, setMovs] = useState([]);
   const [fotos, setFotos] = useState([]);
+  const [conceptos, setConceptos] = useState([]);
+  const [cuentasMat, setCuentasMat] = useState([]);
+  const [anticiposMat, setAnticiposMat] = useState([]);
+  const [retirosMat, setRetirosMat] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Qué secciones incluir en el reporte (vista previa y PDF). Todo activo por defecto.
@@ -89,11 +78,13 @@ export default function ReporteriaPage() {
   const reload = async () => {
     if (!proyecto) return;
     setLoading(true);
-    const [{ data: hs }, { data: mv }, { data: ft }, { data: rg }] = await Promise.all([
+    const [{ data: hs }, { data: mv }, { data: ft }, { data: rg }, { data: cs }, { data: cm }] = await Promise.all([
       supabase.from("hitos").select("*").eq("proyecto_id", proyecto.id).order("orden"),
       supabase.from("movimientos_caja").select("*").eq("proyecto_id", proyecto.id),
       supabase.from("fotos").select("*").eq("proyecto_id", proyecto.id).order("fecha"),
       supabase.from("seguimiento_diario").select("fecha,trabajado,etapa,tareas").eq("proyecto_id", proyecto.id),
+      supabase.from("conceptos").select("nombre,usa_etapas").eq("proyecto_id", proyecto.id),
+      supabase.from("cuentas_materiales").select("id,proveedor,moneda").eq("proyecto_id", proyecto.id),
     ]);
     const ids = (hs ?? []).map(h => h.id);
     let ts = [];
@@ -101,7 +92,17 @@ export default function ReporteriaPage() {
       const { data } = await supabase.from("hito_tareas").select("*").in("hito_id", ids).order("orden");
       ts = data ?? [];
     }
+    const matIds = (cm ?? []).map(c => c.id);
+    let am = [], rm = [];
+    if (matIds.length) {
+      const [{ data: a }, { data: r }] = await Promise.all([
+        supabase.from("anticipos_materiales").select("cuenta_id,monto,tipo_cambio,es_devolucion").in("cuenta_id", matIds),
+        supabase.from("retiros_materiales").select("cuenta_id,fecha,descripcion,monto,etapa,tipo_cambio,recupero,recupero_items,recupero_total").in("cuenta_id", matIds),
+      ]);
+      am = a ?? []; rm = r ?? [];
+    }
     setHitos(hs ?? []); setTareas(ts); setRegistros(rg ?? []); setMovs(mv ?? []); setFotos(ft ?? []);
+    setConceptos(cs ?? []); setCuentasMat(cm ?? []); setAnticiposMat(am); setRetirosMat(rm);
     setLoading(false);
   };
 
@@ -176,10 +177,13 @@ export default function ReporteriaPage() {
     const planPorHito = {};
     for (const t of tareasPlanificadas) { (planPorHito[t.hito] ||= []).push(t); }
 
-    // Gasto del rango, total acumulado + serie mensual (historial completo)
+    // Gasto del rango, total acumulado + serie mensual (historial completo).
+    // Mismo criterio que la portada / económico: egresos de caja (sin acopio)
+    // + retiros de materiales (neto).
+    const movsReal = buildMovsReales({ movs, cuentasMat, anticiposMat, retirosMat, conceptos });
     const porMes = new Map();
     let totalUSD = 0, gastoRango = 0, acumHasta = 0;
-    for (const mv of movs) {
+    for (const mv of movsReal) {
       const g = gastoUSD(mv);
       if (g <= 0 || !mv.fecha) continue;
       totalUSD += g;
@@ -202,7 +206,7 @@ export default function ReporteriaPage() {
     const fotosRango = fotos.filter(f => inRango(f.fecha));
 
     return { avance: Math.round(avance), tareasPorHito: ordenarPorEtapa(tareasPorHito), nTareasRango: tareasRango.length, enCursoPorHito: ordenarPorEtapa(enCursoPorHito), nEnCurso: tareasEnCurso.length, planPorHito: ordenarPorEtapa(planPorHito), nPlan: tareasPlanificadas.length, planDesde, planHasta, avanceEtapa, gastoRango, totalUSD, acumHasta, serie, hastaKey, fotosRango };
-  }, [hitos, tareas, registros, movs, fotos, desde, hasta]);
+  }, [hitos, tareas, registros, movs, fotos, desde, hasta, conceptos, cuentasMat, anticiposMat, retirosMat]);
 
   const rangoLabel = `${fmtDate(desde)} a ${fmtDate(hasta)}`;
 

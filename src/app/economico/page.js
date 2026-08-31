@@ -11,23 +11,7 @@ import { useProjects } from "@/components/ProjectContext";
 import TableViewIcon from "@mui/icons-material/TableView";
 import { fmtMoney, fmtPct, fmtDate, fmtNum } from "@/components/Money";
 import { getCache, setCache } from "@/lib/dataCache";
-
-// USD imputable a la etapa/concepto = el gasto REAL valuado en USD.
-// - Gasto en USD: ese monto.
-// - Gasto en ARS: monto / tipo de cambio (el del cambio integrado si lo hubo,
-//   o el tipo_cambio_gasto cargado al registrar el pago en pesos).
-// Un cambio puro de divisa (sin gasto) no imputa nada.
-function gastoUSD(mv) {
-  if (mv.tipo !== "egreso") return 0;
-  // El egreso de acopio es financiero (no consumo): el gasto real se imputa en
-  // los retiros de materiales, no acá. Lo excluimos para no duplicar.
-  if (mv.anticipo_materiales) return 0;
-  const m = Number(mv.monto || 0);
-  if (m <= 0) return 0;
-  if (mv.moneda === "USD") return m;
-  const tc = Number(mv.cambio_tipo_cambio || mv.tipo_cambio_gasto || 0);
-  return tc > 0 ? m / tc : 0;
-}
+import { gastoUSD, retirosMatDetalle as calcRetirosMatDetalle, buildMovsReales } from "@/lib/gastosReales";
 
 // Agrupa los egresos (USD imputado) por un campo, ordenado de mayor a menor.
 // Los que no tienen valor en ese campo van a "(Sin asignar)".
@@ -196,75 +180,20 @@ export default function EconomicoPage() {
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
 
-  // Gasto real de materiales de acopio por etapa (USD neto). Cada anticipo
-  // congela su TC; el dólar de la cuenta es el promedio ponderado de sus
-  // anticipos reales. Cada retiro imputa su neto (monto − recupero) a su etapa.
-  const { realMatPorEtapa, retirosMatDetalle } = useMemo(() => {
-    const byCuenta = {};
-    for (const c of cuentasMat) byCuenta[c.id] = c;
-    const arsAcc = {}, usdAcc = {};
-    for (const a of anticiposMat) {
-      if (a.es_devolucion) continue;
-      const c = byCuenta[a.cuenta_id];
-      if (!c || (c.moneda || "ARS") !== "ARS") continue;
-      const tc = Number(a.tipo_cambio || 0), m = Number(a.monto || 0);
-      if (tc > 0 && m > 0) { arsAcc[a.cuenta_id] = (arsAcc[a.cuenta_id] || 0) + m; usdAcc[a.cuenta_id] = (usdAcc[a.cuenta_id] || 0) + m / tc; }
-    }
-    const tcByCuenta = {};
-    for (const id in arsAcc) tcByCuenta[id] = usdAcc[id] > 0 ? arsAcc[id] / usdAcc[id] : null;
-    const usdDe = (c, monto, tc) => {
-      if (!c || (c.moneda || "ARS") !== "ARS") return Number(monto || 0);
-      const t = Number(tc || 0) > 0 ? Number(tc) : tcByCuenta[c.id];
-      return t > 0 ? Number(monto || 0) / t : 0;
-    };
-    const recOf = (r) => {
-      if (!r.recupero) return 0;
-      if (Array.isArray(r.recupero_items) && r.recupero_items.length) {
-        return r.recupero_items.reduce((s, it) => s + Number(it.total != null ? it.total : Number(it.cantidad || 0) * Number(it.precio || 0)), 0);
-      }
-      return Number(r.recupero_total || 0);
-    };
-    const real = {};
-    const det = [];
-    for (const r of retirosMat) {
-      const c = byCuenta[r.cuenta_id];
-      if (!c) continue;
-      const rec = recOf(r);
-      const neto = Number(r.monto || 0) - rec;
-      const usd = usdDe(c, neto, r.tipo_cambio);
-      const usdRec = usdDe(c, rec, r.tipo_cambio);
-      const usdGross = usdDe(c, Number(r.monto || 0), r.tipo_cambio);
-      if (!usd && !usdRec) continue;
-      if (r.etapa) real[r.etapa] = (real[r.etapa] || 0) + usd;
-      det.push({
-        id: "ret_" + (r.id ?? `${r.cuenta_id}_${r.fecha}_${r.monto}`),
-        fecha: r.fecha, etapa: r.etapa || null,
-        descripcion: `Materiales · ${c.proveedor}${r.descripcion ? ` · ${r.descripcion}` : ""}`,
-        categoria: "Materiales", monto: neto, moneda: c.moneda,
-        tc: Number(r.tipo_cambio || 0), usd, usdRec, usdGross,
-      });
-    }
-    return { realMatPorEtapa: real, retirosMatDetalle: det };
-  }, [cuentasMat, anticiposMat, retirosMat]);
-
-  // El concepto de "Obra" (el que usa etapas) recibe el consumo de materiales.
-  const obraConcepto = useMemo(() => {
-    const obra = conceptos.filter(c => c.usa_etapas).map(c => c.nombre);
-    return obra.length === 1 ? obra[0] : null;
-  }, [conceptos]);
+  // Gasto real de materiales de acopio (USD neto). Cada anticipo congela su TC;
+  // el dólar de la cuenta es el promedio ponderado de sus anticipos reales.
+  // Cada retiro imputa su neto (monto − recupero) a su etapa. (Ver lib/gastosReales.)
+  const retirosMatDetalle = useMemo(
+    () => calcRetirosMatDetalle({ cuentasMat, anticiposMat, retirosMat }),
+    [cuentasMat, anticiposMat, retirosMat]
+  );
 
   // Gastos reales unificados: egresos de Caja (sin acopio) + retiros de
   // materiales representados como gasto en USD (neto, imputado a su etapa).
-  const movsReal = useMemo(() => {
-    const mat = retirosMatDetalle.map(d => ({
-      id: d.id, tipo: "egreso", fecha: d.fecha,
-      moneda: d.moneda, monto: d.monto, tipo_cambio_gasto: d.tc > 0 ? d.tc : null,
-      concepto: obraConcepto || null, etapa: d.etapa || null,
-      tipo_costo: "Materiales", rubro: null, categoria: "Materiales",
-      descripcion: d.descripcion, _material: true,
-    }));
-    return [...movs, ...mat];
-  }, [movs, retirosMatDetalle, obraConcepto]);
+  const movsReal = useMemo(
+    () => buildMovsReales({ movs, cuentasMat, anticiposMat, retirosMat, conceptos }),
+    [movs, cuentasMat, anticiposMat, retirosMat, conceptos]
+  );
 
   // Acopio total (USD) vs lo ya retirado (USD): el acopio sale de Caja pero no
   // se cuenta como gasto; la diferencia con lo retirado es acopio sin consumir.

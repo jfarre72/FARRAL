@@ -7,16 +7,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useProjects } from "@/components/ProjectContext";
 import { fmtMoney, fmtPct, fmtNum } from "@/components/Money";
 import { getCache, setCache } from "@/lib/dataCache";
-
-// Gasto REAL en USD (misma convención que Caja / Económico).
-function gastoUSD(mv) {
-  if (mv.tipo !== "egreso") return 0;
-  const m = Number(mv.monto || 0);
-  if (m <= 0) return 0;
-  if (mv.moneda === "USD") return m;
-  const tc = Number(mv.cambio_tipo_cambio || mv.tipo_cambio_gasto || 0);
-  return tc > 0 ? m / tc : 0;
-}
+import { gastoUSD, buildMovsReales } from "@/lib/gastosReales";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
@@ -149,13 +140,19 @@ export default function IndicadoresPanel({ beforeChart }) {
   const [movs, setMovs] = useState(() => getCache("indic", proyecto?.id)?.movs ?? []);
   const [aportes, setAportes] = useState(() => getCache("indic", proyecto?.id)?.aportes ?? []);
   const [presTotal, setPresTotal] = useState(() => getCache("indic", proyecto?.id)?.presTotal ?? 0);
+  const [conceptos, setConceptos] = useState(() => getCache("indic", proyecto?.id)?.conceptos ?? []);
+  const [cuentasMat, setCuentasMat] = useState(() => getCache("indic", proyecto?.id)?.cuentasMat ?? []);
+  const [anticiposMat, setAnticiposMat] = useState(() => getCache("indic", proyecto?.id)?.anticiposMat ?? []);
+  const [retirosMat, setRetirosMat] = useState(() => getCache("indic", proyecto?.id)?.retirosMat ?? []);
 
   const reload = async () => {
     if (!proyecto) return;
-    const [{ data: mv }, { data: ap }, { data: pres }] = await Promise.all([
+    const [{ data: mv }, { data: ap }, { data: pres }, { data: cs }, { data: cm }] = await Promise.all([
       supabase.from("movimientos_caja").select("*").eq("proyecto_id", proyecto.id),
       supabase.from("aportes").select("*").eq("proyecto_id", proyecto.id),
       supabase.from("presupuestos").select("id").eq("proyecto_id", proyecto.id),
+      supabase.from("conceptos").select("nombre,usa_etapas").eq("proyecto_id", proyecto.id),
+      supabase.from("cuentas_materiales").select("id,proveedor,moneda").eq("proyecto_id", proyecto.id),
     ]);
     let total = 0;
     const ids = (pres ?? []).map(p => p.id);
@@ -164,8 +161,18 @@ export default function IndicadoresPanel({ beforeChart }) {
         .from("presupuesto_items").select("monto_presupuestado,presupuesto_id").in("presupuesto_id", ids);
       total = (items ?? []).reduce((s, it) => s + Number(it.monto_presupuestado || 0), 0);
     }
-    setCache("indic", proyecto.id, { movs: mv ?? [], aportes: ap ?? [], presTotal: total });
+    const matIds = (cm ?? []).map(c => c.id);
+    let am = [], rm = [];
+    if (matIds.length) {
+      const [{ data: a }, { data: r }] = await Promise.all([
+        supabase.from("anticipos_materiales").select("cuenta_id,monto,tipo_cambio,es_devolucion").in("cuenta_id", matIds),
+        supabase.from("retiros_materiales").select("cuenta_id,fecha,descripcion,monto,etapa,tipo_cambio,recupero,recupero_items,recupero_total").in("cuenta_id", matIds),
+      ]);
+      am = a ?? []; rm = r ?? [];
+    }
+    setCache("indic", proyecto.id, { movs: mv ?? [], aportes: ap ?? [], presTotal: total, conceptos: cs ?? [], cuentasMat: cm ?? [], anticiposMat: am, retirosMat: rm });
     setMovs(mv ?? []); setAportes(ap ?? []); setPresTotal(total);
+    setConceptos(cs ?? []); setCuentasMat(cm ?? []); setAnticiposMat(am); setRetirosMat(rm);
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
 
@@ -173,12 +180,15 @@ export default function IndicadoresPanel({ beforeChart }) {
     const m2 = Number(proyecto?.m2_totales || 0);
     const costoEst = Number(proyecto?.costo_total_estimado || 0);
     const ventaEst = Number(proyecto?.precio_venta_estimado || 0);
-    const gastadoUSD = movs.reduce((s, mv) => s + gastoUSD(mv), 0);
+    // Gastos reales unificados: egresos de caja (sin acopio) + retiros de
+    // materiales (neto), mismo criterio que Seguimiento económico.
+    const movsReal = buildMovsReales({ movs, cuentasMat, anticiposMat, retirosMat, conceptos });
+    const gastadoUSD = movsReal.reduce((s, mv) => s + gastoUSD(mv), 0);
     const invEjecutada = aportes
       .filter(a => (a.moneda ?? "USD") === "USD" && a.entra_a_caja !== false)
       .reduce((s, a) => s + Number(a.monto || 0), 0);
     const porMes = new Map();
-    for (const mv of movs) {
+    for (const mv of movsReal) {
       const g = gastoUSD(mv);
       if (g <= 0 || !mv.fecha) continue;
       const key = String(mv.fecha).slice(0, 7);
@@ -199,7 +209,7 @@ export default function IndicadoresPanel({ beforeChart }) {
       avanceEconomico: costoEst > 0 ? (gastadoUSD / costoEst) * 100 : null,
       margenEsperado: costoEst > 0 ? ((ventaEst - costoEst) / costoEst) * 100 : null,
     };
-  }, [movs, aportes, presTotal, proyecto]);
+  }, [movs, aportes, presTotal, proyecto, conceptos, cuentasMat, anticiposMat, retirosMat]);
 
   return (
     <Stack spacing={3}>

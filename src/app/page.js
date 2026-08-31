@@ -6,17 +6,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { fmtMoney, fmtNum, fmtPct, fmtDate } from "@/components/Money";
 import IndicadoresPanel from "@/components/IndicadoresPanel";
-
-// Gasto REAL en USD (misma convención que Caja / Seguimiento económico):
-// gasto en USD por su monto; gasto en ARS por monto / tipo de cambio.
-function gastoRealUSD(mv) {
-  if (mv.tipo !== "egreso") return 0;
-  const m = Number(mv.monto || 0);
-  if (m <= 0) return 0;
-  if (mv.moneda === "USD") return m;
-  const tc = Number(mv.cambio_tipo_cambio || mv.tipo_cambio_gasto || 0);
-  return tc > 0 ? m / tc : 0;
-}
+import { totalGastadoUSD } from "@/lib/gastosReales";
 
 export default function Home() {
   const { proyecto, loading, error } = useProjects();
@@ -25,12 +15,25 @@ export default function Home() {
   useEffect(() => {
     if (!proyecto) { setStats(null); return; }
     (async () => {
-      const [{ data: aportes }, { data: hitos }, { data: inversores }, { data: movs }] = await Promise.all([
+      const [{ data: aportes }, { data: hitos }, { data: inversores }, { data: movs }, { data: conceptos }, { data: cuentasMat }] = await Promise.all([
         supabase.from("aportes").select("*").eq("proyecto_id", proyecto.id),
         supabase.from("hitos").select("*").eq("proyecto_id", proyecto.id).order("orden"),
         supabase.from("inversores").select("id").eq("proyecto_id", proyecto.id),
         supabase.from("movimientos_caja").select("*").eq("proyecto_id", proyecto.id),
+        supabase.from("conceptos").select("nombre,usa_etapas").eq("proyecto_id", proyecto.id),
+        supabase.from("cuentas_materiales").select("id,proveedor,moneda").eq("proyecto_id", proyecto.id),
       ]);
+      // Consumo real de materiales (retiros): se imputa como gasto en lugar del
+      // egreso de acopio, igual que en Seguimiento económico.
+      const matIds = (cuentasMat ?? []).map(c => c.id);
+      let anticiposMat = [], retirosMat = [];
+      if (matIds.length) {
+        const [{ data: am }, { data: rm }] = await Promise.all([
+          supabase.from("anticipos_materiales").select("cuenta_id,monto,tipo_cambio,es_devolucion").in("cuenta_id", matIds),
+          supabase.from("retiros_materiales").select("cuenta_id,fecha,descripcion,monto,etapa,tipo_cambio,recupero,recupero_items,recupero_total").in("cuenta_id", matIds),
+        ]);
+        anticiposMat = am ?? []; retirosMat = rm ?? [];
+      }
       // Saldos de caja
       let cajaUSD = 0, cajaARS = 0;
       // USD movido en operaciones de caja (positivo = ingreso, negativo = egreso)
@@ -65,8 +68,12 @@ export default function Home() {
           if (mv.moneda_destino === "USD") { cajaUSD += md; ingresoUSD += md; } else cajaARS += md;
         }
       }
-      // Gasto REAL en USD (gasto en USD por su monto; en ARS por monto/TC).
-      gastadoUSD = (movs ?? []).reduce((s, mv) => s + gastoRealUSD(mv), 0);
+      // Gasto REAL en USD: egresos de caja (sin acopio) + retiros de materiales
+      // (neto), mismo criterio que Seguimiento económico.
+      gastadoUSD = totalGastadoUSD({
+        movs: movs ?? [], cuentasMat: cuentasMat ?? [],
+        anticiposMat, retirosMat, conceptos: conceptos ?? [],
+      });
       const pctGastado = (Number(proyecto.costo_total_estimado || 0) > 0)
         ? (gastadoUSD / Number(proyecto.costo_total_estimado)) * 100 : 0;
       const hitoIds = (hitos ?? []).map(h => h.id);
