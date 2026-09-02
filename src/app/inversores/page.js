@@ -79,6 +79,10 @@ export default function InversoresPage() {
   // What-if: fecha de venta simulada → desde cuándo el "Faltante" aporta capital.
   const [fechaVentaSim, setFechaVentaSim] = useState("");
 
+  // Snapshot de la simulación del "What if" (para exportar PDF/Excel con los
+  // cambios de esa solapa en lugar de los valores originales).
+  const [whatIfData, setWhatIfData] = useState(null);
+
   const [orderBy, setOrderBy] = useState("aportesUSD");
   const [orderDir, setOrderDir] = useState("desc");
   const handleSort = (col) => {
@@ -256,7 +260,15 @@ export default function InversoresPage() {
 
   const invName = (id) => inversores.find(i => i.id === id)?.nombre ?? "—";
 
+  // Fuente de datos para exportar: si estamos en la solapa "What if" y hay una
+  // simulación cargada, exportamos esos valores; si no, el resumen original.
+  const usarWhatIf = tab === 4 && whatIfData;
+  const expResumen = usarWhatIf ? whatIfData.resumen : resumen;
+  const expTotProy = usarWhatIf ? whatIfData.totProy : totProy;
+  const expSufijo = usarWhatIf && whatIfData.hayCambio ? "_WhatIf" : "";
+
   const exportarExcel = () => {
+    const resumen = expResumen, totProy = expTotProy;
     const numAR = (v) => Number(v || 0).toLocaleString("es-AR", { useGrouping: false, maximumFractionDigits: 2 });
     const t = resumen.reduce((acc, r) => {
       acc.aportesUSD += Number(r.aportesUSD || 0);
@@ -282,12 +294,13 @@ export default function InversoresPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `Inversores_${(proyecto.nombre || "proyecto").replace(/[^\w.\-]/g, "_")}.csv`;
+    a.download = `Inversores_${(proyecto.nombre || "proyecto").replace(/[^\w.\-]/g, "_")}${expSufijo}.csv`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
   const exportarPdf = () => {
+    const resumen = expResumen, totProy = expTotProy;
     const filas = resumen.map((r) => `<tr>
         <td>${esc(r.nombre)}${r.es_faltante ? ' <span class="tag">virtual</span>' : ""}</td>
         <td style="text-align:right">${esc(fmtMoney(r.aportesUSD, "USD"))}</td>
@@ -327,7 +340,7 @@ export default function InversoresPage() {
         <th>Ganancia estim.</th><th>% ganancia</th><th>Total a devolver</th>
       </tr></thead><tbody>${filas}${totalRow}</tbody></table>`;
     printDocument({
-      title: "Inversores",
+      title: usarWhatIf && whatIfData.hayCambio ? "Inversores — Simulación What if" : "Inversores",
       subtitle: `${esc(proyecto.nombre)} · ${fmtDate(new Date().toISOString())}`,
       bodyHtml: resumenKpi + tabla,
     });
@@ -729,7 +742,7 @@ export default function InversoresPage() {
       )}
 
       {tab === 4 && (
-        <WhatIf proyecto={proyecto} aportes={aportes} inversores={inversores} />
+        <WhatIf proyecto={proyecto} aportes={aportes} inversores={inversores} onExportData={setWhatIfData} />
       )}
 
       {tab === 5 && (
@@ -1090,7 +1103,7 @@ function DetalleInversor({ r, aportesC, totProy }) {
 // =====================================================================
 // SOLAPA "What if" — simulador de venta / costo / % ganancia y fechas
 // =====================================================================
-function WhatIf({ proyecto, aportes, inversores }) {
+function WhatIf({ proyecto, aportes, inversores, onExportData }) {
   const baseVenta = Number(proyecto?.precio_venta_estimado || 0);
   const baseCosto = Number(proyecto?.costo_total_estimado || 0);
   const baseFEntrega = proyecto?.fecha_fin || "";
@@ -1110,6 +1123,18 @@ function WhatIf({ proyecto, aportes, inversores }) {
     if (orderBy === col) setOrderDir(d => d === "asc" ? "desc" : "asc");
     else { setOrderBy(col); setOrderDir("desc"); }
   };
+  // What-if: inversores excluidos de la ganancia (por default todos incluidos).
+  const [excluidos, setExcluidos] = useState(() => new Set());
+  const toggleExcluir = (id) => setExcluidos(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
+  });
+  // What-if: override del aporte por inversor (p.ej. honorarios Fope / Farral).
+  const [montoOverrides, setMontoOverrides] = useState({});
+  const setMontoOverride = (id, val) => setMontoOverrides(prev => {
+    const n = { ...prev };
+    if (val === "" || val == null) delete n[id]; else n[id] = val;
+    return n;
+  });
   // Vista: gráfico de proyección (principal) o detalle de inversores.
   const [view, setView] = useState("grafico");
   // Tareas con costo estimado y fecha (del Diario), para la curva de gasto.
@@ -1138,6 +1163,8 @@ function WhatIf({ proyecto, aportes, inversores }) {
     setPctStr("");
     setFEntrega(baseFEntrega);
     setFVenta(baseFVenta);
+    setExcluidos(new Set());
+    setMontoOverrides({});
   };
   useEffect(() => { resetAll(); /* eslint-disable-next-line */ }, [proyecto?.id]);
 
@@ -1151,8 +1178,8 @@ function WhatIf({ proyecto, aportes, inversores }) {
   const aplicarPct = (g) => { const gg = Number(g || 0); if (costoN > 0) setVenta(String(Math.round(costoN * (1 + gg / 100) / 100) * 100)); };
 
   const sim = useMemo(
-    () => computePonderacion({ proyecto, aportes, inversores, fechaCorteOverride: fEntrega || undefined, fechaFaltanteOverride: fVenta || undefined, ventaOverride: ventaN, costoOverride: costoN }),
-    [proyecto, aportes, inversores, fEntrega, fVenta, ventaN, costoN]
+    () => computePonderacion({ proyecto, aportes, inversores, fechaCorteOverride: fEntrega || undefined, fechaFaltanteOverride: fVenta || undefined, ventaOverride: ventaN, costoOverride: costoN, excluidos: [...excluidos], montoOverrides }),
+    [proyecto, aportes, inversores, fEntrega, fVenta, ventaN, costoN, excluidos, montoOverrides]
   );
   const base = useMemo(
     () => computePonderacion({ proyecto, aportes, inversores }),
@@ -1205,7 +1232,8 @@ function WhatIf({ proyecto, aportes, inversores }) {
 
   const delta = (v) => (v > 0 ? "+" : "") + fmtMoney(v, "USD");
   const hayCambio = ventaN !== baseVenta || costoN !== baseCosto
-    || (fEntrega || "") !== baseFEntrega || (fVenta || "") !== baseFVenta;
+    || (fEntrega || "") !== baseFEntrega || (fVenta || "") !== baseFVenta
+    || excluidos.size > 0 || Object.keys(montoOverrides).length > 0;
 
   const t = resumen.reduce((acc, r) => {
     acc.aportesUSD += Number(r.aportesUSD || 0);
@@ -1215,6 +1243,14 @@ function WhatIf({ proyecto, aportes, inversores }) {
     acc.totalDevolver += Number(totProy.ganancia > 0 ? r.totalDevolver : r.aportesUSD) || 0;
     return acc;
   }, { aportesUSD: 0, ponderado: 0, participacion: 0, ganancia: 0, totalDevolver: 0 });
+
+  // Reporto al padre los datos simulados para que PDF/Excel exporten el "What if".
+  useEffect(() => {
+    if (!onExportData) return;
+    onExportData({ resumen, totProy, hayCambio });
+    return () => onExportData(null);
+    // eslint-disable-next-line
+  }, [resumen, totProy.ganancia, totProy.venta, totProy.costo, hayCambio]);
 
   return (
     <Card>
@@ -1294,6 +1330,10 @@ function WhatIf({ proyecto, aportes, inversores }) {
         )}
 
         {view === "inversores" && (
+        <>
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+          Destildá un inversor para excluirlo de la ganancia (tomarlo como contratado) o editá su aporte para simular honorarios (p.ej. Fope / Farral) si la venta cambia.
+        </Typography>
         <Box sx={{ overflowX: "auto" }}>
           <Table size="small">
             <TableHead>
@@ -1332,15 +1372,38 @@ function WhatIf({ proyecto, aportes, inversores }) {
                       </TableCell>
                       <TableCell>
                         <Stack direction="row" alignItems="center" spacing={1}>
-                          <Typography fontWeight={600} sx={{ fontStyle: r.es_faltante ? "italic" : "normal" }}>{r.nombre}</Typography>
+                          {!r.es_faltante && (
+                            <Tooltip title={r.excluido ? "Tomar como inversor (participa de la ganancia)" : "Excluir de la ganancia (tomarlo como contratado)"}>
+                              <Checkbox size="small" sx={{ p: 0.5 }}
+                                checked={!r.excluido}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={() => toggleExcluir(r.id)} />
+                            </Tooltip>
+                          )}
+                          <Typography fontWeight={600} sx={{ fontStyle: r.es_faltante ? "italic" : "normal", textDecoration: r.excluido ? "line-through" : "none", color: r.excluido ? "text.secondary" : "inherit" }}>{r.nombre}</Typography>
                           {r.es_faltante && <Chip size="small" label="virtual" variant="outlined" />}
+                          {r.excluido && <Chip size="small" color="warning" label="contratado" variant="outlined" />}
                         </Stack>
                       </TableCell>
-                      <TableCell align="right">{fmtMoney(r.aportesUSD, "USD")}</TableCell>
-                      <TableCell align="right">{fmtNum(r.ponderado, 0)}</TableCell>
-                      <TableCell align="right">{fmtPct(r.participacion)}</TableCell>
-                      <TableCell align="right">{totProy.ganancia > 0 ? fmtMoney(r.ganancia, "USD") : "—"}</TableCell>
-                      <TableCell align="right">{totProy.ganancia > 0 && r.aportesUSD > 0 ? fmtPct(r.gananciaPct) : "—"}</TableCell>
+                      <TableCell align="right">
+                        {r.es_faltante ? fmtMoney(r.aportesUSD, "USD") : (
+                          <Tooltip title="Editá el aporte simulado (p.ej. honorarios Fope / Farral)">
+                            <TextField
+                              variant="standard" size="small" type="number"
+                              onClick={(e) => e.stopPropagation()}
+                              value={montoOverrides[r.id] ?? ""}
+                              placeholder={fmtNum(r.aportesUSD, 0)}
+                              onChange={(e) => setMontoOverride(r.id, e.target.value)}
+                              InputProps={{ disableUnderline: false, inputProps: { style: { textAlign: "right", MozAppearance: "textfield" } } }}
+                              sx={{ width: 110, "& input": { fontSize: 14, py: 0.25 } }}
+                            />
+                          </Tooltip>
+                        )}
+                      </TableCell>
+                      <TableCell align="right">{r.excluido ? "—" : fmtNum(r.ponderado, 0)}</TableCell>
+                      <TableCell align="right">{r.excluido ? "—" : fmtPct(r.participacion)}</TableCell>
+                      <TableCell align="right">{r.excluido ? "—" : (totProy.ganancia > 0 ? fmtMoney(r.ganancia, "USD") : "—")}</TableCell>
+                      <TableCell align="right">{r.excluido ? "—" : (totProy.ganancia > 0 && r.aportesUSD > 0 ? fmtPct(r.gananciaPct) : "—")}</TableCell>
                       <TableCell align="right"><Typography fontWeight={700}>{totProy.ganancia > 0 ? fmtMoney(r.totalDevolver, "USD") : fmtMoney(r.aportesUSD, "USD")}</Typography></TableCell>
                     </TableRow>
                     {isOpen && (
@@ -1368,6 +1431,7 @@ function WhatIf({ proyecto, aportes, inversores }) {
             </TableBody>
           </Table>
         </Box>
+        </>
         )}
       </CardContent>
     </Card>
