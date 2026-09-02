@@ -27,13 +27,18 @@ export function daysBetween(fromISO, toISO) {
   return Math.max(0, diff);
 }
 
-export function computePonderacion({ proyecto, aportes = [], inversores = [], fechaCorteOverride, fechaFaltanteOverride, ventaOverride, costoOverride, excluidos = [] } = {}) {
+export function computePonderacion({ proyecto, aportes = [], inversores = [], fechaCorteOverride, fechaFaltanteOverride, ventaOverride, costoOverride, excluidos = [], montoOverrides = {} } = {}) {
   // Permite hacer "what if" con una fecha distinta a la de fin del proyecto y/o
   // con una venta / costo simulados (ventaOverride, costoOverride).
   // `excluidos`: ids de inversores que NO participan de la ganancia (p.ej. un
   // arquitecto tomado como contratado). Su ponderado se anula, así no reciben
   // ganancia y ésta se reparte entre el resto según su propio peso.
+  // `montoOverrides`: mapa { inversor_id: nuevoAporteTotalUSD } para simular un
+  // aporte distinto al real (p.ej. honorarios de administración/planificación
+  // como Fope o Farral, que se ajustan si la venta cambia). El nuevo total se
+  // reparte proporcionalmente entre los aportes reales del inversor.
   const exSet = new Set(excluidos || []);
+  const ovMap = montoOverrides || {};
   const fechaCorte = fechaCorteOverride || proyecto?.fecha_fin || todayISO();
   const venta = ventaOverride != null ? Number(ventaOverride) : Number(proyecto?.precio_venta_estimado || 0);
   const costo = costoOverride != null ? Number(costoOverride) : Number(proyecto?.costo_total_estimado  || 0);
@@ -44,13 +49,23 @@ export function computePonderacion({ proyecto, aportes = [], inversores = [], fe
   // ARS aportes se ignoran para la ponderación / ganancia y se reportan
   // aparte como info de caja.
   const aportesUSD = aportes.filter(a => (a.moneda ?? "USD") === "USD");
+  // Total original aportado por inversor (para prorratear los overrides de monto).
+  const totalOrigPorInv = {};
+  aportesUSD.forEach((a) => {
+    totalOrigPorInv[a.inversor_id] = (totalOrigPorInv[a.inversor_id] || 0) + Number(a.monto || 0);
+  });
   const aportesConPonderado = aportesUSD.map((a) => {
     const start = a.fecha_inicio_calculo || a.fecha;
     const dias = daysBetween(start, fechaCorte);
-    const monto = Number(a.monto || 0);
+    // Aplico override de monto (prorrateado) si el inversor lo tiene definido.
+    const ov = ovMap[a.inversor_id];
+    const origTot = totalOrigPorInv[a.inversor_id] || 0;
+    const monto = (ov != null && ov !== "")
+      ? (origTot > 0 ? Number(a.monto || 0) * (Number(ov) / origTot) : Number(ov))
+      : Number(a.monto || 0);
     const excl = exSet.has(a.inversor_id);
     const ponderado = excl ? 0 : monto * dias;
-    return { ...a, _dias: dias, _ponderado: ponderado, _excluido: excl, _fechaInicioCalculo: start };
+    return { ...a, monto, _dias: dias, _ponderado: ponderado, _excluido: excl, _fechaInicioCalculo: start };
   });
 
   const totalAportadoUSD = aportesConPonderado.reduce((s, a) => s + Number(a.monto || 0), 0);
