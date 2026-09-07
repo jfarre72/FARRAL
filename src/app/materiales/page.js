@@ -999,7 +999,10 @@ export default function MaterialesPage() {
         const tieneLista = Array.isArray(a.lista_precios) && a.lista_precios.length;
         const rsLista = rsCta.filter(r => r.lista_anticipo_id === a.id);
         const devsPropias = devsPorLista[a.id] || [];
-        if (!tieneLista && rsLista.length === 0 && devsPropias.length === 0 && (legacyAsignada || devsLegacy.length === 0)) continue;
+        // Antes se ocultaban los acopios sin lista de precios, sin retiros y sin
+        // devoluciones: por eso un acopio recién creado (ej. "HERNAN") no aparecía
+        // acá hasta cargarle la lista o imputarle un retiro. Ahora se muestran
+        // siempre (con estado "vacío"), para que todo acopio real sea visible.
         const map = {};
         for (const r of rsLista) {
           const its = Array.isArray(r.materiales_items) ? r.materiales_items : [];
@@ -1024,6 +1027,23 @@ export default function MaterialesPage() {
         const devoluciones = [...devsPropias, ...(legacyAsignada ? [] : devsLegacy)];
         legacyAsignada = true;
         const devTotal = devoluciones.reduce((s, it) => s + it.total, 0);
+        // Conteo de bolsones / pallets recuperados (devoluciones a saldo) vs.
+        // retirados (renglones de retiro cuya unidad o artículo es bolsón/pallet).
+        const clasifUnidad = (unidad, material) => {
+          const u = `${unidad || ""} ${material || ""}`.toLowerCase();
+          if (/bols/.test(u)) return "bolson";
+          if (/pallet|pallete|palet/.test(u)) return "pallet";
+          return null;
+        };
+        const envases = { retirados: { bolson: 0, pallet: 0 }, recuperados: { bolson: 0, pallet: 0 } };
+        for (const it of items) {
+          const tipo = clasifUnidad(it.unidad, it.material);
+          if (tipo) envases.retirados[tipo] += Number(it.cantidad || 0);
+        }
+        for (const it of devoluciones) {
+          const tipo = it.unidad === "bolson" ? "bolson" : "pallet";
+          envases.recuperados[tipo] += Number(it.cantidad || 0);
+        }
         out.push({
           key: a.id,
           cuenta: c,
@@ -1035,6 +1055,8 @@ export default function MaterialesPage() {
           devoluciones,
           devTotal,
           nRetiros: rsLista.length,
+          tieneLista: !!tieneLista,
+          envases,
           totalRetirado,
           anticipoMonto,
           saldo: anticipoMonto - totalRetirado + devTotal,
@@ -2313,6 +2335,22 @@ export default function MaterialesPage() {
                       {L.fecha ? fmtDate(L.fecha) : "sin fecha"} · {L.nRetiros} retiro{L.nRetiros === 1 ? "" : "s"}
                     </Typography>
                   </Stack>
+                  {(() => {
+                    const tipos = [
+                      { k: "bolson", lbl: "Bolsones" },
+                      { k: "pallet", lbl: "Pallets" },
+                    ].filter(t => L.envases.retirados[t.k] > 0 || L.envases.recuperados[t.k] > 0);
+                    if (tipos.length === 0) return null;
+                    return (
+                      <Stack direction="row" spacing={1} sx={{ mt: 0.75, flexWrap: "wrap" }} useFlexGap>
+                        {tipos.map(t => (
+                          <Chip key={t.k} size="small" variant="outlined"
+                            sx={{ borderColor: "#8E44AD", color: "#8E44AD", fontWeight: 700 }}
+                            label={`${t.lbl}: ${fmtNum0(L.envases.recuperados[t.k])} / ${fmtNum0(L.envases.retirados[t.k])} recuperados`} />
+                        ))}
+                      </Stack>
+                    );
+                  })()}
                 </Box>
                 <Stack direction="row" spacing={3}>
                   <Box sx={{ textAlign: "right" }}>
