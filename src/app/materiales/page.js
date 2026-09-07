@@ -1029,10 +1029,18 @@ export default function MaterialesPage() {
         const devTotal = devoluciones.reduce((s, it) => s + it.total, 0);
         // Conteo de bolsones / pallets recuperados (devoluciones a saldo) vs.
         // retirados (renglones de retiro cuya unidad o artículo es bolsón/pallet).
+        // Un renglón cuenta como ENVASE RETORNABLE (a devolver) sólo cuando el
+        // artículo ES el envase: su nombre empieza con "bolson"/"pallet" o está
+        // marcado como devolución (ej. "BOLSON DE ARIDOS **DEVOLUCION CON BOLETA**"),
+        // o la unidad es explícitamente bolson/pallet. NO cuenta cuando el
+        // bolsón/pallet es sólo la unidad de venta del material (ej. "ARENA X BOLSON").
         const clasifUnidad = (unidad, material) => {
-          const u = `${unidad || ""} ${material || ""}`.toLowerCase();
-          if (/bols/.test(u)) return "bolson";
-          if (/pallet|pallete|palet/.test(u)) return "pallet";
+          const m = (material || "").toLowerCase().trim();
+          const u = (unidad || "").toLowerCase().trim();
+          const esBolson = /^bols/.test(m) || (/bols/.test(m) && /devoluc/.test(m)) || u === "bolson";
+          const esPallet = /^(pallet|palet)/.test(m) || (/(pallet|palet)/.test(m) && /devoluc/.test(m)) || u === "pallet";
+          if (esBolson) return "bolson";
+          if (esPallet) return "pallet";
           return null;
         };
         const envases = { retirados: { bolson: 0, pallet: 0 }, recuperados: { bolson: 0, pallet: 0 } };
