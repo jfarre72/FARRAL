@@ -945,8 +945,11 @@ export default function MaterialesPage() {
           const unidad = (it.unidad || "unidad").toString().trim().toLowerCase();
           const categoria = CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros";
           const key = `${categoria}||${material.toLowerCase()}||${unidad}`;
-          (map[key] ??= { categoria, material, unidad, cantidad: 0, retiros: 0, etapas: new Set() });
+          (map[key] ??= { categoria, material, unidad, cantidad: 0, totalUSD: 0, retiros: 0, etapas: new Set() });
           map[key].cantidad += Number(it.cantidad || 0);
+          // Total en USD del ítem: subtotal (cantidad × precio) en la moneda de la
+          // cuenta, convertido con el TC del retiro (o el de la cuenta si falta).
+          map[key].totalUSD += usdDe(c, subtotalMat(it), r.tipo_cambio);
           map[key].retiros += 1;
           map[key].etapas.add(et);
         }
@@ -959,6 +962,11 @@ export default function MaterialesPage() {
         : a.categoria.localeCompare(b.categoria));
     // eslint-disable-next-line
   }, [cuentas, retiros, consumoEtapa]);
+  // Total general en USD del consumo mostrado (respeta el filtro de etapa).
+  const consumoTotalUSD = useMemo(
+    () => consumo.reduce((s, m) => s + (Number(m.totalUSD) || 0), 0),
+    [consumo]
+  );
 
   // Control por lista (acopio): para cada anticipo con lista de precios, arma el
   // detalle de lo retirado imputado a esa lista — artículo, cantidad, precio
@@ -2276,13 +2284,14 @@ export default function MaterialesPage() {
                     <TableCell>Material</TableCell>
                     <TableCell align="right" sx={{ width: 120 }}>Cantidad</TableCell>
                     <TableCell sx={{ width: 90 }}>Unidad</TableCell>
+                    <TableCell align="right" sx={{ width: 130 }}>Total USD</TableCell>
                     <TableCell align="right" sx={{ width: 80 }}>Retiros</TableCell>
                     {!consumoEtapa && <TableCell>Etapas</TableCell>}
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {consumo.length === 0 && (
-                    <TableRow><TableCell colSpan={consumoEtapa ? 5 : 6}>
+                    <TableRow><TableCell colSpan={consumoEtapa ? 6 : 7}>
                       <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
                         Todavía no hay materiales cargados. Cargá un retiro con la foto del remito y leelo con IA.
                       </Typography>
@@ -2294,6 +2303,7 @@ export default function MaterialesPage() {
                       <TableCell>{m.material}</TableCell>
                       <TableCell align="right" sx={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmtNum0(m.cantidad)}</TableCell>
                       <TableCell sx={{ color: "text.secondary" }}>{m.unidad}</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 700, color: "#0F2A4A", fontVariantNumeric: "tabular-nums" }}>{m.totalUSD > 0 ? fmtMoney(m.totalUSD, "USD") : "—"}</TableCell>
                       <TableCell align="right" sx={{ color: "text.secondary" }}>{m.retiros}</TableCell>
                       {!consumoEtapa && (
                         <TableCell>
@@ -2306,6 +2316,17 @@ export default function MaterialesPage() {
                       )}
                     </TableRow>
                   ))}
+                  {consumo.length > 0 && (
+                    <TableRow>
+                      <TableCell />
+                      <TableCell sx={{ fontWeight: 800 }}>Total</TableCell>
+                      <TableCell />
+                      <TableCell />
+                      <TableCell align="right" sx={{ fontWeight: 800, color: "#0F2A4A", fontVariantNumeric: "tabular-nums" }}>{fmtMoney(consumoTotalUSD, "USD")}</TableCell>
+                      <TableCell />
+                      {!consumoEtapa && <TableCell />}
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
             </Box>
