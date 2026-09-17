@@ -17,6 +17,7 @@ import AttachFileIcon from "@mui/icons-material/AttachFile";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import FileDownloadIcon from "@mui/icons-material/FileDownload";
+import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
 import * as XLSX from "xlsx";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
@@ -269,10 +270,13 @@ export default function MaterialesPage() {
   const recuperosDe = (cuentaId) => recuperos.filter(r => r.cuenta_materiales_id === cuentaId);
   const anticiposDe = (cuentaId) => anticipos.filter(a => a.cuenta_id === cuentaId);
   // Anticipos "reales" (acopios) vs devoluciones a saldo (recupero acreditado en
-  // la cuenta). Ambos suman al anticipo total / saldo, pero se muestran y cuentan
-  // por separado.
-  const anticiposReales = (cuentaId) => anticiposDe(cuentaId).filter(a => !a.es_devolucion);
+  // la cuenta) vs traspasos de saldo entre cuentas. Todos suman/restan al
+  // anticipo total (saldo), pero se muestran y cuentan por separado. Los
+  // traspasos se excluyen de los "reales" para no ensuciar el TC ponderado, el
+  // FIFO de listas ni el detalle de acopios.
+  const anticiposReales = (cuentaId) => anticiposDe(cuentaId).filter(a => !a.es_devolucion && !a.es_traspaso);
   const devolucionesDe = (cuentaId) => anticiposDe(cuentaId).filter(a => a.es_devolucion);
+  const traspasosDe = (cuentaId) => anticiposDe(cuentaId).filter(a => a.es_traspaso);
 
   // ---- Valuación en USD (gasto real por etapa) ----
   // Cada anticipo congela su propio TC (lista nueva = nuevo acopio = nuevo TC).
@@ -470,10 +474,19 @@ export default function MaterialesPage() {
   };
 
   // ---- Anticipos (acopios sucesivos de una cuenta) ----
-  const [nuevoAnticipo, setNuevoAnticipo] = useState({}); // { [cuentaId]: { monto, fecha } }
+  // "Sumar plata a un acopio": carga manual de un anticipo desde Materiales
+  // (sin pasar por Caja). El formulario se abre/cierra por cuenta.
+  const [nuevoAnticipo, setNuevoAnticipo] = useState({}); // { [cuentaId]: { monto, tc, fecha, descripcion, remito_nro } }
+  const [antForm, setAntForm] = useState(null); // cuentaId con el formulario de acopio abierto
   const [editAnt, setEditAnt] = useState(null); // anticipo en edición
   const setAnt = (cuentaId, patch) =>
-    setNuevoAnticipo(prev => ({ ...prev, [cuentaId]: { monto: "", tc: "", fecha: hoyISO(), ...prev[cuentaId], ...patch } }));
+    setNuevoAnticipo(prev => ({ ...prev, [cuentaId]: { monto: "", tc: "", fecha: hoyISO(), descripcion: "", remito_nro: "", ...prev[cuentaId], ...patch } }));
+  const emptyAnt = () => ({ monto: "", tc: "", fecha: hoyISO(), descripcion: "", remito_nro: "" });
+  const openAntForm = (cuentaId) => {
+    setEditAnt(null);
+    setNuevoAnticipo(prev => ({ ...prev, [cuentaId]: emptyAnt() }));
+    setAntForm(cuentaId);
+  };
   const addAnticipo = async (cuentaId) => {
     const f = nuevoAnticipo[cuentaId] || {};
     const monto = Number(parseMiles(f.monto ?? "")) || 0;
@@ -481,31 +494,118 @@ export default function MaterialesPage() {
     const c = cuentas.find(x => x.id === cuentaId);
     const tc = Number(parseMiles(f.tc ?? "")) || 0;
     if (esARS(c) && tc <= 0) { alert("Ingresá el tipo de cambio del acopio (ARS por 1 USD)."); return; }
-    const datos = { monto, fecha: f.fecha || hoyISO(), tipo_cambio: esARS(c) ? tc : null };
+    const datos = {
+      monto, fecha: f.fecha || hoyISO(), tipo_cambio: esARS(c) ? tc : null,
+      remito_nro: (f.remito_nro || "").trim() || null,
+      descripcion: (f.descripcion || "").trim() || "Acopio (carga manual)",
+    };
     const editing = editAnt && editAnt.cuenta_id === cuentaId;
     const { error } = editing
       ? await supabase.from("anticipos_materiales").update(datos).eq("id", editAnt.id)
       : await supabase.from("anticipos_materiales").insert({ cuenta_id: cuentaId, ...datos });
     if (error) { alert(error.message); return; }
     setEditAnt(null);
-    setNuevoAnticipo(prev => ({ ...prev, [cuentaId]: { monto: "", tc: "", fecha: hoyISO() } }));
+    setAntForm(null);
+    setNuevoAnticipo(prev => ({ ...prev, [cuentaId]: emptyAnt() }));
     reload();
   };
   const startEditAnticipo = (a) => {
     setEditAnt(a);
+    setAntForm(a.cuenta_id);
     setNuevoAnticipo(prev => ({ ...prev, [a.cuenta_id]: {
       monto: a.monto != null ? String(a.monto) : "",
       tc: a.tipo_cambio != null ? String(a.tipo_cambio) : "",
       fecha: a.fecha || hoyISO(),
+      descripcion: a.descripcion && a.descripcion !== "Acopio (carga manual)" ? a.descripcion : "",
+      remito_nro: a.remito_nro ?? "",
     } }));
   };
   const cancelEditAnticipo = (cuentaId) => {
     setEditAnt(null);
-    setNuevoAnticipo(prev => ({ ...prev, [cuentaId]: { monto: "", tc: "", fecha: hoyISO() } }));
+    setAntForm(null);
+    setNuevoAnticipo(prev => ({ ...prev, [cuentaId]: emptyAnt() }));
   };
   const delAnticipo = async (a) => {
     if (!confirm("¿Eliminar este anticipo?")) return;
     const { error } = await supabase.from("anticipos_materiales").delete().eq("id", a.id);
+    if (error) alert(error.message); else reload();
+  };
+
+  // ---- Traspaso de saldo entre acopios (cuentas) ----
+  // Pasa plata del saldo de una cuenta ORIGEN a una cuenta DESTINO (mismo tipo
+  // de moneda). Se registra como un par de anticipos: -monto en el origen y
+  // +monto en el destino, vinculados por traspaso_grupo para poder deshacerlo.
+  // El "monto" arranca en el saldo disponible del origen, pero se puede editar
+  // (importe manual).
+  const [traspasoDlg, setTraspasoDlg] = useState(null); // { origenId, destinoId, monto, fecha, descripcion }
+  const [guardandoTraspaso, setGuardandoTraspaso] = useState(false);
+  const openTraspaso = (origenId) => {
+    const c = cuentas.find(x => x.id === origenId);
+    if (!c) return;
+    const saldo = calc(c).saldo;
+    setTraspasoDlg({
+      origenId,
+      destinoId: "",
+      monto: saldo > 0 ? String(Number(saldo.toFixed(2))) : "",
+      fecha: hoyISO(),
+      descripcion: "",
+    });
+  };
+  const setTraspaso = (patch) => setTraspasoDlg(prev => prev && ({ ...prev, ...patch }));
+  const saveTraspaso = async () => {
+    const d = traspasoDlg;
+    if (!d) return;
+    const origen = cuentas.find(x => x.id === d.origenId);
+    const destino = cuentas.find(x => x.id === d.destinoId);
+    if (!destino) { alert("Elegí la cuenta destino del traspaso."); return; }
+    if (d.origenId === d.destinoId) { alert("El origen y el destino deben ser cuentas distintas."); return; }
+    if ((origen?.moneda || "ARS") !== (destino?.moneda || "ARS")) {
+      alert("El traspaso sólo puede hacerse entre cuentas de la misma moneda.");
+      return;
+    }
+    const monto = Number(parseMiles(d.monto ?? "")) || 0;
+    if (monto <= 0) { alert("Ingresá el monto a traspasar."); return; }
+    const saldoOrigen = calc(origen).saldo;
+    if (monto - saldoOrigen > 0.005 &&
+      !confirm(`El monto (${fmtMoney(monto, origen.moneda)}) supera el saldo disponible del origen (${fmtMoney(saldoOrigen, origen.moneda)}). El origen quedará con saldo negativo. ¿Continuar?`)) {
+      return;
+    }
+    setGuardandoTraspaso(true);
+    try {
+      const grupo = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : undefined;
+      // El TC se propaga desde el origen (para que la conversión a USD siga
+      // teniendo referencia en cuentas ARS). Mismo TC en ambas puntas.
+      const tc = esARS(origen) ? tcDe(origen) : null;
+      const fecha = d.fecha || hoyISO();
+      const nota = (d.descripcion || "").trim();
+      const filas = [
+        {
+          cuenta_id: d.origenId, monto: -monto, fecha,
+          tipo_cambio: tc && tc > 0 ? Number(tc.toFixed(2)) : null,
+          es_traspaso: true, traspaso_cuenta_id: d.destinoId, traspaso_grupo: grupo,
+          descripcion: nota || `Traspaso a ${destino.proveedor}`,
+        },
+        {
+          cuenta_id: d.destinoId, monto: monto, fecha,
+          tipo_cambio: tc && tc > 0 ? Number(tc.toFixed(2)) : null,
+          es_traspaso: true, traspaso_cuenta_id: d.origenId, traspaso_grupo: grupo,
+          descripcion: nota || `Traspaso desde ${origen.proveedor}`,
+        },
+      ];
+      const { error } = await supabase.from("anticipos_materiales").insert(filas);
+      if (error) { alert(error.message); return; }
+      setTraspasoDlg(null);
+      reload();
+    } finally {
+      setGuardandoTraspaso(false);
+    }
+  };
+  const delTraspaso = async (a) => {
+    if (!confirm("¿Eliminar este traspaso? Se borra de las dos cuentas.")) return;
+    const q = a.traspaso_grupo
+      ? supabase.from("anticipos_materiales").delete().eq("traspaso_grupo", a.traspaso_grupo)
+      : supabase.from("anticipos_materiales").delete().eq("id", a.id);
+    const { error } = await q;
     if (error) alert(error.message); else reload();
   };
 
@@ -1228,15 +1328,20 @@ export default function MaterialesPage() {
   const ledgerDe = (cuentaId) => {
     const ents = [];
     for (const a of anticiposDe(cuentaId)) {
+      const otraCta = a.es_traspaso ? cuentas.find(x => x.id === a.traspaso_cuenta_id) : null;
       ents.push({
         id: "a_" + a.id, fecha: a.fecha, created_at: a.created_at,
-        tipo: a.es_devolucion ? "Devolución" : "Anticipo",
+        tipo: a.es_traspaso ? "Traspaso" : a.es_devolucion ? "Devolución" : "Anticipo",
         remito_nro: a.remito_nro || "",
-        detalle: a.es_devolucion
-          ? (Array.isArray(a.rec_items) && a.rec_items.length
-              ? a.rec_items.map(it => `${fmtNum0(it.cantidad)} ${it.unidad === "bolson" ? "bolsón/es" : "pallet/s"}`).join(", ")
-              : "Devolución a saldo")
-          : "Acopio / anticipo",
+        detalle: a.es_traspaso
+          ? (a.descripcion || (Number(a.monto || 0) >= 0
+              ? `Traspaso desde ${otraCta?.proveedor || "otra cuenta"}`
+              : `Traspaso a ${otraCta?.proveedor || "otra cuenta"}`))
+          : a.es_devolucion
+            ? (Array.isArray(a.rec_items) && a.rec_items.length
+                ? a.rec_items.map(it => `${fmtNum0(it.cantidad)} ${it.unidad === "bolson" ? "bolsón/es" : "pallet/s"}`).join(", ")
+                : "Devolución a saldo")
+            : "Acopio / anticipo",
         url: a.comprobante_url || null,
         delta: Number(a.monto || 0),
       });
@@ -1352,6 +1457,7 @@ export default function MaterialesPage() {
           const rs = retirosDe(c.id);
           const ant = anticiposReales(c.id);
           const devs = devolucionesDe(c.id);
+          const traspasos = traspasosDe(c.id);
           const na = nuevoAnticipo[c.id] || {};
           const nr = nuevoRetiro[c.id] || {};
           const pct = k.anticipado > 0 ? Math.min(100, (k.retirado / k.anticipado) * 100) : 0;
@@ -1408,10 +1514,69 @@ export default function MaterialesPage() {
                 {/* ===================== SECCIÓN 1: ANTICIPOS ===================== */}
                 <Section title="Anticipos / acopios" accent="#1E8E3E"
                   right={<Typography variant="caption" color="text.secondary">Total anticipado: <b>{fmtMoney(k.anticipado, c.moneda)}</b></Typography>}>
-                  {/* Los acopios se cargan desde Caja (egreso marcado como acopio). */}
+                  {/* Los acopios se cargan desde Caja o a mano acá mismo. */}
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                    Los acopios se registran desde <b>Caja</b> (egreso marcado como “acopio de materiales”). Acá ves los anticipos cargados.
+                    Los acopios se registran desde <b>Caja</b> (egreso marcado como “acopio de materiales”) o cargando plata a mano acá.
                   </Typography>
+
+                  {/* Acciones: sumar plata (acopio manual) y traspaso de saldo */}
+                  <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: "wrap", gap: 1 }}>
+                    <Button variant="contained" size="small" startIcon={<AddIcon />}
+                      sx={{ bgcolor: "#1E8E3E", "&:hover": { bgcolor: "#176b2f" } }}
+                      onClick={() => (antForm === c.id ? cancelEditAnticipo(c.id) : openAntForm(c.id))}>
+                      Sumar plata
+                    </Button>
+                    <Button variant="outlined" size="small" color="success" startIcon={<SwapHorizIcon />}
+                      disabled={cuentas.length < 2}
+                      onClick={() => openTraspaso(c.id)}>
+                      Traspaso de saldo
+                    </Button>
+                  </Stack>
+
+                  {/* Formulario de acopio manual */}
+                  {antForm === c.id && (
+                    <Box sx={{ mb: 1.5, p: 1.5, border: "1px solid", borderColor: "rgba(30,142,62,0.35)", borderRadius: 1.5, bgcolor: "rgba(30,142,62,0.04)" }}>
+                      <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                        {editAnt && editAnt.cuenta_id === c.id ? "Editar acopio" : "Sumar plata al acopio"}
+                      </Typography>
+                      <Grid container spacing={1.5} alignItems="center">
+                        <Grid item xs={6} sm={2.5}>
+                          <TextField type="date" label="Fecha" InputLabelProps={{ shrink: true }} fullWidth size="small"
+                            value={na.fecha ?? hoyISO()} onChange={(e) => setAnt(c.id, { fecha: e.target.value })} />
+                        </Grid>
+                        <Grid item xs={6} sm={2.5}>
+                          <TextField label={`Monto (${c.moneda})`} fullWidth size="small"
+                            inputProps={{ inputMode: "decimal" }}
+                            value={fmtMiles(na.monto ?? "")}
+                            onChange={(e) => setAnt(c.id, { monto: parseMiles(e.target.value) })} />
+                        </Grid>
+                        {esARS(c) && (
+                          <Grid item xs={6} sm={2}>
+                            <TextField label="TC (ARS/USD)" fullWidth size="small"
+                              inputProps={{ inputMode: "decimal" }}
+                              value={fmtMiles(na.tc ?? "")}
+                              onChange={(e) => setAnt(c.id, { tc: parseMiles(e.target.value) })} />
+                          </Grid>
+                        )}
+                        <Grid item xs={6} sm={2}>
+                          <TextField label="Remito Nº" fullWidth size="small"
+                            value={na.remito_nro ?? ""} onChange={(e) => setAnt(c.id, { remito_nro: e.target.value })} />
+                        </Grid>
+                        <Grid item xs={12} sm={esARS(c) ? 3 : 5}>
+                          <TextField label="Detalle" fullWidth size="small"
+                            value={na.descripcion ?? ""} onChange={(e) => setAnt(c.id, { descripcion: e.target.value })} />
+                        </Grid>
+                      </Grid>
+                      <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+                        <Button variant="contained" size="small" sx={{ bgcolor: "#1E8E3E", "&:hover": { bgcolor: "#176b2f" } }}
+                          onClick={() => addAnticipo(c.id)}>
+                          {editAnt && editAnt.cuenta_id === c.id ? "Guardar" : "Agregar"}
+                        </Button>
+                        <Button size="small" onClick={() => cancelEditAnticipo(c.id)}>Cancelar</Button>
+                      </Stack>
+                    </Box>
+                  )}
+
                   {/* Detalle de anticipos abajo (por fecha) */}
                   {ant.length > 0 && (
                     <Box sx={{ mt: 1.5 }}>
@@ -1446,14 +1611,57 @@ export default function MaterialesPage() {
                                 <Chip size="small" variant="outlined" label="Caja" sx={{ height: 22 }} />
                               </Tooltip>
                             ) : (
-                              <Tooltip title="Eliminar anticipo"><span>
-                                <IconButton size="small" onClick={() => delAnticipo(a)}>
-                                  <DeleteOutlineIcon fontSize="small" />
-                                </IconButton>
-                              </span></Tooltip>
+                              <>
+                                <Tooltip title="Editar acopio"><span>
+                                  <IconButton size="small" onClick={() => startEditAnticipo(a)}>
+                                    <EditIcon fontSize="small" />
+                                  </IconButton>
+                                </span></Tooltip>
+                                <Tooltip title="Eliminar anticipo"><span>
+                                  <IconButton size="small" onClick={() => delAnticipo(a)}>
+                                    <DeleteOutlineIcon fontSize="small" />
+                                  </IconButton>
+                                </span></Tooltip>
+                              </>
                             )}
                           </Stack>
                         ))}
+                      </Stack>
+                    </Box>
+                  )}
+
+                  {/* Traspasos de saldo (entradas + / salidas −) */}
+                  {traspasos.length > 0 && (
+                    <Box sx={{ mt: 1.5 }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5, fontWeight: 600 }}>
+                        Traspasos de saldo
+                      </Typography>
+                      <Stack>
+                        {traspasos.map((a) => {
+                          const entra = Number(a.monto || 0) >= 0;
+                          const otra = cuentas.find(x => x.id === a.traspaso_cuenta_id);
+                          return (
+                            <Stack key={a.id} direction="row" alignItems="center" spacing={1}
+                              sx={{ px: 0.5, py: 0.5, borderTop: "1px solid", borderColor: "rgba(15,42,74,0.06)" }}>
+                              <Typography variant="body2" sx={{ width: 120, whiteSpace: "nowrap" }}>{a.fecha ? fmtDate(a.fecha) : "—"}</Typography>
+                              <Stack sx={{ flex: 1 }}>
+                                <Typography variant="body2" sx={{ fontWeight: 600, color: entra ? "#1E8E3E" : "#C0392B" }}>
+                                  {entra ? "+" : "−"}{fmtMoney(Math.abs(Number(a.monto || 0)), c.moneda)}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {entra ? "Desde" : "Hacia"} {otra?.proveedor || "otra cuenta"}
+                                </Typography>
+                              </Stack>
+                              <Chip size="small" variant="outlined" color={entra ? "success" : "error"}
+                                label={entra ? "Entrada" : "Salida"} sx={{ height: 22 }} />
+                              <Tooltip title="Eliminar traspaso (se borra de las dos cuentas)"><span>
+                                <IconButton size="small" onClick={() => delTraspaso(a)}>
+                                  <DeleteOutlineIcon fontSize="small" />
+                                </IconButton>
+                              </span></Tooltip>
+                            </Stack>
+                          );
+                        })}
                       </Stack>
                     </Box>
                   )}
@@ -2474,6 +2682,85 @@ export default function MaterialesPage() {
           ))}
         </Stack>
       )}
+
+      {/* Dialog: traspaso de saldo entre acopios (cuentas) */}
+      <Dialog open={!!traspasoDlg} onClose={() => setTraspasoDlg(null)} fullWidth maxWidth="sm" fullScreen={fullScreen}>
+        {traspasoDlg && (() => {
+          const origen = cuentas.find(x => x.id === traspasoDlg.origenId);
+          if (!origen) return null;
+          const saldoOrigen = calc(origen).saldo;
+          // Destinos posibles: otras cuentas de la MISMA moneda.
+          const destinos = cuentas.filter(x => x.id !== origen.id && (x.moneda || "ARS") === (origen.moneda || "ARS"));
+          const destino = cuentas.find(x => x.id === traspasoDlg.destinoId);
+          const monto = Number(parseMiles(traspasoDlg.monto ?? "")) || 0;
+          return (
+            <>
+              <DialogTitle>Traspaso de saldo · {origen.proveedor}</DialogTitle>
+              <DialogContent dividers>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
+                  Saldo disponible en <b>{origen.proveedor}</b>: <b>{fmtMoney(saldoOrigen, origen.moneda)}</b>.
+                  Pasá parte (o todo) a otra cuenta de la misma moneda, o cargá un importe manual.
+                </Typography>
+                {destinos.length === 0 ? (
+                  <Alert severity="info">No hay otra cuenta en <b>{origen.moneda}</b> para recibir el traspaso.</Alert>
+                ) : (
+                  <Grid container spacing={1.5}>
+                    <Grid item xs={12} sm={6}>
+                      <TextField select label="Cuenta destino" fullWidth size="small"
+                        value={traspasoDlg.destinoId}
+                        onChange={(e) => setTraspaso({ destinoId: e.target.value })}>
+                        <MenuItem value="">— Elegí —</MenuItem>
+                        {destinos.map(d => (
+                          <MenuItem key={d.id} value={d.id}>{d.proveedor} ({fmtMoney(calc(d).saldo, d.moneda)})</MenuItem>
+                        ))}
+                      </TextField>
+                    </Grid>
+                    <Grid item xs={6} sm={3}>
+                      <TextField type="date" label="Fecha" InputLabelProps={{ shrink: true }} fullWidth size="small"
+                        value={traspasoDlg.fecha ?? hoyISO()} onChange={(e) => setTraspaso({ fecha: e.target.value })} />
+                    </Grid>
+                    <Grid item xs={6} sm={3}>
+                      <TextField label={`Monto (${origen.moneda})`} fullWidth size="small"
+                        inputProps={{ inputMode: "decimal" }}
+                        value={fmtMiles(traspasoDlg.monto ?? "")}
+                        onChange={(e) => setTraspaso({ monto: parseMiles(e.target.value) })} />
+                    </Grid>
+                    <Grid item xs={12}>
+                      <TextField label="Detalle (opcional)" fullWidth size="small"
+                        value={traspasoDlg.descripcion ?? ""}
+                        onChange={(e) => setTraspaso({ descripcion: e.target.value })} />
+                    </Grid>
+                    {monto > saldoOrigen + 0.005 && (
+                      <Grid item xs={12}>
+                        <Alert severity="warning" sx={{ py: 0.5 }}>
+                          El monto supera el saldo disponible; <b>{origen.proveedor}</b> quedará con saldo negativo.
+                        </Alert>
+                      </Grid>
+                    )}
+                    {destino && monto > 0 && (
+                      <Grid item xs={12}>
+                        <Typography variant="caption" color="text.secondary">
+                          {origen.proveedor} <b style={{ color: "#C0392B" }}>−{fmtMoney(monto, origen.moneda)}</b>
+                          {"  →  "}
+                          {destino.proveedor} <b style={{ color: "#1E8E3E" }}>+{fmtMoney(monto, destino.moneda)}</b>
+                        </Typography>
+                      </Grid>
+                    )}
+                  </Grid>
+                )}
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setTraspasoDlg(null)}>Cancelar</Button>
+                <Button variant="contained" color="success"
+                  disabled={destinos.length === 0 || !traspasoDlg.destinoId || monto <= 0 || guardandoTraspaso}
+                  onClick={saveTraspaso}>
+                  {guardandoTraspaso ? "Guardando…" : "Traspasar"}
+                </Button>
+              </DialogActions>
+            </>
+          );
+        })()}
+      </Dialog>
 
       {/* Dialog: lista de precios de un acopio (anticipo) */}
       <Dialog open={!!listaDlg} onClose={() => setListaDlg(null)} fullWidth maxWidth="md" fullScreen={fullScreen}>
