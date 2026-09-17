@@ -91,6 +91,8 @@ const emptyMov = {
   recupero_bolsones: "",
   // Egreso marcado como acopio de materiales (genera el anticipo en Materiales)
   anticipo_materiales: false,
+  acopio_modo: "nuevo", // "nuevo" (acopio nuevo) | "existente" (suma a un acopio ya cargado)
+  acopio_padre_id: "",  // acopio (anticipo) al que se suma la plata cuando el modo es "existente"
   acopio_tc: "",       // TC del acopio (ARS por 1 USD) si la cuenta es ARS
   acopio_remito: "",   // Nº de remito del acopio
 };
@@ -119,6 +121,7 @@ export default function CajaPage() {
   const [hitos, setHitos] = useState([]);
   const [conceptos, setConceptos] = useState([]);
   const [cuentasMateriales, setCuentasMateriales] = useState([]);
+  const [acopios, setAcopios] = useState([]); // anticipos "padre" (para sumar a un acopio existente)
   const [loading, setLoading] = useState(true);
 
   // Dialog principal (crear / editar mov)
@@ -157,6 +160,20 @@ export default function CajaPage() {
     setHitos((r8.data ?? []).map(h => h.nombre));
     setConceptos(r9.data ?? []);
     setCuentasMateriales(r10.data ?? []);
+    // Acopios (anticipos "padre") de las cuentas del proyecto, para poder sumar
+    // plata a un acopio existente desde Caja. Excluyo devoluciones a saldo y las
+    // filas hijas (que ya son sumas a un padre).
+    const ctaIds = (r10.data ?? []).map(c => c.id);
+    if (ctaIds.length) {
+      const { data: acs } = await supabase
+        .from("anticipos_materiales")
+        .select("id,cuenta_id,monto,fecha,tipo_cambio,acopio_nro,remito_nro,es_devolucion,acopio_padre_id")
+        .in("cuenta_id", ctaIds)
+        .order("fecha", { ascending: true });
+      setAcopios((acs ?? []).filter(a => !a.es_devolucion && !a.acopio_padre_id));
+    } else {
+      setAcopios([]);
+    }
     // index items por presupuesto
     const idx = {};
     for (const it of (r7.data ?? [])) {
@@ -484,6 +501,8 @@ export default function CajaPage() {
       recupero_pallets: mv.recupero_pallets ?? "",
       recupero_bolsones: mv.recupero_bolsones ?? "",
       anticipo_materiales: !!mv.anticipo_materiales,
+      acopio_modo: "nuevo",
+      acopio_padre_id: "",
       acopio_tc: "",
       acopio_remito: "",
     });
@@ -491,15 +510,18 @@ export default function CajaPage() {
     setKeepCompPath(mv.comprobante_url ?? null);
     setFile(null); setErr(null);
     setDetail(null);
-    // Si es un acopio, traigo el TC y remito del anticipo vinculado.
+    // Si es un acopio, traigo el TC, remito y (si suma a un acopio existente) el
+    // acopio padre del anticipo vinculado.
     if (mv.tipo === "egreso" && mv.anticipo_materiales) {
       supabase.from("anticipos_materiales")
-        .select("tipo_cambio, remito_nro").eq("movimiento_id", mv.id).limit(1)
+        .select("tipo_cambio, remito_nro, acopio_padre_id").eq("movimiento_id", mv.id).limit(1)
         .then(({ data }) => {
           const a = data?.[0];
           if (a) setForm(prev => ({ ...prev,
             acopio_tc: a.tipo_cambio != null ? String(a.tipo_cambio) : "",
-            acopio_remito: a.remito_nro ?? "" }));
+            acopio_remito: a.remito_nro ?? "",
+            acopio_modo: a.acopio_padre_id ? "existente" : "nuevo",
+            acopio_padre_id: a.acopio_padre_id ?? "" }));
         });
     }
     // Cargo las imputaciones existentes del movimiento
@@ -562,7 +584,11 @@ export default function CajaPage() {
       }
       if (form.tipo === "egreso" && form.anticipo_materiales) {
         if (!form.cuenta_materiales_id) { setErr("Elegí la cuenta de materiales del acopio."); return; }
-        if (form.moneda === "ARS" && !(Number(form.acopio_tc) > 0)) { setErr("Ingresá el tipo de cambio del acopio."); return; }
+        if (form.acopio_modo === "existente") {
+          if (!form.acopio_padre_id) { setErr("Elegí el acopio al que se suma la plata."); return; }
+        } else if (form.moneda === "ARS" && !(Number(form.acopio_tc) > 0)) {
+          setErr("Ingresá el tipo de cambio del acopio."); return;
+        }
       }
       if (form.tipo === "egreso" && form.con_cambio) {
         if (form.cambio_moneda_origen === form.moneda) { setErr("La caja origen del cambio debe ser distinta de la caja del gasto."); return; }
@@ -698,14 +724,21 @@ export default function CajaPage() {
     // Sincronizo el anticipo de materiales vinculado (acopio).
     if (form.tipo === "egreso" && movId) {
       if (form.anticipo_materiales) {
+        // Acopio existente: la plata se suma a un acopio (anticipo) ya cargado.
+        // La fila hija hereda el TC del acopio padre y no lleva lista propia.
+        const sumaExistente = form.acopio_modo === "existente" && form.acopio_padre_id;
+        const padre = sumaExistente ? acopios.find(a => a.id === form.acopio_padre_id) : null;
         const datosAnt = {
           cuenta_id: form.cuenta_materiales_id,
           monto: monto,
           fecha: form.fecha || null,
-          tipo_cambio: form.moneda === "ARS" ? (Number(form.acopio_tc) > 0 ? Number(form.acopio_tc) : null) : null,
+          tipo_cambio: sumaExistente
+            ? (padre?.tipo_cambio ?? null)
+            : (form.moneda === "ARS" ? (Number(form.acopio_tc) > 0 ? Number(form.acopio_tc) : null) : null),
           remito_nro: (form.acopio_remito || "").trim() || null,
-          descripcion: "Acopio (desde Caja)",
+          descripcion: sumaExistente ? "Acopio (suma desde Caja)" : "Acopio (desde Caja)",
           es_devolucion: false,
+          acopio_padre_id: sumaExistente ? form.acopio_padre_id : null,
           movimiento_id: movId,
         };
         const ya = await supabase.from("anticipos_materiales").select("id").eq("movimiento_id", movId).limit(1);
@@ -1433,12 +1466,19 @@ export default function CajaPage() {
                       }
                       sx={{ alignItems: "flex-start", m: 0 }}
                     />
-                    {form.anticipo_materiales && (
+                    {form.anticipo_materiales && (() => {
+                      const acopiosCta = acopios.filter(a => a.cuenta_id === form.cuenta_materiales_id);
+                      const padreSel = acopios.find(a => a.id === form.acopio_padre_id);
+                      const acopioLabel = (a) => {
+                        const ref = a.acopio_nro ? `Acopio #${a.acopio_nro}` : (a.fecha ? fmtDate(a.fecha) : `#${String(a.id).slice(-4)}`);
+                        return `${ref} · ${fmtMoney(Number(a.monto || 0), form.moneda)}`;
+                      };
+                      return (
                       <Grid container spacing={2} sx={{ mt: 0.5 }}>
                         <Grid item xs={12} sm={6}>
                           <TextField select fullWidth label="Cuenta de materiales"
                             value={form.cuenta_materiales_id}
-                            onChange={(e) => setForm({ ...form, cuenta_materiales_id: e.target.value })}
+                            onChange={(e) => setForm({ ...form, cuenta_materiales_id: e.target.value, acopio_padre_id: "" })}
                             helperText={cuentasMateriales.filter(cm => cm.moneda === form.moneda).length === 0
                               ? `No hay cuentas en ${form.moneda}; creala en Materiales` : "Cuenta que recibe el acopio"}>
                             {cuentasMateriales.filter(cm => cm.moneda === form.moneda).length === 0 && <MenuItem value="" disabled>Sin cuentas en {form.moneda}</MenuItem>}
@@ -1447,21 +1487,71 @@ export default function CajaPage() {
                             ))}
                           </TextField>
                         </Grid>
-                        <Grid item xs={6} sm={3}>
-                          <TextField fullWidth label="Nº remito"
-                            value={form.acopio_remito}
-                            onChange={(e) => setForm({ ...form, acopio_remito: e.target.value })} />
+
+                        {/* ¿Acopio nuevo o sumar plata a un acopio existente? */}
+                        <Grid item xs={12}>
+                          <ToggleButtonGroup exclusive size="small" color="success"
+                            value={form.acopio_modo}
+                            onChange={(e, v) => { if (v) setForm({ ...form, acopio_modo: v, acopio_padre_id: v === "nuevo" ? "" : form.acopio_padre_id }); }}>
+                            <ToggleButton value="nuevo">Nuevo acopio</ToggleButton>
+                            <ToggleButton value="existente" disabled={acopiosCta.length === 0}>Acopio existente</ToggleButton>
+                          </ToggleButtonGroup>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+                            {form.acopio_modo === "existente"
+                              ? "La plata se suma a un acopio ya cargado (mismo N° y lista de precios)."
+                              : acopiosCta.length === 0 && form.cuenta_materiales_id
+                                ? "Esta cuenta todavía no tiene acopios; se creará el primero."
+                                : "Se crea un acopio nuevo en la cuenta."}
+                          </Typography>
                         </Grid>
-                        {form.moneda === "ARS" && (
-                          <Grid item xs={6} sm={3}>
-                            <TextField fullWidth type="number" label="TC del acopio"
-                              value={form.acopio_tc}
-                              onChange={(e) => setForm({ ...form, acopio_tc: e.target.value })}
-                              helperText={Number(form.acopio_tc) > 0 && monto > 0 ? `= ${fmtMoney(monto / Number(form.acopio_tc), "USD")}` : "ARS por 1 USD"} />
-                          </Grid>
+
+                        {form.acopio_modo === "existente" ? (
+                          <>
+                            <Grid item xs={12} sm={6}>
+                              <TextField select fullWidth label="Acopio a sumar"
+                                value={form.acopio_padre_id}
+                                onChange={(e) => setForm({ ...form, acopio_padre_id: e.target.value })}
+                                disabled={!form.cuenta_materiales_id}
+                                helperText={form.cuenta_materiales_id ? "Acopio que recibe la plata" : "Elegí primero la cuenta"}>
+                                {acopiosCta.length === 0 && <MenuItem value="" disabled>Sin acopios en esta cuenta</MenuItem>}
+                                {acopiosCta.map(a => (
+                                  <MenuItem key={a.id} value={a.id}>{acopioLabel(a)}</MenuItem>
+                                ))}
+                              </TextField>
+                            </Grid>
+                            <Grid item xs={6} sm={3}>
+                              <TextField fullWidth label="Nº remito"
+                                value={form.acopio_remito}
+                                onChange={(e) => setForm({ ...form, acopio_remito: e.target.value })} />
+                            </Grid>
+                            {form.moneda === "ARS" && padreSel && (
+                              <Grid item xs={6} sm={3}>
+                                <TextField fullWidth label="TC del acopio" disabled
+                                  value={padreSel.tipo_cambio != null ? String(padreSel.tipo_cambio) : ""}
+                                  helperText={Number(padreSel.tipo_cambio) > 0 && monto > 0 ? `= ${fmtMoney(monto / Number(padreSel.tipo_cambio), "USD")}` : "Heredado del acopio"} />
+                              </Grid>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <Grid item xs={6} sm={3}>
+                              <TextField fullWidth label="Nº remito"
+                                value={form.acopio_remito}
+                                onChange={(e) => setForm({ ...form, acopio_remito: e.target.value })} />
+                            </Grid>
+                            {form.moneda === "ARS" && (
+                              <Grid item xs={6} sm={3}>
+                                <TextField fullWidth type="number" label="TC del acopio"
+                                  value={form.acopio_tc}
+                                  onChange={(e) => setForm({ ...form, acopio_tc: e.target.value })}
+                                  helperText={Number(form.acopio_tc) > 0 && monto > 0 ? `= ${fmtMoney(monto / Number(form.acopio_tc), "USD")}` : "ARS por 1 USD"} />
+                              </Grid>
+                            )}
+                          </>
                         )}
                       </Grid>
-                    )}
+                      );
+                    })()}
                   </Box>
                 </Grid>
               )}
