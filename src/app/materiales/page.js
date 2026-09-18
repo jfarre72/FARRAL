@@ -201,6 +201,24 @@ const parseMiles = (val) => {
   }
   return (neg ? "-" : "") + s;
 };
+// Parser para el onChange de los inputs que muestran fmtMiles: el texto SIEMPRE
+// viene en formato AR (punto = separador de miles, coma = decimal), así que no
+// hay que adivinar. Descarta los puntos de miles y usa la coma como decimal.
+// Evita el bug de tipear "11.350" y que quede "1,1350": el punto nunca es
+// decimal en este contexto.
+const parseMilesInput = (val) => {
+  if (val === "" || val === null || val === undefined) return "";
+  let s = String(val).replace(/[^\d,-]/g, ""); // saca puntos de miles y basura
+  if (s === "" || s === "-") return s;
+  const neg = s.startsWith("-");
+  s = s.replace(/-/g, "");
+  const i = s.indexOf(",");
+  if (i >= 0) {
+    // Primera coma = decimal; comas siguientes se ignoran.
+    s = s.slice(0, i).replace(/,/g, "") + "." + s.slice(i + 1).replace(/,/g, "");
+  }
+  return (neg ? "-" : "") + s;
+};
 
 export default function MaterialesPage() {
   const { proyecto } = useProjects();
@@ -1096,10 +1114,8 @@ export default function MaterialesPage() {
     const f = nuevoRetiro[cuentaId] || {};
     const monto = Number(f.monto || 0);
     if (!monto || monto <= 0) { alert("Ingresá el monto del retiro."); return; }
-    // Foto del remito OBLIGATORIA: al menos una foto nueva, o (en edición) la ya cargada.
-    const editingNow = editRet && editRet.cuenta_id === cuentaId;
-    const tieneFoto = !!f.file || (editingNow && !!editRet.remito_url);
-    if (!tieneFoto) { alert("La foto del remito es obligatoria para cargar un retiro."); return; }
+    // La foto del remito es OPCIONAL: a veces se carga el retiro sin tener el
+    // remito a mano. Se puede adjuntar después editando el retiro.
     setSubiendo(cuentaId);
     try {
       let remito_url = null, remito_path = null;
@@ -1509,7 +1525,7 @@ export default function MaterialesPage() {
                       <TextField label={`Monto (${c.moneda})`} fullWidth size="small"
                         inputProps={{ inputMode: "decimal" }}
                         value={fmtMiles(nr.monto ?? "")}
-                        onChange={(e) => setRet(c.id, { monto: parseMiles(e.target.value) })} />
+                        onChange={(e) => setRet(c.id, { monto: parseMilesInput(e.target.value) })} />
                     </Grid>
                     <Grid item xs={6} sm={2}>
                       <TextField label="Remito Nº" fullWidth size="small"
@@ -1520,10 +1536,9 @@ export default function MaterialesPage() {
                         value={nr.descripcion ?? ""} onChange={(e) => setRet(c.id, { descripcion: e.target.value })} />
                     </Grid>
                     <Grid item xs={8} sm={2}>
-                      <Button component="label" variant={nr.file || (editRet?.cuenta_id === c.id && editRet?.remito_url) ? "outlined" : "contained"}
-                        color={nr.file || (editRet?.cuenta_id === c.id && editRet?.remito_url) ? "primary" : "error"}
+                      <Button component="label" variant="outlined" color="primary"
                         startIcon={<AttachFileIcon />} fullWidth size="small" sx={{ overflow: "hidden" }}>
-                        {nr.file ? nr.file.name : (editRet?.cuenta_id === c.id && editRet?.remito_url ? "Cambiar foto" : "Foto remito *")}
+                        {nr.file ? nr.file.name : (editRet?.cuenta_id === c.id && editRet?.remito_url ? "Cambiar foto" : "Foto remito (opcional)")}
                         <input hidden type="file" accept="image/*,application/pdf"
                           onChange={(e) => setRet(c.id, { file: e.target.files?.[0] ?? null })} />
                       </Button>
@@ -1542,7 +1557,7 @@ export default function MaterialesPage() {
                         <TextField label="TC del retiro (ARS/USD)" fullWidth size="small"
                           inputProps={{ inputMode: "decimal" }}
                           value={fmtMiles(nr.tc ?? (ultimoTcDe(c.id) ? String(ultimoTcDe(c.id)) : ""))}
-                          onChange={(e) => setRet(c.id, { tc: parseMiles(e.target.value) })}
+                          onChange={(e) => setRet(c.id, { tc: parseMilesInput(e.target.value) })}
                           helperText="Dólar del acopio del que sale" />
                       </Grid>
                     )}
@@ -1629,7 +1644,7 @@ export default function MaterialesPage() {
                                   <TextField label={`Precio unitario (${c.moneda})`} fullWidth size="small"
                                     inputProps={{ inputMode: "decimal" }}
                                     value={fmtMiles(it.precio ?? "")}
-                                    onChange={(e) => setRecItem(c.id, idx, { precio: parseMiles(e.target.value) })} />
+                                    onChange={(e) => setRecItem(c.id, idx, { precio: parseMilesInput(e.target.value) })} />
                                 </Grid>
                                 <Grid item xs={10} sm={3}>
                                   <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5, display: "block" }}>
@@ -1785,7 +1800,7 @@ export default function MaterialesPage() {
                             </Grid>
                             <Grid item xs={4} sm={2}>
                               <TextField label={`Precio (${c.moneda})`} fullWidth size="small" inputProps={{ inputMode: "decimal" }}
-                                value={fmtMiles(it.precio ?? "")} onChange={(e) => setMatItem(c.id, idx, { precio: parseMiles(e.target.value) })} />
+                                value={fmtMiles(it.precio ?? "")} onChange={(e) => setMatItem(c.id, idx, { precio: parseMilesInput(e.target.value) })} />
                             </Grid>
                             <Grid item xs={8} sm={9}>
                               <Typography variant="caption" color="text.secondary">
@@ -2011,7 +2026,7 @@ export default function MaterialesPage() {
                                   <TextField label={`Precio unitario (${c.moneda})`} fullWidth size="small"
                                     inputProps={{ inputMode: "decimal" }}
                                     value={fmtMiles(it.precio ?? "")}
-                                    onChange={(e) => setDevItem(c.id, idx, { precio: parseMiles(e.target.value) })} />
+                                    onChange={(e) => setDevItem(c.id, idx, { precio: parseMilesInput(e.target.value) })} />
                                 </Grid>
                                 <Grid item xs={10} sm={3}>
                                   <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", fontSize: 10, letterSpacing: 0.5, display: "block" }}>
@@ -2574,7 +2589,7 @@ export default function MaterialesPage() {
                             </TableCell>
                             <TableCell align="right">
                               <TextField variant="standard" size="small" fullWidth inputProps={{ inputMode: "decimal", style: { textAlign: "right" } }}
-                                value={fmtMiles(it.precio_bruto ?? "")} onChange={(e) => setListaItem(idx, { precio_bruto: parseMiles(e.target.value) })} />
+                                value={fmtMiles(it.precio_bruto ?? "")} onChange={(e) => setListaItem(idx, { precio_bruto: parseMilesInput(e.target.value) })} />
                             </TableCell>
                             <TableCell align="right">
                               <TextField variant="standard" size="small" fullWidth inputProps={{ inputMode: "decimal", style: { textAlign: "right" } }}
