@@ -723,10 +723,8 @@ export default function PresupuestosPage() {
                       <TableCell>Contratista</TableCell>
                       <TableCell align="right">Presupuestos</TableCell>
                       <TableCell align="right">Total</TableCell>
-                      <TableCell align="right">Avance valorizado</TableCell>
                       <TableCell align="right">Pagado</TableCell>
                       <TableCell align="right">Saldo</TableCell>
-                      <TableCell align="right">Avance − Pagado</TableCell>
                       <TableCell align="right"></TableCell>
                     </TableRow>
                   </TableHead>
@@ -745,15 +743,8 @@ export default function PresupuestosPage() {
                         </TableCell>
                         <TableCell align="right">{c.nPres}</TableCell>
                         <TableCell align="right">{fmtNum(c.tot, 0)}</TableCell>
-                        <TableCell align="right">{fmtNum(c.valAvance, 0)}</TableCell>
                         <TableCell align="right">{fmtNum(c.pagado, 0)}</TableCell>
                         <TableCell align="right">{fmtNum(c.saldo, 0)}</TableCell>
-                        <TableCell align="right">
-                          <Typography component="span" fontWeight={600}
-                            color={c.dif > 0 ? "success.main" : c.dif < 0 ? "error.main" : "text.primary"}>
-                            {fmtNum(c.dif, 0)}
-                          </Typography>
-                        </TableCell>
                         <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                           <Tooltip title="Imprimir / PDF">
                             <IconButton size="small" onClick={() => imprimir(htmlPagosContratista(c), `Contratista - ${c.nombre}`)}>
