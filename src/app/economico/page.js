@@ -56,8 +56,20 @@ function Barra({ pct }) {
   );
 }
 
-function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick }) {
+// Color de una diferencia (plan − real): negativa = sobrecosto.
+const colorDif = (v) => (v < 0 ? "error.main" : "success.main");
+
+function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick, acumulada = false }) {
   const pctTot = totalPlan > 0 ? (totalReal / totalPlan) * 100 : null;
+  // Diferencia acumulada (plan − real), en orden, sumando solo las filas
+  // completas (etapas al 100% en Planificación).
+  let acc = 0;
+  const difAcum = filas.map(f => {
+    if (!f.completa) return null;
+    acc += f.plan - f.real;
+    return acc;
+  });
+  const hayCompletas = difAcum.some(v => v != null);
   return (
     <Card>
       <CardContent>
@@ -75,12 +87,13 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick }) {
                 <TableCell align="right">Real (USD)</TableCell>
                 <TableCell align="right">% del real</TableCell>
                 <TableCell align="right">Diferencia (USD)</TableCell>
+                {acumulada && <TableCell align="right">Dif. acumulada (USD)</TableCell>}
                 <TableCell align="right">%</TableCell>
                 <TableCell sx={{ width: 140 }}>Avance</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {filas.map((f) => {
+              {filas.map((f, i) => {
                 const pct = f.plan > 0 ? (f.real / f.plan) * 100 : null;
                 const pctPlan = totalPlan > 0 ? (f.plan / totalPlan) * 100 : null;
                 const pctReal = totalReal > 0 ? (f.real / totalReal) * 100 : null;
@@ -110,6 +123,13 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick }) {
                         {fmtMoney(f.plan - f.real, "USD")}
                       </Typography>
                     </TableCell>
+                    {acumulada && (
+                      <TableCell align="right">
+                        {difAcum[i] != null
+                          ? <Typography variant="body2" color={colorDif(difAcum[i])}>{fmtMoney(difAcum[i], "USD")}</Typography>
+                          : <Typography variant="body2" color="text.secondary">—</Typography>}
+                      </TableCell>
+                    )}
                     <TableCell align="right">
                       <Typography variant="body2" color={pct != null && pct > 100 ? "error.main" : "text.primary"}>
                         {pct != null ? fmtPct(pct, 0) : "—"}
@@ -126,12 +146,25 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick }) {
                 <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totalReal, "USD")}</Typography></TableCell>
                 <TableCell align="right"><Typography fontWeight={700}>{totalReal > 0 ? "100%" : "—"}</Typography></TableCell>
                 <TableCell align="right"><Typography fontWeight={700} color={(totalPlan - totalReal) < 0 ? "error.main" : "success.main"}>{fmtMoney(totalPlan - totalReal, "USD")}</Typography></TableCell>
+                {acumulada && (
+                  <TableCell align="right">
+                    {hayCompletas
+                      ? <Typography fontWeight={700} color={colorDif(acc)}>{fmtMoney(acc, "USD")}</Typography>
+                      : <Typography fontWeight={700} color="text.secondary">—</Typography>}
+                  </TableCell>
+                )}
                 <TableCell align="right"><Typography fontWeight={700}>{pctTot != null ? fmtPct(pctTot, 0) : "—"}</Typography></TableCell>
                 <TableCell><Barra pct={pctTot ?? 0} /></TableCell>
               </TableRow>
             </TableBody>
           </Table>
         </TableContainer>
+        {acumulada && (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
+            Dif. acumulada: suma, en orden, de la diferencia de las etapas completas al 100% en Planificación.
+            Las etapas sin completar no acumulan (—).
+          </Typography>
+        )}
       </CardContent>
     </Card>
   );
@@ -142,6 +175,8 @@ export default function EconomicoPage() {
   const cacheInit = getCache("economico", proyecto?.id);
   const [conceptos, setConceptos] = useState(cacheInit?.conceptos ?? []);
   const [hitos, setHitos] = useState(cacheInit?.hitos ?? []);
+  // Tareas de Planificación: definen qué etapas están completas (100%).
+  const [tareas, setTareas] = useState(cacheInit?.tareas ?? []);
   const [movs, setMovs] = useState(cacheInit?.movs ?? []);
   // Materiales de acopio: el consumo se imputa por etapa en los retiros (neto en USD).
   const [cuentasMat, setCuentasMat] = useState(cacheInit?.cuentasMat ?? []);
@@ -165,7 +200,12 @@ export default function EconomicoPage() {
       supabase.from("cuentas_materiales").select("id,proveedor,moneda").eq("proyecto_id", proyecto.id),
     ]);
     const matIds = (cm ?? []).map(c => c.id);
-    let am = [], rm = [];
+    const hitoIds = (hs ?? []).map(h => h.id);
+    let am = [], rm = [], ts = [];
+    if (hitoIds.length) {
+      const { data: t } = await supabase.from("hito_tareas").select("hito_id,avance,completado").in("hito_id", hitoIds);
+      ts = t ?? [];
+    }
     if (matIds.length) {
       const [{ data: a }, { data: r }] = await Promise.all([
         supabase.from("anticipos_materiales").select("cuenta_id,monto,tipo_cambio,es_devolucion").in("cuenta_id", matIds),
@@ -173,8 +213,8 @@ export default function EconomicoPage() {
       ]);
       am = a ?? []; rm = r ?? [];
     }
-    setCache("economico", proyecto.id, { conceptos: cs ?? [], hitos: hs ?? [], movs: mv ?? [], cuentasMat: cm ?? [], anticiposMat: am, retirosMat: rm });
-    setConceptos(cs ?? []); setHitos(hs ?? []); setMovs(mv ?? []);
+    setCache("economico", proyecto.id, { conceptos: cs ?? [], hitos: hs ?? [], tareas: ts, movs: mv ?? [], cuentasMat: cm ?? [], anticiposMat: am, retirosMat: rm });
+    setConceptos(cs ?? []); setHitos(hs ?? []); setTareas(ts); setMovs(mv ?? []);
     setCuentasMat(cm ?? []); setAnticiposMat(am); setRetirosMat(rm);
     setLoading(false);
   };
@@ -246,14 +286,23 @@ export default function EconomicoPage() {
     const totRealC = filasConcepto.reduce((s, f) => s + f.real, 0);
 
     // El real por etapa ya incluye el consumo de materiales (vía movsReal).
-    const filasEtapa = hitos.map(h => ({
+    // Una etapa está completa con el mismo criterio que Planificación: promedio
+    // de avance de sus tareas al 100% (o, sin tareas, marcada como completada).
+    const avanceT = (t) => (t.avance != null ? Number(t.avance) : (t.completado ? 100 : 0));
+    const completa = (h) => {
+      const ts = tareas.filter(t => t.hito_id === h.id);
+      if (ts.length > 0) return ts.reduce((s, t) => s + avanceT(t), 0) / ts.length >= 100;
+      return !!h.completado;
+    };
+    const filasEtapa = [...hitos].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0)).map(h => ({
       nombre: h.nombre, plan: Number(h.valor_plan || 0), real: realPorEtapa[h.nombre] || 0,
+      completa: completa(h),
     }));
     const totPlanE = filasEtapa.reduce((s, f) => s + f.plan, 0);
     const totRealE = filasEtapa.reduce((s, f) => s + f.real, 0);
 
     return { filasConcepto, totPlanC, totRealC, filasEtapa, totPlanE, totRealE };
-  }, [conceptos, hitos, movsReal]);
+  }, [conceptos, hitos, tareas, movsReal]);
 
   // Egresos que componen la fila seleccionada, con su USD imputado.
   const detalleGastos = useMemo(() => {
@@ -389,7 +438,7 @@ export default function EconomicoPage() {
           </Alert>
           <TablaSeguimiento titulo="Por concepto" filas={filasConcepto} totalPlan={totPlanC} totalReal={totRealC}
             onRowClick={(f) => setDetalle({ campo: "concepto", valor: f.nombre, otros: !!f.otros })} />
-          <TablaSeguimiento titulo="Por etapa (Obra)" filas={filasEtapa} totalPlan={totPlanE} totalReal={totRealE}
+          <TablaSeguimiento titulo="Por etapa (Obra)" filas={filasEtapa} totalPlan={totPlanE} totalReal={totRealE} acumulada
             onRowClick={(f) => setDetalle({ campo: "etapa", valor: f.nombre })} />
           <Typography variant="caption" color="text.secondary">
             El “real” se imputa siempre en USD: los gastos en USD por su monto, y los gastos en ARS convertidos por el
