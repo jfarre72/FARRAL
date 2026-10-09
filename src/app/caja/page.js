@@ -108,6 +108,7 @@ export default function CajaPage() {
   const [contratistas, setContratistas] = useState([]);
   const [presupuestos, setPresupuestos] = useState([]);
   const [itemsByPres, setItemsByPres] = useState({});
+  const [impsByItem, setImpsByItem] = useState({}); // { item_id: [{ movimiento_id, monto }] }
   // Imputación dentro del form de egreso
   const [imputarA, setImputarA] = useState(false);
   const [impContratistaId, setImpContratistaId] = useState("");
@@ -181,6 +182,19 @@ export default function CajaPage() {
       idx[it.presupuesto_id].push(it);
     }
     setItemsByPres(idx);
+    // Lo ya pagado por ítem (imputaciones existentes), para mostrar el faltante.
+    const allItemIds = (r7.data ?? []).map(it => it.id);
+    const impIdx = {};
+    if (allItemIds.length) {
+      const { data: imps } = await supabase.from("imputaciones_pago")
+        .select("item_id, monto, movimiento_id")
+        .in("item_id", allItemIds);
+      for (const r of (imps ?? [])) {
+        if (!impIdx[r.item_id]) impIdx[r.item_id] = [];
+        impIdx[r.item_id].push(r);
+      }
+    }
+    setImpsByItem(impIdx);
     setLoading(false);
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
@@ -1718,7 +1732,7 @@ export default function CajaPage() {
                         <Stack>
                           <Typography fontWeight={600}>Imputar este pago a un presupuesto</Typography>
                           <Typography variant="caption" color="text.secondary">
-                            Vincula este egreso a ítems de un presupuesto para llevar el pagado vs ejecutado.
+                            Vincula este egreso a ítems de un presupuesto para llevar el pagado vs presupuestado.
                           </Typography>
                         </Stack>
                       }
@@ -1773,38 +1787,36 @@ export default function CajaPage() {
                                   <TableRow>
                                     <TableCell>Ítem</TableCell>
                                     <TableCell align="right">Presupuestado</TableCell>
-                                    <TableCell align="right">Avance %</TableCell>
-                                    <TableCell align="right">Valor avance</TableCell>
+                                    <TableCell align="right">Pagado</TableCell>
+                                    <TableCell align="right">Faltante</TableCell>
                                     <TableCell align="right" sx={{ minWidth: 140 }}>Imputar</TableCell>
                                   </TableRow>
                                 </TableHead>
                                 <TableBody>
                                   {items.map(it => {
                                     const presup = Number(it.monto_presupuestado || 0);
-                                    const avanceActual = impAvances[it.id] !== undefined ? impAvances[it.id] : it.avance_pct;
-                                    const valorAv = presup * Number(avanceActual || 0) / 100;
+                                    // Pagado = imputaciones de otros movimientos (excluyo el que estoy editando)
+                                    const pagado = (impsByItem[it.id] ?? [])
+                                      .filter(r => r.movimiento_id !== editId)
+                                      .reduce((acc, r) => acc + Number(r.monto || 0), 0);
+                                    const faltante = presup - pagado;
                                     const imputadoEsteItem = Number(impMontos[it.id] || 0);
-                                    const excedeAvance = imputadoEsteItem > valorAv + 0.01;
+                                    const excedeFaltante = imputadoEsteItem > faltante + 0.01;
                                     return (
                                       <TableRow key={it.id}>
                                         <TableCell>{it.nombre}</TableCell>
                                         <TableCell align="right">{fmtMoney(presup, form.moneda)}</TableCell>
-                                        <TableCell align="right">
-                                          <TextField
-                                            size="small" type="number" sx={{ width: 90 }}
-                                            value={avanceActual ?? ""}
-                                            inputProps={{ min: 0, max: 100, style: { textAlign: "right" } }}
-                                            onChange={(e) => setImpAvances(prev => ({ ...prev, [it.id]: e.target.value }))}
-                                          />
+                                        <TableCell align="right">{fmtMoney(pagado, form.moneda)}</TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 700, color: faltante > 0.01 ? "success.main" : "text.disabled" }}>
+                                          {fmtMoney(faltante, form.moneda)}
                                         </TableCell>
-                                        <TableCell align="right">{fmtMoney(valorAv, form.moneda)}</TableCell>
                                         <TableCell align="right">
                                           <Stack direction="column" alignItems="flex-end" spacing={0.25}>
                                             <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="flex-end">
                                               <TextField
                                                 size="small" type="number" sx={{ width: 130 }}
                                                 value={impMontos[it.id] ?? ""}
-                                                error={excedeAvance}
+                                                error={excedeFaltante}
                                                 onChange={(e) => setImpMontos(prev => ({ ...prev, [it.id]: e.target.value }))}
                                               />
                                               {items.length > 1 && (
@@ -1813,9 +1825,9 @@ export default function CajaPage() {
                                                 </Tooltip>
                                               )}
                                             </Stack>
-                                            {excedeAvance && (
+                                            {excedeFaltante && (
                                               <Typography variant="caption" color="warning.main">
-                                                Supera el valor avance ({fmtMoney(valorAv, form.moneda)})
+                                                Supera el faltante ({fmtMoney(faltante, form.moneda)})
                                               </Typography>
                                             )}
                                           </Stack>
