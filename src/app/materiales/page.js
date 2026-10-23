@@ -135,6 +135,8 @@ const esRetornable = (it) => {
   return /(retornab|devoluc|retorno|con boleta)/.test(t);
 };
 // Unidad de recupero (pallet o bolsón) inferida del texto del ítem.
+// Normaliza el nombre de un material para agrupar: sin mayúsculas ni espacios.
+const normMat = (s) => String(s || "").toLowerCase().replace(/\s+/g, "");
 const unidadRecupero = (it) =>
   /pallet|palet|tarima/.test(`${it?.material || ""} ${it?.unidad || ""}`.toLowerCase()) ? "pallet" : "bolson";
 
@@ -970,7 +972,7 @@ export default function MaterialesPage() {
           const material = (it.material || "").trim() || "(sin nombre)";
           const unidad = (it.unidad || "unidad").toString().trim().toLowerCase();
           const categoria = CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros";
-          const key = `${categoria}||${material.toLowerCase()}||${unidad}`;
+          const key = `${categoria}||${normMat(material)}||${unidad}`;
           (map[key] ??= { categoria, material, unidad, cantidad: 0, totalUSD: 0, retiros: 0, etapas: new Set() });
           map[key].cantidad += Number(it.cantidad || 0);
           // Total en USD del ítem: subtotal (cantidad × precio) en la moneda de la
@@ -1037,6 +1039,12 @@ export default function MaterialesPage() {
         // devoluciones: por eso un acopio recién creado (ej. "HERNAN") no aparecía
         // acá hasta cargarle la lista o imputarle un retiro. Ahora se muestran
         // siempre (con estado "vacío"), para que todo acopio real sea visible.
+        // Nombre "oficial" por código según la lista de precios del acopio.
+        const nombreLista = {};
+        for (const li of (tieneLista ? a.lista_precios : [])) {
+          const cod = (li?.codigo != null ? String(li.codigo) : "").trim();
+          if (cod && li.material && !nombreLista[cod]) nombreLista[cod] = String(li.material).trim();
+        }
         const map = {};
         for (const r of rsLista) {
           const its = Array.isArray(r.materiales_items) ? r.materiales_items : [];
@@ -1047,8 +1055,11 @@ export default function MaterialesPage() {
             const precio = Number(it.precio || 0);
             const cantidad = Number(it.cantidad || 0);
             const total = it.total != null ? Number(it.total) : cantidad * precio;
-            const key = `${codigo}||${material.toLowerCase()}||${unidad}`;
-            (map[key] ??= { codigo, material, unidad, cantidad: 0, precio, total: 0 });
+            // Con código se agrupa por código + unidad: el mismo artículo puede
+            // venir escrito distinto en cada remito (ej. "12 TUBOS" / "12TUBOS").
+            // Sin código, por nombre normalizado (sin espacios ni mayúsculas).
+            const key = codigo ? `${codigo}||${unidad}` : `||${normMat(material)}||${unidad}`;
+            (map[key] ??= { codigo, material: nombreLista[codigo] || material, unidad, cantidad: 0, precio, total: 0 });
             map[key].cantidad += cantidad;
             map[key].total += total;
             if (precio > 0) map[key].precio = precio;
