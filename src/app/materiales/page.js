@@ -1047,16 +1047,23 @@ export default function MaterialesPage() {
             const precio = Number(it.precio || 0);
             const cantidad = Number(it.cantidad || 0);
             const total = it.total != null ? Number(it.total) : cantidad * precio;
-            const key = `${codigo}||${material.toLowerCase()}||${unidad}`;
+            // El precio forma parte de la clave: en cuenta corriente los precios
+            // no están congelados y un mismo artículo puede retirarse a precios
+            // distintos (ej. 50 ladrillos a $1.700 y 100 a $1.800). Se muestran
+            // como renglones separados en vez de sumar cantidades con un único
+            // precio. En acopios con precio congelado el resultado no cambia.
+            const key = `${codigo}||${material.toLowerCase()}||${unidad}||${precio}`;
             (map[key] ??= { codigo, material, unidad, cantidad: 0, precio, total: 0 });
             map[key].cantidad += cantidad;
             map[key].total += total;
             if (precio > 0) map[key].precio = precio;
           }
         }
-        const items = Object.values(map).sort((x, y) => x.material.localeCompare(y.material));
+        const items = Object.values(map).sort((x, y) => x.material.localeCompare(y.material) || x.precio - y.precio);
         const totalRetirado = rsLista.reduce((s, r) => s + Number(r.monto || 0), 0);
-        const anticipoMonto = Number(a.monto || 0);
+        // Monto consolidado: el acopio + las sumas posteriores imputadas a ese
+        // mismo Nº de acopio (filas hijas con acopio_padre_id, cargadas desde Caja).
+        const anticipoMonto = montoAcopio(a);
         // Devoluciones imputadas a esta lista + las legado (a la primera lista).
         const devoluciones = [...devsPropias, ...(legacyAsignada ? [] : devsLegacy)];
         legacyAsignada = true;
