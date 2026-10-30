@@ -1,0 +1,7 @@
+/* Variables de fuente usadas por el tema (src/theme/theme.js). Las fuentes se
+   sirven desde el propio build (@fontsource) en vez de next/font/google, que
+   descarga de Google Fonts al compilar y hacía fallar el deploy en Vercel. */
+:root {
+  --font-sans: "Plus Jakarta Sans";
+  --font-mono: "JetBrains Mono";
+}
