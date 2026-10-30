@@ -233,6 +233,7 @@ export default function MaterialesPage() {
   const [tab, setTab] = useState(0); // 0 = Cuentas, 1 = Cuenta corriente, 2 = Por etapa, 3 = Consumo, 4 = Control por lista
   const [cuentaSel, setCuentaSel] = useState(""); // cuenta elegida en la solapa de cuenta corriente
   const [consumoEtapa, setConsumoEtapa] = useState(""); // filtro de etapa en la solapa de consumo
+  const [consumoProducto, setConsumoProducto] = useState(""); // filtro de producto (agrupador) en la solapa de consumo
   const [leyendoIA, setLeyendoIA] = useState(null); // cuentaId con lectura de remito en curso
 
   // Dialog cuenta
@@ -957,9 +958,24 @@ export default function MaterialesPage() {
     }
   };
 
+  // Producto "agrupador" de un material: la primera palabra del nombre,
+  // normalizada (sin acentos, en singular). Así "LADRILLO HUECO 12x18x33" y
+  // "LADRILLOS COMUNES" caen en "Ladrillo"; "HIERRO ALETADO 8MM" y "HIERRO
+  // ALETADO 10MM" en "Hierro".
+  const productoDe = (material) => {
+    const palabras = (material || "").toLowerCase()
+      .replace(/[áà]/g, "a").replace(/[éè]/g, "e").replace(/[íì]/g, "i").replace(/[óò]/g, "o").replace(/[úùü]/g, "u")
+      .split(/[^a-zñ]+/).filter(w => w.length >= 3);
+    let w = palabras[0];
+    if (!w) return "Otros";
+    if (/[lnrdzj]es$/.test(w)) w = w.slice(0, -2);
+    else if (/[^s]s$/.test(w)) w = w.slice(0, -1);
+    return w.charAt(0).toUpperCase() + w.slice(1);
+  };
+
   // Consumo de materiales agregado (de los ítems de los remitos), opcionalmente
   // filtrado por etapa. Agrupa por categoría + material + unidad.
-  const consumo = useMemo(() => {
+  const consumoBase = useMemo(() => {
     const map = {};
     for (const c of cuentas) {
       for (const r of retiros.filter(x => x.cuenta_id === c.id)) {
@@ -971,7 +987,7 @@ export default function MaterialesPage() {
           const unidad = (it.unidad || "unidad").toString().trim().toLowerCase();
           const categoria = CATEGORIAS_MAT.includes(it.categoria) ? it.categoria : "Otros";
           const key = `${categoria}||${material.toLowerCase()}||${unidad}`;
-          (map[key] ??= { categoria, material, unidad, cantidad: 0, totalUSD: 0, retiros: 0, etapas: new Set() });
+          (map[key] ??= { categoria, material, producto: productoDe(material), unidad, cantidad: 0, totalUSD: 0, retiros: 0, etapas: new Set() });
           map[key].cantidad += Number(it.cantidad || 0);
           // Total en USD del ítem: subtotal (cantidad × precio) en la moneda de la
           // cuenta, convertido con el TC del retiro (o el de la cuenta si falta).
@@ -988,6 +1004,26 @@ export default function MaterialesPage() {
         : a.categoria.localeCompare(b.categoria));
     // eslint-disable-next-line
   }, [cuentas, retiros, consumoEtapa]);
+  // Productos (agrupadores) presentes en el consumo de la etapa elegida, con la
+  // cantidad de materiales distintos de cada uno.
+  const consumoProductos = useMemo(() => {
+    const n = {};
+    for (const m of consumoBase) n[m.producto] = (n[m.producto] || 0) + 1;
+    return Object.entries(n).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [consumoBase]);
+  // Consumo mostrado: filtrado además por producto (si hay uno elegido).
+  const consumo = useMemo(
+    () => (consumoProducto ? consumoBase.filter(m => m.producto === consumoProducto) : consumoBase),
+    [consumoBase, consumoProducto]
+  );
+  // Si se filtra por producto y todos los renglones comparten unidad, se puede
+  // sumar la cantidad total (ej. total de ladrillos). Si no, null.
+  const consumoCantidadTotal = useMemo(() => {
+    if (!consumoProducto || !consumo.length) return null;
+    const u = consumo[0].unidad;
+    if (consumo.some(m => m.unidad !== u)) return null;
+    return { cantidad: consumo.reduce((s, m) => s + Number(m.cantidad || 0), 0), unidad: u };
+  }, [consumo, consumoProducto]);
   // Total general en USD del consumo mostrado (respeta el filtro de etapa).
   const consumoTotalUSD = useMemo(
     () => consumo.reduce((s, m) => s + (Number(m.totalUSD) || 0), 0),
@@ -2307,12 +2343,20 @@ export default function MaterialesPage() {
                   Cantidades salidas según los remitos de los retiros (leídos con IA o cargados a mano). Sirve para saber cuánto material llevó cada etapa y aprender para la próxima obra.
                 </Typography>
               </Box>
-              <TextField select size="small" label="Etapa" sx={{ minWidth: 220 }}
-                value={consumoEtapa} onChange={(e) => setConsumoEtapa(e.target.value)}>
-                <MenuItem value="">Todas las etapas</MenuItem>
-                {(hitos.length ? hitos : ETAPAS_DEFAULT).map(et => <MenuItem key={et} value={et}>{et}</MenuItem>)}
-                <MenuItem value="(Sin etapa)">(Sin etapa)</MenuItem>
-              </TextField>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                <TextField select size="small" label="Producto" sx={{ minWidth: 200 }}
+                  value={consumoProductos.some(([p]) => p === consumoProducto) ? consumoProducto : ""}
+                  onChange={(e) => setConsumoProducto(e.target.value)}>
+                  <MenuItem value="">Todos los productos</MenuItem>
+                  {consumoProductos.map(([p, n]) => <MenuItem key={p} value={p}>{p} ({n})</MenuItem>)}
+                </TextField>
+                <TextField select size="small" label="Etapa" sx={{ minWidth: 220 }}
+                  value={consumoEtapa} onChange={(e) => setConsumoEtapa(e.target.value)}>
+                  <MenuItem value="">Todas las etapas</MenuItem>
+                  {(hitos.length ? hitos : ETAPAS_DEFAULT).map(et => <MenuItem key={et} value={et}>{et}</MenuItem>)}
+                  <MenuItem value="(Sin etapa)">(Sin etapa)</MenuItem>
+                </TextField>
+              </Stack>
             </Stack>
           </CardContent></Card>
 
@@ -2360,9 +2404,9 @@ export default function MaterialesPage() {
                   {consumo.length > 0 && (
                     <TableRow>
                       <TableCell />
-                      <TableCell sx={{ fontWeight: 800 }}>Total</TableCell>
-                      <TableCell />
-                      <TableCell />
+                      <TableCell sx={{ fontWeight: 800 }}>Total{consumoProducto ? ` ${consumoProducto}` : ""}</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{consumoCantidadTotal ? fmtNum0(consumoCantidadTotal.cantidad) : ""}</TableCell>
+                      <TableCell sx={{ color: "text.secondary" }}>{consumoCantidadTotal ? consumoCantidadTotal.unidad : ""}</TableCell>
                       <TableCell align="right" sx={{ fontWeight: 800, color: "#0F2A4A", fontVariantNumeric: "tabular-nums" }}>{fmtMoney(consumoTotalUSD, "USD")}</TableCell>
                       <TableCell />
                       {!consumoEtapa && <TableCell />}
