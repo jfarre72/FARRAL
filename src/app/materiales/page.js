@@ -1011,19 +1011,22 @@ export default function MaterialesPage() {
     for (const m of consumoBase) n[m.producto] = (n[m.producto] || 0) + 1;
     return Object.entries(n).sort((a, b) => a[0].localeCompare(b[0]));
   }, [consumoBase]);
+  // Producto elegido, sólo si existe en la etapa actual (al cambiar de etapa
+  // puede no haber materiales de ese producto: entonces se muestran todos).
+  const productoSel = consumoProductos.some(([p]) => p === consumoProducto) ? consumoProducto : "";
   // Consumo mostrado: filtrado además por producto (si hay uno elegido).
   const consumo = useMemo(
-    () => (consumoProducto ? consumoBase.filter(m => m.producto === consumoProducto) : consumoBase),
-    [consumoBase, consumoProducto]
+    () => (productoSel ? consumoBase.filter(m => m.producto === productoSel) : consumoBase),
+    [consumoBase, productoSel]
   );
   // Si se filtra por producto y todos los renglones comparten unidad, se puede
   // sumar la cantidad total (ej. total de ladrillos). Si no, null.
   const consumoCantidadTotal = useMemo(() => {
-    if (!consumoProducto || !consumo.length) return null;
+    if (!productoSel || !consumo.length) return null;
     const u = consumo[0].unidad;
     if (consumo.some(m => m.unidad !== u)) return null;
     return { cantidad: consumo.reduce((s, m) => s + Number(m.cantidad || 0), 0), unidad: u };
-  }, [consumo, consumoProducto]);
+  }, [consumo, productoSel]);
   // Total general en USD del consumo mostrado (respeta el filtro de etapa).
   const consumoTotalUSD = useMemo(
     () => consumo.reduce((s, m) => s + (Number(m.totalUSD) || 0), 0),
@@ -2345,7 +2348,7 @@ export default function MaterialesPage() {
               </Box>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
                 <TextField select size="small" label="Producto" sx={{ minWidth: 200 }}
-                  value={consumoProductos.some(([p]) => p === consumoProducto) ? consumoProducto : ""}
+                  value={productoSel}
                   onChange={(e) => setConsumoProducto(e.target.value)}>
                   <MenuItem value="">Todos los productos</MenuItem>
                   {consumoProductos.map(([p, n]) => <MenuItem key={p} value={p}>{p} ({n})</MenuItem>)}
@@ -2404,7 +2407,7 @@ export default function MaterialesPage() {
                   {consumo.length > 0 && (
                     <TableRow>
                       <TableCell />
-                      <TableCell sx={{ fontWeight: 800 }}>Total{consumoProducto ? ` ${consumoProducto}` : ""}</TableCell>
+                      <TableCell sx={{ fontWeight: 800 }}>Total{productoSel ? ` ${productoSel}` : ""}</TableCell>
                       <TableCell align="right" sx={{ fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{consumoCantidadTotal ? fmtNum0(consumoCantidadTotal.cantidad) : ""}</TableCell>
                       <TableCell sx={{ color: "text.secondary" }}>{consumoCantidadTotal ? consumoCantidadTotal.unidad : ""}</TableCell>
                       <TableCell align="right" sx={{ fontWeight: 800, color: "#0F2A4A", fontVariantNumeric: "tabular-nums" }}>{fmtMoney(consumoTotalUSD, "USD")}</TableCell>
