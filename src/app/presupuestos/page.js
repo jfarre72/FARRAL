@@ -754,6 +754,22 @@ export default function PresupuestosPage() {
                         </TableCell>
                       </TableRow>
                     ))}
+                    {(() => {
+                      const t = porContratista.reduce((a, c) => ({
+                        nPres: a.nPres + c.nPres, tot: a.tot + c.tot, pagado: a.pagado + c.pagado, saldo: a.saldo + c.saldo,
+                      }), { nPres: 0, tot: 0, pagado: 0, saldo: 0 });
+                      const sx = { fontWeight: 700, borderTop: 2, borderColor: "divider", borderBottom: "none" };
+                      return (
+                        <TableRow>
+                          <TableCell sx={sx}>Total</TableCell>
+                          <TableCell align="right" sx={sx}>{t.nPres}</TableCell>
+                          <TableCell align="right" sx={sx}>{fmtNum(t.tot, 0)}</TableCell>
+                          <TableCell align="right" sx={sx}>{fmtNum(t.pagado, 0)}</TableCell>
+                          <TableCell align="right" sx={sx}>{fmtNum(t.saldo, 0)}</TableCell>
+                          <TableCell sx={sx} />
+                        </TableRow>
+                      );
+                    })()}
                   </TableBody>
                 </Table>
               </Box>
