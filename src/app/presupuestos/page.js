@@ -582,7 +582,6 @@ export default function PresupuestosPage() {
                             <TableCell align="right">Valor avance</TableCell>
                             <TableCell align="right">Pagado</TableCell>
                             <TableCell align="right">Saldo</TableCell>
-                            <TableCell align="right">Avance − Pagado</TableCell>
                             <TableCell align="right"></TableCell>
                           </TableRow>
                         </TableHead>
@@ -625,11 +624,11 @@ export default function PresupuestosPage() {
                                 </TableCell>
                                 <TableCell align="right">{fmtMoney(valAv, p.moneda)}</TableCell>
                                 <TableCell align="right">{fmtMoney(pag, p.moneda)}</TableCell>
-                                <TableCell align="right">{fmtMoney(saldo, p.moneda)}</TableCell>
                                 <TableCell align="right">
+                                  {/* Verde: se le pagó de más respecto del avance (a favor). Rojo: se le debe. */}
                                   <Typography component="span" fontWeight={600}
-                                    color={dif > 0 ? "success.main" : dif < 0 ? "error.main" : "text.primary"}>
-                                    {fmtMoney(dif, p.moneda)}
+                                    color={dif < 0 ? "success.main" : dif > 0 ? "error.main" : "text.primary"}>
+                                    {fmtMoney(saldo, p.moneda)}
                                   </Typography>
                                 </TableCell>
                                 <TableCell align="right">
