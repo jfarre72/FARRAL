@@ -2,7 +2,7 @@
 import {
   Card, CardContent, Stack, Typography, Alert, Box, LinearProgress,
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer,
-  Dialog, DialogTitle, DialogContent, DialogActions, Button, Chip,
+  Dialog, DialogTitle, DialogContent, DialogActions, Button, Chip, Checkbox, Tooltip,
   Tabs, Tab, Divider, ToggleButton, ToggleButtonGroup, TextField, InputAdornment
 } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
@@ -59,13 +59,13 @@ function Barra({ pct }) {
 // Color de una diferencia (plan − real): negativa = sobrecosto.
 const colorDif = (v) => (v < 0 ? "error.main" : "success.main");
 
-function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick, acumulada = false }) {
+function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick, acumulada = false, onToggleAcumula }) {
   const pctTot = totalPlan > 0 ? (totalReal / totalPlan) * 100 : null;
   // Diferencia acumulada (plan − real), en orden, sumando solo las filas
-  // completas (etapas al 100% en Planificación).
+  // tildadas a mano con el check de la izquierda.
   let acc = 0;
   const difAcum = filas.map(f => {
-    if (!f.completa) return null;
+    if (!f.acumula) return null;
     acc += f.plan - f.real;
     return acc;
   });
@@ -81,6 +81,11 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick, acu
           <Table size="small" sx={{ minWidth: 560 }}>
             <TableHead>
               <TableRow>
+                {acumulada && (
+                  <TableCell padding="checkbox">
+                    <Tooltip title="Etapas que suman en la Dif. acumulada"><span>Acum.</span></Tooltip>
+                  </TableCell>
+                )}
                 <TableCell>{titulo.includes("etapa") ? "Etapa" : "Concepto"}</TableCell>
                 <TableCell align="right">Plan (USD)</TableCell>
                 <TableCell align="right">% del plan</TableCell>
@@ -107,6 +112,16 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick, acu
                       cursor: clickable ? "pointer" : "default",
                     }}
                   >
+                    {acumulada && (
+                      <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          size="small"
+                          checked={!!f.acumula}
+                          onChange={(e) => onToggleAcumula?.(f, e.target.checked)}
+                          inputProps={{ "aria-label": `Acumular ${f.nombre}` }}
+                        />
+                      </TableCell>
+                    )}
                     <TableCell>
                       <Typography variant="body2" sx={{ fontStyle: f.otros ? "italic" : "normal" }}>{f.nombre}</Typography>
                     </TableCell>
@@ -140,6 +155,7 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick, acu
                 );
               })}
               <TableRow sx={{ "& > td": { borderTop: "2px solid", borderColor: "divider", fontWeight: 700 } }}>
+                {acumulada && <TableCell padding="checkbox" />}
                 <TableCell><Typography fontWeight={700}>Total</Typography></TableCell>
                 <TableCell align="right"><Typography fontWeight={700}>{fmtMoney(totalPlan, "USD")}</Typography></TableCell>
                 <TableCell align="right"><Typography fontWeight={700}>{totalPlan > 0 ? "100%" : "—"}</Typography></TableCell>
@@ -161,8 +177,8 @@ function TablaSeguimiento({ titulo, filas, totalPlan, totalReal, onRowClick, acu
         </TableContainer>
         {acumulada && (
           <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
-            Dif. acumulada: suma, en orden, de la diferencia de las etapas completas al 100% en Planificación.
-            Las etapas sin completar no acumulan (—).
+            Dif. acumulada: suma, en orden, de la diferencia de las etapas tildadas en la columna “Acum.”.
+            Las etapas sin tildar no acumulan (—).
           </Typography>
         )}
       </CardContent>
@@ -175,8 +191,6 @@ export default function EconomicoPage() {
   const cacheInit = getCache("economico", proyecto?.id);
   const [conceptos, setConceptos] = useState(cacheInit?.conceptos ?? []);
   const [hitos, setHitos] = useState(cacheInit?.hitos ?? []);
-  // Tareas de Planificación: definen qué etapas están completas (100%).
-  const [tareas, setTareas] = useState(cacheInit?.tareas ?? []);
   const [movs, setMovs] = useState(cacheInit?.movs ?? []);
   // Materiales de acopio: el consumo se imputa por etapa en los retiros (neto en USD).
   const [cuentasMat, setCuentasMat] = useState(cacheInit?.cuentasMat ?? []);
@@ -200,12 +214,7 @@ export default function EconomicoPage() {
       supabase.from("cuentas_materiales").select("id,proveedor,moneda").eq("proyecto_id", proyecto.id),
     ]);
     const matIds = (cm ?? []).map(c => c.id);
-    const hitoIds = (hs ?? []).map(h => h.id);
-    let am = [], rm = [], ts = [];
-    if (hitoIds.length) {
-      const { data: t } = await supabase.from("hito_tareas").select("hito_id,avance,completado").in("hito_id", hitoIds);
-      ts = t ?? [];
-    }
+    let am = [], rm = [];
     if (matIds.length) {
       const [{ data: a }, { data: r }] = await Promise.all([
         supabase.from("anticipos_materiales").select("cuenta_id,monto,tipo_cambio,es_devolucion").in("cuenta_id", matIds),
@@ -213,12 +222,30 @@ export default function EconomicoPage() {
       ]);
       am = a ?? []; rm = r ?? [];
     }
-    setCache("economico", proyecto.id, { conceptos: cs ?? [], hitos: hs ?? [], tareas: ts, movs: mv ?? [], cuentasMat: cm ?? [], anticiposMat: am, retirosMat: rm });
-    setConceptos(cs ?? []); setHitos(hs ?? []); setTareas(ts); setMovs(mv ?? []);
+    setCache("economico", proyecto.id, { conceptos: cs ?? [], hitos: hs ?? [], movs: mv ?? [], cuentasMat: cm ?? [], anticiposMat: am, retirosMat: rm });
+    setConceptos(cs ?? []); setHitos(hs ?? []); setMovs(mv ?? []);
     setCuentasMat(cm ?? []); setAnticiposMat(am); setRetirosMat(rm);
     setLoading(false);
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [proyecto?.id]);
+
+  // Tilda/destilda una etapa para la Dif. acumulada (se guarda en hitos.acumula_dif).
+  const [errAcum, setErrAcum] = useState("");
+  const toggleAcumula = async (f, checked) => {
+    const prev = hitos;
+    const next = hitos.map(h => (h.id === f.id ? { ...h, acumula_dif: checked } : h));
+    setHitos(next);
+    setErrAcum("");
+    const { error } = await supabase.from("hitos").update({ acumula_dif: checked }).eq("id", f.id);
+    if (error) {
+      setHitos(prev);
+      setErrAcum("No se pudo guardar el check de Dif. acumulada: " + error.message +
+        " (¿se ejecutó la migración supabase/v48_hito_acumula_dif.sql?)");
+      return;
+    }
+    const cached = getCache("economico", proyecto.id);
+    if (cached) setCache("economico", proyecto.id, { ...cached, hitos: next });
+  };
 
   // Gasto real de materiales de acopio (USD neto). Cada anticipo congela su TC;
   // el dólar de la cuenta es el promedio ponderado de sus anticipos reales.
@@ -286,23 +313,17 @@ export default function EconomicoPage() {
     const totRealC = filasConcepto.reduce((s, f) => s + f.real, 0);
 
     // El real por etapa ya incluye el consumo de materiales (vía movsReal).
-    // Una etapa está completa con el mismo criterio que Planificación: promedio
-    // de avance de sus tareas al 100% (o, sin tareas, marcada como completada).
-    const avanceT = (t) => (t.avance != null ? Number(t.avance) : (t.completado ? 100 : 0));
-    const completa = (h) => {
-      const ts = tareas.filter(t => t.hito_id === h.id);
-      if (ts.length > 0) return ts.reduce((s, t) => s + avanceT(t), 0) / ts.length >= 100;
-      return !!h.completado;
-    };
     const filasEtapa = [...hitos].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0)).map(h => ({
       nombre: h.nombre, plan: Number(h.valor_plan || 0), real: realPorEtapa[h.nombre] || 0,
-      completa: completa(h),
+      id: h.id,
+      // Se tilda a mano: define si la etapa suma en la Dif. acumulada.
+      acumula: !!h.acumula_dif,
     }));
     const totPlanE = filasEtapa.reduce((s, f) => s + f.plan, 0);
     const totRealE = filasEtapa.reduce((s, f) => s + f.real, 0);
 
     return { filasConcepto, totPlanC, totRealC, filasEtapa, totPlanE, totRealE };
-  }, [conceptos, hitos, tareas, movsReal]);
+  }, [conceptos, hitos, movsReal]);
 
   // Egresos que componen la fila seleccionada, con su USD imputado.
   const detalleGastos = useMemo(() => {
@@ -438,7 +459,9 @@ export default function EconomicoPage() {
           </Alert>
           <TablaSeguimiento titulo="Por concepto" filas={filasConcepto} totalPlan={totPlanC} totalReal={totRealC}
             onRowClick={(f) => setDetalle({ campo: "concepto", valor: f.nombre, otros: !!f.otros })} />
+          {errAcum && <Alert severity="error" onClose={() => setErrAcum("")}>{errAcum}</Alert>}
           <TablaSeguimiento titulo="Por etapa (Obra)" filas={filasEtapa} totalPlan={totPlanE} totalReal={totRealE} acumulada
+            onToggleAcumula={toggleAcumula}
             onRowClick={(f) => setDetalle({ campo: "etapa", valor: f.nombre })} />
           <Typography variant="caption" color="text.secondary">
             El “real” se imputa siempre en USD: los gastos en USD por su monto, y los gastos en ARS convertidos por el
